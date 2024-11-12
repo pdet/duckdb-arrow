@@ -1,0 +1,47 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 21,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "extension",
+            "displayName": "Extension",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/../build",
+            "cacheVariables": {
+                "EXTENSION_STATIC_BUILD": "1",
+                "DUCKDB_EXTENSION_CONFIGS": "${sourceDir}/../extension_config.cmake"
+            }
+        },
+        {
+            "name": "extension_debug",
+            "displayName": "Extension (Debug build)",
+            "inherits": ["extension"],
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "extension_vcpkg_config",
+            "hidden": true,
+            "cacheVariables": {
+                "CMAKE_TOOLCHAIN_FILE": "/$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "VCPKG_MANIFEST_DIR": "${sourceDir}/..",
+                "VCPKG_BUILD": "1"
+            }
+        },
+        {
+            "name": "extension_vcpkg",
+            "displayName": "Extension (using vcpkg)",
+            "inherits": ["extension", "extension_vcpkg_config"]
+        },
+        {
+            "name": "extension_vcpkg_debug",
+            "displayName": "Extension (Debug build using vcpkg)",
+            "inherits": ["extension_debug", "extension_vcpkg_config"]
+        }
+    ]
+}
