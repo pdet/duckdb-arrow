@@ -1,0 +1,23 @@
+# name: test/sql/nanoarrow.test
+# description: test nanoarrow extension
+# group: [nanoarrow]
+
+# Before we load the extension, this will fail
+statement error
+SELECT nanoarrow('Sam');
+----
+Catalog Error: Scalar Function with name nanoarrow does not exist!
+
+# Require statement will ensure this test is run with this extension loaded
+require nanoarrow
+
+# Confirm the extension works
+query I
+SELECT nanoarrow('Sam');
+----
+Nanoarrow Sam 🐥
+
+query I
+SELECT nanoarrow_openssl_version('Michael') ILIKE 'Nanoarrow Michael, my linked OpenSSL version is OpenSSL%';
+----
+true
