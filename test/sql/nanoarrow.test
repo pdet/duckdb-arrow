@@ -4,20 +4,15 @@
 
 # Before we load the extension, this will fail
 statement error
-SELECT nanoarrow('Sam');
+SELECT nanoarrow_version();
 ----
-Catalog Error: Scalar Function with name nanoarrow does not exist!
+Catalog Error: Scalar Function with name nanoarrow_version does not exist!
 
 # Require statement will ensure this test is run with this extension loaded
 require nanoarrow
 
 # Confirm the extension works
 query I
-SELECT nanoarrow('Sam');
+SELECT nanoarrow_version();
 ----
-Nanoarrow Sam 🐥
-
-query I
-SELECT nanoarrow_openssl_version('Michael') ILIKE 'Nanoarrow Michael, my linked OpenSSL version is OpenSSL%';
-----
-true
+0.6.0
