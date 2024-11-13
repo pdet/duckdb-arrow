@@ -11,6 +11,8 @@
 
 #include "nanoarrow/nanoarrow.hpp"
 
+#include "read_arrow_stream.hpp"
+
 namespace duckdb {
 
 namespace {
@@ -27,7 +29,10 @@ struct NanoarrowVersion {
   }
 };
 
-void LoadInternal(DatabaseInstance& db) { NanoarrowVersion::Register(db); }
+void LoadInternal(DatabaseInstance& db) {
+  NanoarrowVersion::Register(db);
+  ext_nanoarrow::RegisterReadArrowStream(db);
+}
 
 }  // namespace
 
