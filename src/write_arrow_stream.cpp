@@ -2,6 +2,7 @@
 #include "write_arrow_stream.hpp"
 
 #include "duckdb/common/arrow/arrow_converter.hpp"
+#include "duckdb/common/serializer/buffered_file_writer.hpp"
 #include "duckdb/function/copy_function.hpp"
 #include "duckdb/main/extension_util.hpp"
 
@@ -45,9 +46,9 @@ struct ArrowStreamWriter {
                     const vector<LogicalType>& logical_types,
                     const vector<string>& column_names,
                     const vector<pair<string, string>>& metadata)
-      : options(context.GetClientProperties()) {
-    InitArrowDuckBuffer(header.get(), BufferAllocator::Get(context));
-    InitArrowDuckBuffer(body.get(), BufferAllocator::Get(context));
+      : options(context.GetClientProperties()), allocator(BufferAllocator::Get(context)) {
+    InitArrowDuckBuffer(header.get(), allocator);
+    InitArrowDuckBuffer(body.get(), allocator);
 
     InitializeSchema(logical_types, column_names, metadata);
     InitializeOutputFile(fs, file_path);
@@ -83,16 +84,19 @@ struct ArrowStreamWriter {
   }
 
   void InitializeOutputFile(FileSystem& fs, const string& file_path) {
-    out_file = fs.OpenFile(file_path, FileOpenFlags::FILE_FLAGS_WRITE);
+    writer = make_uniq<BufferedFileWriter>(
+        fs, file_path.c_str(),
+        FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW);
   }
 
   void InitializeEncoderAndWriteSchema() {
+    THROW_NOT_OK(InternalException, &error,
+                 ArrowArrayViewInitFromSchema(chunk_view.get(), schema.get(), &error));
     ArrowIpcEncoderInit(encoder.get());
     ArrowIpcEncoderEncodeSchema(encoder.get(), schema.get(), &error);
     ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get());
 
-    out_file->Write(header->data, header->size_bytes);
-    file_size += header->size_bytes;
+    writer->WriteData(header->data, header->size_bytes);
   }
 
   void Flush(ColumnDataCollection& buffer) {
@@ -107,8 +111,7 @@ struct ArrowStreamWriter {
     // chunk. keeping track of any owning elements that had to be allocated,
     // since that's all that is strictly required to write).
     DataChunk chunk;
-    chunk.InitializeEmpty(buffer.Types());
-    chunk.SetCapacity(buffer.Count());
+    chunk.Initialize(allocator, buffer.Types(), buffer.Count());
     for (const auto& item : buffer.Chunks()) {
       chunk.Append(item, true);
     }
@@ -124,31 +127,28 @@ struct ArrowStreamWriter {
                                            &error);
     ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get());
 
-    out_file->Write(header->data, header->size_bytes);
-    file_size += header->size_bytes;
-    out_file->Write(body->data, body->size_bytes);
-    file_size += body->size_bytes;
-
+    writer->WriteData(header->data, header->size_bytes);
+    writer->WriteData(body->data, body->size_bytes);
     ++row_group_count;
   }
 
   void Finalize() {
     uint8_t end_of_stream[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
-    out_file->Write(end_of_stream, sizeof(end_of_stream));
-    out_file->Close();
+    writer->WriteData(end_of_stream, sizeof(end_of_stream));
+    writer->Close();
   }
 
   idx_t NumberOfRowGroups() { return row_group_count; }
 
-  idx_t FileSize() { return file_size; }
+  idx_t FileSize() { return writer->GetTotalWritten(); }
 
  private:
   ClientProperties options;
+  Allocator& allocator;
   nanoarrow::ipc::UniqueEncoder encoder;
   ArrowConverter converter;
-  unique_ptr<FileHandle> out_file;
+  unique_ptr<BufferedFileWriter> writer;
   idx_t row_group_count{0};
-  idx_t file_size{0};
   nanoarrow::UniqueSchema schema;
   nanoarrow::UniqueArrayView chunk_view;
   nanoarrow::UniqueArray chunk_arrow;
