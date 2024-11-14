@@ -28,7 +28,14 @@ void InitArrowDuckBuffer(ArrowBuffer* buffer, Allocator& duck_allocator) {
                                     int64_t old_size, int64_t new_size) -> uint8_t* {
     NANOARROW_DCHECK(allocator->private_data != nullptr);
     auto duck_allocator = reinterpret_cast<Allocator*>(allocator->private_data);
-    return duck_allocator->ReallocateData(ptr, old_size, new_size);
+    if (ptr == nullptr && new_size > 0) {
+      return duck_allocator->AllocateData(new_size);
+    } else if (new_size == 0) {
+      duck_allocator->FreeData(ptr, old_size);
+      return nullptr;
+    } else {
+      return duck_allocator->ReallocateData(ptr, old_size, new_size);
+    }
   };
 
   buffer->allocator.free = [](ArrowBufferAllocator* allocator, uint8_t* ptr,
@@ -92,9 +99,11 @@ struct ArrowStreamWriter {
   void InitializeEncoderAndWriteSchema() {
     THROW_NOT_OK(InternalException, &error,
                  ArrowArrayViewInitFromSchema(chunk_view.get(), schema.get(), &error));
-    ArrowIpcEncoderInit(encoder.get());
-    ArrowIpcEncoderEncodeSchema(encoder.get(), schema.get(), &error);
-    ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get());
+    NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
+    THROW_NOT_OK(InternalException, &error,
+                 ArrowIpcEncoderEncodeSchema(encoder.get(), schema.get(), &error));
+    NANOARROW_THROW_NOT_OK(
+        ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
 
     writer->WriteData(header->data, header->size_bytes);
   }
@@ -125,6 +134,7 @@ struct ArrowStreamWriter {
     // rather than buffer the entire output in memory (again).
     ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(), body.get(),
                                            &error);
+    header->size_bytes = 0;
     ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get());
 
     writer->WriteData(header->data, header->size_bytes);
