@@ -1,3 +1,6 @@
+#include "read_arrow_stream.hpp"
+
+#include "duckdb/function/copy_function.hpp"
 #include "duckdb/function/table/arrow.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/extension_util.hpp"
@@ -61,7 +64,7 @@ class ArrowIpcArrowArrayStreamFactory {
                                            const std::string& src_string)
       : fs(FileSystem::GetFileSystem(context)),
         allocator(BufferAllocator::Get(context)),
-        src_string(src_string){};
+        src_string(src_string) {};
 
   // Called once when initializing Scan States
   static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr,
@@ -121,7 +124,7 @@ struct ReadArrowStream {
   // as arguments, we keep the factory alive by making it a member of the bind
   // data (instead of as a Python object whose ownership is kept alive via the
   // DependencyItem mechanism).
-  static void Register(DatabaseInstance& db) {
+  static TableFunction Function() {
     TableFunction fn("read_arrow_stream", {LogicalType::VARCHAR}, Scan, Bind,
                      ArrowTableFunction::ArrowScanInitGlobal,
                      ArrowTableFunction::ArrowScanInitLocal);
@@ -130,7 +133,7 @@ struct ReadArrowStream {
     fn.projection_pushdown = true;
     fn.filter_pushdown = false;
     fn.filter_prune = false;
-    ExtensionUtil::RegisterFunction(db, fn);
+    return fn;
   }
 
   // Our FunctionData is the same as the ArrowScanFunctionData except we extend it
@@ -149,8 +152,18 @@ struct ReadArrowStream {
                                        TableFunctionBindInput& input,
                                        vector<LogicalType>& return_types,
                                        vector<string>& names) {
-    std::string src = input.inputs[0].GetValue<string>();
+    return BindInternal(context, input.inputs[0].GetValue<string>(), return_types, names);
+  }
 
+  static unique_ptr<FunctionData> BindCopy(ClientContext& context, CopyInfo& info,
+                                           vector<string>& expected_names,
+                                           vector<LogicalType>& expected_types) {
+    return BindInternal(context, info.file_path, expected_types, expected_names);
+  }
+
+  static unique_ptr<FunctionData> BindInternal(ClientContext& context, std::string src,
+                                               vector<LogicalType>& return_types,
+                                               vector<string>& names) {
     auto stream_factory = make_uniq<ArrowIpcArrowArrayStreamFactory>(context, src);
     auto res = make_uniq<Data>(std::move(stream_factory));
     res->factory->InitStream();
@@ -258,7 +271,17 @@ inline void InitDuckDBInputStream(unique_ptr<FileHandle> handle,
 
 }  // namespace
 
-void RegisterReadArrowStream(DatabaseInstance& db) { ReadArrowStream::Register(db); }
+unique_ptr<FunctionData> ReadArrowStreamBindCopy(ClientContext& context, CopyInfo& info,
+                                                 vector<string>& expected_names,
+                                                 vector<LogicalType>& expected_types) {
+  return ReadArrowStream::BindCopy(context, info, expected_names, expected_types);
+}
+
+TableFunction ReadArrowStreamFunction() { return ReadArrowStream::Function(); }
+
+void RegisterReadArrowStream(DatabaseInstance& db) {
+  ExtensionUtil::RegisterFunction(db, ReadArrowStream::Function());
+}
 
 }  // namespace ext_nanoarrow
 }  // namespace duckdb
