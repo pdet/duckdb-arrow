@@ -1,6 +1,13 @@
+
+#include "write_arrow_stream.hpp"
+
+#include "duckdb/common/arrow/arrow_converter.hpp"
 #include "duckdb/function/copy_function.hpp"
 #include "duckdb/main/extension_util.hpp"
 
+#include "nanoarrow/nanoarrow_ipc.hpp"
+
+#include "nanoarrow_errors.hpp"
 #include "read_arrow_stream.hpp"
 
 namespace duckdb {
@@ -9,25 +16,153 @@ namespace ext_nanoarrow {
 
 namespace {
 
+// Initialize buffer whose realloc operations go through DuckDB's memory
+// accounting. Note that the Allocator must outlive the buffer (true for
+// the case of this writer, but maybe not true for generic production of
+// ArrowArrays whose lifetime might outlive the connection/database).
+void InitArrowDuckBuffer(ArrowBuffer* buffer, Allocator& duck_allocator) {
+  ArrowBufferInit(buffer);
+
+  buffer->allocator.reallocate = [](ArrowBufferAllocator* allocator, uint8_t* ptr,
+                                    int64_t old_size, int64_t new_size) -> uint8_t* {
+    NANOARROW_DCHECK(allocator->private_data != nullptr);
+    auto duck_allocator = reinterpret_cast<Allocator*>(allocator->private_data);
+    return duck_allocator->ReallocateData(ptr, old_size, new_size);
+  };
+
+  buffer->allocator.free = [](ArrowBufferAllocator* allocator, uint8_t* ptr,
+                              int64_t old_size) {
+    NANOARROW_DCHECK(allocator->private_data != nullptr);
+    auto duck_allocator = reinterpret_cast<Allocator*>(allocator->private_data);
+    duck_allocator->FreeData(ptr, old_size);
+  };
+
+  buffer->allocator.private_data = &duck_allocator;
+}
+
 struct ArrowStreamWriter {
   ArrowStreamWriter(ClientContext& context, FileSystem& fs, const string& file_path,
-                    vector<LogicalType> logical_types, vector<string> column_names,
-                    vector<pair<string, string>> metadata) {}
+                    const vector<LogicalType>& logical_types,
+                    const vector<string>& column_names,
+                    const vector<pair<string, string>>& metadata)
+      : options(context.GetClientProperties()) {
+    InitArrowDuckBuffer(header.get(), BufferAllocator::Get(context));
+    InitArrowDuckBuffer(body.get(), BufferAllocator::Get(context));
 
-  void Flush(ColumnDataCollection& buffer) {}
+    InitializeSchema(logical_types, column_names, metadata);
+    InitializeOutputFile(fs, file_path);
+    InitializeEncoderAndWriteSchema();
+  }
 
-  void Finalize() {}
+  // Probably should do this conversion at a higher level and reuse for all outputs
+  void InitializeSchema(const vector<LogicalType>& logical_types,
+                        const vector<string>& column_names,
+                        const vector<pair<string, string>>& metadata) {
+    nanoarrow::UniqueSchema tmp_schema;
+    converter.ToArrowSchema(tmp_schema.get(), logical_types, column_names, options);
 
-  idx_t NumberOfRowGroups() { return 0; }
+    if (metadata.empty()) {
+      ArrowSchemaMove(tmp_schema.get(), schema.get());
+    } else {
+      nanoarrow::UniqueBuffer metadata_packed;
+      NANOARROW_THROW_NOT_OK(
+          ArrowMetadataBuilderInit(metadata_packed.get(), tmp_schema->metadata));
+      ArrowStringView key;
+      ArrowStringView value;
+      for (const auto& item : metadata) {
+        key = {item.first.data(), static_cast<int64_t>(item.first.size())};
+        key = {item.second.data(), static_cast<int64_t>(item.second.size())};
+        NANOARROW_THROW_NOT_OK(
+            ArrowMetadataBuilderAppend(metadata_packed.get(), key, value));
+      }
 
-  idx_t FileSize() { return 0; }
+      NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(tmp_schema.get(), schema.get()));
+      NANOARROW_THROW_NOT_OK(ArrowSchemaSetMetadata(
+          schema.get(), reinterpret_cast<char*>(metadata_packed->data)));
+    }
+  }
+
+  void InitializeOutputFile(FileSystem& fs, const string& file_path) {
+    out_file = fs.OpenFile(file_path, FileOpenFlags::FILE_FLAGS_WRITE);
+  }
+
+  void InitializeEncoderAndWriteSchema() {
+    ArrowIpcEncoderInit(encoder.get());
+    ArrowIpcEncoderEncodeSchema(encoder.get(), schema.get(), &error);
+    ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get());
+
+    out_file->Write(header->data, header->size_bytes);
+    file_size += header->size_bytes;
+  }
+
+  void Flush(ColumnDataCollection& buffer) {
+    if (buffer.ChunkCount() == 0) {
+      return;
+    }
+
+    // The ArrowConverter requires all of this to be in one big DataChunk.
+    // It would be better to append these one at a time using other DuckDB
+    // internals like the ArrowAppender. (Possibly better would be to skip the
+    // owning ArrowArray entirely and just expose an ArrowArrayView of the
+    // chunk. keeping track of any owning elements that had to be allocated,
+    // since that's all that is strictly required to write).
+    DataChunk chunk;
+    chunk.InitializeEmpty(buffer.Types());
+    chunk.SetCapacity(buffer.Count());
+    for (const auto& item : buffer.Chunks()) {
+      chunk.Append(item, true);
+    }
+
+    chunk_arrow.reset();
+    converter.ToArrowArray(chunk, chunk_arrow.get(), options);
+    THROW_NOT_OK(InternalException, &error,
+                 ArrowArrayViewSetArray(chunk_view.get(), chunk_arrow.get(), &error));
+
+    // It would be nice to be able to flush this straight to the output file
+    // rather than buffer the entire output in memory (again).
+    ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(), body.get(),
+                                           &error);
+    ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get());
+
+    out_file->Write(header->data, header->size_bytes);
+    file_size += header->size_bytes;
+    out_file->Write(body->data, body->size_bytes);
+    file_size += body->size_bytes;
+
+    ++row_group_count;
+  }
+
+  void Finalize() {
+    uint8_t end_of_stream[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
+    out_file->Write(end_of_stream, sizeof(end_of_stream));
+    out_file->Close();
+  }
+
+  idx_t NumberOfRowGroups() { return row_group_count; }
+
+  idx_t FileSize() { return file_size; }
+
+ private:
+  ClientProperties options;
+  nanoarrow::ipc::UniqueEncoder encoder;
+  ArrowConverter converter;
+  unique_ptr<FileHandle> out_file;
+  idx_t row_group_count{0};
+  idx_t file_size{0};
+  nanoarrow::UniqueSchema schema;
+  nanoarrow::UniqueArrayView chunk_view;
+  nanoarrow::UniqueArray chunk_arrow;
+  nanoarrow::UniqueBuffer header;
+  nanoarrow::UniqueBuffer body;
+  ArrowError error{};
 };
 
 struct ArrowWriteBindData : public TableFunctionData {
   vector<LogicalType> sql_types;
   vector<string> column_names;
   vector<pair<string, string>> kv_metadata;
-  idx_t row_group_size = Storage::ROW_GROUP_SIZE;
+  // Storage::ROW_GROUP_SIZE is not defined in at least one CI job
+  idx_t row_group_size = STANDARD_ROW_GROUPS_SIZE;
   optional_idx row_groups_per_file;
   static constexpr const idx_t BYTES_PER_ROW = 1024;
   idx_t row_group_size_bytes;
@@ -112,7 +247,7 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
   bind_data->sql_types = sql_types;
   bind_data->column_names = names;
 
-  return bind_data;
+  return std::move(bind_data);
 }
 
 unique_ptr<GlobalFunctionData> ArrowWriteInitializeGlobal(ClientContext& context,

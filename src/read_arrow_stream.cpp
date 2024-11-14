@@ -14,6 +14,8 @@
 #include "nanoarrow/nanoarrow.hpp"
 #include "nanoarrow/nanoarrow_ipc.hpp"
 
+#include "nanoarrow_errors.hpp"
+
 // read_arrow_stream() implementation
 //
 // This currently uses the "easy" IPC Reader route, which wraps
@@ -27,21 +29,6 @@
 // to build a file scanner around an ArrowArrayStream; nanoarrow could make
 // this easier by allowing the ArrowIpcArrayStreamReader to plug in an
 // ArrowBufferAllocator().
-
-#define _DUCKDB_NANOARROW_THROW_NOT_OK_IMPL(NAME, ExceptionCls, ERROR_PTR, EXPR,      \
-                                            EXPR_STR)                                 \
-  do {                                                                                \
-    const int NAME = (EXPR);                                                          \
-    if (NAME) {                                                                       \
-      throw ExceptionCls(std::string(EXPR_STR) + std::string(" failed with errno ") + \
-                         std::to_string(NAME) + std::string(": ") +                   \
-                         std::string((ERROR_PTR)->message));                          \
-    }                                                                                 \
-  } while (0)
-
-#define THROW_NOT_OK(ExceptionCls, ERROR_PTR, EXPR)                                     \
-  _DUCKDB_NANOARROW_THROW_NOT_OK_IMPL(_NANOARROW_MAKE_NAME(errno_status_, __COUNTER__), \
-                                      ExceptionCls, ERROR_PTR, EXPR, #EXPR)
 
 namespace duckdb {
 
@@ -128,7 +115,6 @@ struct ReadArrowStream {
     TableFunction fn("read_arrow_stream", {LogicalType::VARCHAR}, Scan, Bind,
                      ArrowTableFunction::ArrowScanInitGlobal,
                      ArrowTableFunction::ArrowScanInitLocal);
-    fn.get_batch_index = GetBatchIndex;
     fn.cardinality = Cardinality;
     fn.projection_pushdown = true;
     fn.filter_pushdown = false;
@@ -220,14 +206,6 @@ struct ReadArrowStream {
 
     output.Verify();
     state.chunk_offset += output.size();
-  }
-
-  // Identical to the ArrowTableFunction, but that version is marked protected
-  static idx_t GetBatchIndex(ClientContext& context, const FunctionData* bind_data_p,
-                             LocalTableFunctionState* local_state,
-                             GlobalTableFunctionState* global_state) {
-    auto& state = local_state->Cast<ArrowScanLocalState>();
-    return state.batch_index;
   }
 
   // Identical to the ArrowTableFunction, but that version is marked protected
