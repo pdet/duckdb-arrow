@@ -73,12 +73,12 @@ class ColumnDataCollectionSerializer {
         ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
   }
 
-  void Serialize(const ColumnDataCollection& buffer) {
+  idx_t Serialize(const ColumnDataCollection& buffer) {
     header->size_bytes = 0;
     body->size_bytes = 0;
 
     if (buffer.Count() == 0) {
-      return;
+      return 0;
     }
 
     // The ArrowConverter requires all of this to be in one big DataChunk.
@@ -104,6 +104,8 @@ class ColumnDataCollectionSerializer {
 
     NANOARROW_THROW_NOT_OK(
         ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
+
+    return 1;
   }
 
   void Flush(BufferedFileWriter& writer) {
@@ -131,7 +133,8 @@ struct ArrowStreamWriter {
                     const vector<pair<string, string>>& metadata)
       : options(context.GetClientProperties()),
         allocator(BufferAllocator::Get(context)),
-        serializer(options, allocator) {
+        serializer(options, allocator),
+        file_name(file_path) {
     InitSchema(logical_types, column_names, metadata);
     InitOutputFile(fs, file_path);
   }
@@ -184,10 +187,15 @@ struct ArrowStreamWriter {
 
   void Flush(ColumnDataCollection& buffer) {
     serializer.Serialize(buffer);
+    buffer.Reset();
     serializer.Flush(*writer);
+    ++row_group_count;
   }
 
-  void Flush(ColumnDataCollectionSerializer& serializer) { serializer.Flush(*writer); }
+  void Flush(ColumnDataCollectionSerializer& serializer) {
+    serializer.Flush(*writer);
+    ++row_group_count;
+  }
 
   void Finalize() {
     uint8_t end_of_stream[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
@@ -203,6 +211,7 @@ struct ArrowStreamWriter {
   ClientProperties options;
   Allocator& allocator;
   ColumnDataCollectionSerializer serializer;
+  string file_name;
   unique_ptr<BufferedFileWriter> writer;
   idx_t row_group_count{0};
   nanoarrow::UniqueSchema schema;
@@ -413,6 +422,7 @@ unique_ptr<PreparedBatchData> ArrowWritePrepareBatch(
   auto batch = make_uniq<ArrowWriteBatchData>();
   batch->serializer = global_state.writer->NewSerializer();
   batch->serializer->Serialize(*collection);
+  collection->Reset();
 
   return std::move(batch);
 }
