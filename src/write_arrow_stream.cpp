@@ -1,5 +1,6 @@
 
 #include "write_arrow_stream.hpp"
+#include <thread>
 
 #include "duckdb/common/arrow/arrow_converter.hpp"
 #include "duckdb/common/serializer/buffered_file_writer.hpp"
@@ -108,7 +109,8 @@ struct ArrowStreamWriter {
     writer->WriteData(header->data, header->size_bytes);
   }
 
-  void Flush(ColumnDataCollection& buffer) {
+  void PrepareRowGroup(const ColumnDataCollection& buffer, ArrowIpcEncoder* encoder,
+                       ArrowBuffer* header, ArrowBuffer* body) {
     if (buffer.ChunkCount() == 0) {
       return;
     }
@@ -132,14 +134,20 @@ struct ArrowStreamWriter {
 
     // It would be nice to be able to flush this straight to the output file
     // rather than buffer the entire output in memory (again).
-    ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(), body.get(),
-                                           &error);
+    ArrowIpcEncoderEncodeSimpleRecordBatch(encoder, chunk_view.get(), body, &error);
     header->size_bytes = 0;
-    ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get());
+    ArrowIpcEncoderFinalizeBuffer(encoder, true, header);
+  }
 
+  void FlushPreparedRowGroup(ArrowBuffer* header, ArrowBuffer* body) {
     writer->WriteData(header->data, header->size_bytes);
     writer->WriteData(body->data, body->size_bytes);
     ++row_group_count;
+  }
+
+  void Flush(ColumnDataCollection& buffer) {
+    PrepareRowGroup(buffer, encoder.get(), header.get(), body.get());
+    FlushPreparedRowGroup(header.get(), body.get());
   }
 
   void Finalize() {
@@ -353,11 +361,42 @@ bool ArrowWriteRotateNextFile(GlobalFunctionData& gstate, FunctionData& bind_dat
   return false;
 }
 
+struct ArrowWriteBatchData : public PreparedBatchData {
+  ArrowWriteBatchData(ClientContext& context) {
+    // In the future we might need to prime the encoder so that it knows about
+    // things like past dictionaries that were written
+    NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
+    InitArrowDuckBuffer(header.get(), BufferAllocator::Get(context));
+    InitArrowDuckBuffer(body.get(), BufferAllocator::Get(context));
+  }
+
+  nanoarrow::ipc::UniqueEncoder encoder;
+  nanoarrow::UniqueBuffer header;
+  nanoarrow::UniqueBuffer body;
+};
+
+// This is called concurrently for large writes so it can't interact with the
+// writer except to read information needed to initialize. I still get
+// use-after-frees when sending large writes with small row groups to this
+// function
+unique_ptr<PreparedBatchData> ArrowWritePrepareBatch(
+    ClientContext& context, FunctionData& bind_data, GlobalFunctionData& gstate,
+    unique_ptr<ColumnDataCollection> collection) {
+  auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
+
+  // std::cout << "PrepareBatch on thread " << std::this_thread::get_id() << std::endl;
+  auto batch = make_uniq<ArrowWriteBatchData>(context);
+  global_state.writer->PrepareRowGroup(*collection, batch->encoder.get(),
+                                       batch->header.get(), batch->body.get());
+
+  return std::move(batch);
+}
+
 void ArrowWriteFlushBatch(ClientContext& context, FunctionData& bind_data,
                           GlobalFunctionData& gstate, PreparedBatchData& batch_p) {
-  // auto &global_state = gstate.Cast<ArrowWriteGlobalState>();
-  // auto &batch = batch_p.Cast<ArrowWriteBatchData>();
-  // global_state.writer->FlushRowGroup(batch.prepared_row_group);
+  auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
+  auto& batch = batch_p.Cast<ArrowWriteBatchData>();
+  global_state.writer->FlushPreparedRowGroup(batch.header.get(), batch.body.get());
 }
 
 }  // namespace
@@ -374,7 +413,7 @@ void RegisterArrowStreamCopyFunction(DatabaseInstance& db) {
   function.execution_mode = ArrowWriteExecutionMode;
   function.copy_from_bind = ReadArrowStreamBindCopy;
   function.copy_from_function = ReadArrowStreamFunction();
-  // function.prepare_batch = ArrowWritePrepareBatch;
+  function.prepare_batch = ArrowWritePrepareBatch;
   function.flush_batch = ArrowWriteFlushBatch;
   function.desired_batch_size = ArrowWriteDesiredBatchSize;
   function.rotate_files = ArrowWriteRotateFiles;
