@@ -214,7 +214,10 @@ struct ArrowWriteBindData : public TableFunctionData {
   vector<pair<string, string>> kv_metadata;
   // Storage::ROW_GROUP_SIZE (122880), which seems to be the default
   // for Parquet, is higher than the usual number used in IPC writers (65536).
-  idx_t row_group_size = 65536;
+  // Using a value of 65536 results in fairly bad performance for the use
+  // case of "write it all then read it all" (at the expense of not being as
+  // useful for streaming).
+  idx_t row_group_size = 122880;
   optional_idx row_groups_per_file;
   static constexpr const idx_t BYTES_PER_ROW = 1024;
   idx_t row_group_size_bytes;
