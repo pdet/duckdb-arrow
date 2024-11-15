@@ -1,14 +1,13 @@
 #include "read_arrow_stream.hpp"
 
+#include "duckdb/common/atomic.hpp"
+#include "duckdb/common/constants.hpp"
 #include "duckdb/function/copy_function.hpp"
 #include "duckdb/function/table/arrow.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/extension_util.hpp"
-
-#include "duckdb/common/atomic.hpp"
-#include "duckdb/common/constants.hpp"
-#include "duckdb/function/table/arrow.hpp"
-#include "duckdb/function/table_function.hpp"
+#include "duckdb/parser/expression/constant_expression.hpp"
+#include "duckdb/parser/expression/function_expression.hpp"
 #include "duckdb/parser/tableref/table_function_ref.hpp"
 
 #include "nanoarrow/nanoarrow.hpp"
@@ -25,10 +24,16 @@
 // Really this should use the ArrowIpcEncoder() and implement the various
 // pieces of the scan specific to Arrow IPC.
 //
+// This version is based on the Python scanner; the ArrowArrayStreamWrapper
+// was discovered towards the end of writing this. We probably do want the
+// version based on the Python scanner (and when we support Arrow files,
+// this will make a bit more sense, since we'll have a queue of record batch
+// file offsets instead of an indeterminate stream.
+//
 // DuckDB could improve this process by making it easier
-// to build a file scanner around an ArrowArrayStream; nanoarrow could make
-// this easier by allowing the ArrowIpcArrayStreamReader to plug in an
-// ArrowBufferAllocator().
+// to build an efficient file scanner around an ArrowArrayStream;
+// nanoarrow could make this easier by allowing the ArrowIpcArrayStreamReader
+// to plug in an ArrowBufferAllocator().
 
 namespace duckdb {
 
@@ -51,7 +56,7 @@ class ArrowIpcArrowArrayStreamFactory {
                                            const std::string& src_string)
       : fs(FileSystem::GetFileSystem(context)),
         allocator(BufferAllocator::Get(context)),
-        src_string(src_string) {};
+        src_string(src_string){};
 
   // Called once when initializing Scan States
   static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr,
@@ -107,7 +112,7 @@ class ArrowIpcArrowArrayStreamFactory {
 };
 
 struct ReadArrowStream {
-  // Register the function. Unlike arrow_scan(), which takes integer pointers
+  // Define the function. Unlike arrow_scan(), which takes integer pointers
   // as arguments, we keep the factory alive by making it a member of the bind
   // data (instead of as a Python object whose ownership is kept alive via the
   // DependencyItem mechanism).
@@ -120,6 +125,30 @@ struct ReadArrowStream {
     fn.filter_pushdown = false;
     fn.filter_prune = false;
     return fn;
+  }
+
+  static unique_ptr<TableRef> ScanReplacement(ClientContext& context,
+                                              ReplacementScanInput& input,
+                                              optional_ptr<ReplacementScanData> data) {
+    auto table_name = ReplacementScan::GetFullPath(input);
+    if (!ReplacementScan::CanReplace(table_name, {"arrows"})) {
+      return nullptr;
+    }
+
+    auto table_function = make_uniq<TableFunctionRef>();
+    vector<unique_ptr<ParsedExpression>> children;
+    auto table_name_expr = make_uniq<ConstantExpression>(Value(table_name));
+    children.push_back(std::move(table_name_expr));
+    auto function_expr =
+        make_uniq<FunctionExpression>("read_arrow_stream", std::move(children));
+    table_function->function = std::move(function_expr);
+
+    if (!FileSystem::HasGlob(table_name)) {
+      auto& fs = FileSystem::GetFileSystem(context);
+      table_function->alias = fs.ExtractBaseName(table_name);
+    }
+
+    return std::move(table_function);
   }
 
   // Our FunctionData is the same as the ArrowScanFunctionData except we extend it
@@ -259,6 +288,8 @@ TableFunction ReadArrowStreamFunction() { return ReadArrowStream::Function(); }
 
 void RegisterReadArrowStream(DatabaseInstance& db) {
   ExtensionUtil::RegisterFunction(db, ReadArrowStream::Function());
+  auto& config = DBConfig::GetConfig(db);
+  config.replacement_scans.emplace_back(ReadArrowStream::ScanReplacement);
 }
 
 }  // namespace ext_nanoarrow

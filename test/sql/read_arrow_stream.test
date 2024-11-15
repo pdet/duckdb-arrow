@@ -5,15 +5,46 @@
 # Require statement will ensure this test is run with this extension loaded
 require nanoarrow
 
+# Check a basic roundtrip
 statement ok
-COPY (SELECT 42 as foofy) TO "__TEST_DIR__/test.arrows" (FORMAT ARROWS);
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "__TEST_DIR__/test.arrows" (FORMAT ARROWS);
 
-query I
-SELECT count(*) FROM read_arrow_stream('__TEST_DIR__/test.arrows');
+query II
+SELECT * FROM read_arrow_stream('__TEST_DIR__/test.arrows');
 ----
-1
+42	string
 
+# Check that the replacement scan works
+query II
+SELECT * FROM "__TEST_DIR__/test.arrows";
+----
+42	string
+
+# Make sure these project correctly
 query I
 SELECT foofy FROM read_arrow_stream('__TEST_DIR__/test.arrows')
 ----
 42
+
+query I
+SELECT stringy FROM read_arrow_stream('__TEST_DIR__/test.arrows')
+----
+string
+
+# Check our more realistic test table
+query I
+SELECT count(*) FROM read_arrow_stream('__WORKING_DIRECTORY__/data/test.arrows');
+----
+15487
+
+# Check with a filter and projection
+query I
+SELECT message FROM read_arrow_stream('__WORKING_DIRECTORY__/data/test.arrows') WHERE "commit" = 'fa5f0299f046c46e1b2f671e5e3b4f1956522711';
+----
+ARROW-1: Initial Arrow Code Commit
+
+# Check a filter that has to select from multiple batches
+query I
+SELECT count(*) from "data/test.arrows" WHERE dayname(time::TIMESTAMP) = 'Wednesday';
+----
+2927

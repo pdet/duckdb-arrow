@@ -22,6 +22,6 @@ import nanoarrow as na
 from nanoarrow import ipc
 
 url = "https://github.com/apache/arrow-experiments/raw/refs/heads/main/data/arrow-commits/arrow-commits.arrows"
-with ipc.StreamWriter.from_path("test/sql/test.arrows") as writer:
+with ipc.StreamWriter.from_path("data/test.arrows") as writer:
     writer.write_stream(na.ArrayStream.from_url(url))
 ```
