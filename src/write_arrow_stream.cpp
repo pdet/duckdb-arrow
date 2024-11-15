@@ -49,69 +49,35 @@ void InitArrowDuckBuffer(ArrowBuffer* buffer, Allocator& duck_allocator) {
   buffer->allocator.private_data = &duck_allocator;
 }
 
-struct ArrowStreamWriter {
-  ArrowStreamWriter(ClientContext& context, FileSystem& fs, const string& file_path,
-                    const vector<LogicalType>& logical_types,
-                    const vector<string>& column_names,
-                    const vector<pair<string, string>>& metadata)
-      : options(context.GetClientProperties()), allocator(BufferAllocator::Get(context)) {
+class ColumnDataCollectionSerializer {
+ public:
+  ColumnDataCollectionSerializer(ClientProperties& options, Allocator& allocator)
+      : options(options), allocator(allocator) {}
+
+  void Init(ArrowSchema* schema_p) {
     InitArrowDuckBuffer(header.get(), allocator);
     InitArrowDuckBuffer(body.get(), allocator);
-
-    InitializeSchema(logical_types, column_names, metadata);
-    InitializeOutputFile(fs, file_path);
-    InitializeEncoderAndWriteSchema();
-  }
-
-  // Probably should do this conversion at a higher level and reuse for all outputs
-  void InitializeSchema(const vector<LogicalType>& logical_types,
-                        const vector<string>& column_names,
-                        const vector<pair<string, string>>& metadata) {
-    nanoarrow::UniqueSchema tmp_schema;
-    converter.ToArrowSchema(tmp_schema.get(), logical_types, column_names, options);
-
-    if (metadata.empty()) {
-      ArrowSchemaMove(tmp_schema.get(), schema.get());
-    } else {
-      nanoarrow::UniqueBuffer metadata_packed;
-      NANOARROW_THROW_NOT_OK(
-          ArrowMetadataBuilderInit(metadata_packed.get(), tmp_schema->metadata));
-      ArrowStringView key;
-      ArrowStringView value;
-      for (const auto& item : metadata) {
-        key = {item.first.data(), static_cast<int64_t>(item.first.size())};
-        key = {item.second.data(), static_cast<int64_t>(item.second.size())};
-        NANOARROW_THROW_NOT_OK(
-            ArrowMetadataBuilderAppend(metadata_packed.get(), key, value));
-      }
-
-      NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(tmp_schema.get(), schema.get()));
-      NANOARROW_THROW_NOT_OK(ArrowSchemaSetMetadata(
-          schema.get(), reinterpret_cast<char*>(metadata_packed->data)));
-    }
-  }
-
-  void InitializeOutputFile(FileSystem& fs, const string& file_path) {
-    writer = make_uniq<BufferedFileWriter>(
-        fs, file_path.c_str(),
-        FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW);
-  }
-
-  void InitializeEncoderAndWriteSchema() {
-    THROW_NOT_OK(InternalException, &error,
-                 ArrowArrayViewInitFromSchema(chunk_view.get(), schema.get(), &error));
     NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
     THROW_NOT_OK(InternalException, &error,
-                 ArrowIpcEncoderEncodeSchema(encoder.get(), schema.get(), &error));
-    NANOARROW_THROW_NOT_OK(
-        ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
+                 ArrowArrayViewInitFromSchema(chunk_view.get(), schema_p, &error));
 
-    writer->WriteData(header->data, header->size_bytes);
+    schema = schema_p;
   }
 
-  void PrepareRowGroup(const ColumnDataCollection& buffer, ArrowIpcEncoder* encoder,
-                       ArrowBuffer* header, ArrowBuffer* body) {
-    if (buffer.ChunkCount() == 0) {
+  void SerializeSchema() {
+    header->size_bytes = 0;
+    body->size_bytes = 0;
+    THROW_NOT_OK(InternalException, &error,
+                 ArrowIpcEncoderEncodeSchema(encoder.get(), schema, &error));
+    NANOARROW_THROW_NOT_OK(
+        ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
+  }
+
+  void Serialize(const ColumnDataCollection& buffer) {
+    header->size_bytes = 0;
+    body->size_bytes = 0;
+
+    if (buffer.Count() == 0) {
       return;
     }
 
@@ -132,23 +98,96 @@ struct ArrowStreamWriter {
     THROW_NOT_OK(InternalException, &error,
                  ArrowArrayViewSetArray(chunk_view.get(), chunk_arrow.get(), &error));
 
-    // It would be nice to be able to flush this straight to the output file
-    // rather than buffer the entire output in memory (again).
-    ArrowIpcEncoderEncodeSimpleRecordBatch(encoder, chunk_view.get(), body, &error);
-    header->size_bytes = 0;
-    ArrowIpcEncoderFinalizeBuffer(encoder, true, header);
+    THROW_NOT_OK(InternalException, &error,
+                 ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(),
+                                                        body.get(), &error));
+
+    NANOARROW_THROW_NOT_OK(
+        ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
   }
 
-  void FlushPreparedRowGroup(ArrowBuffer* header, ArrowBuffer* body) {
-    writer->WriteData(header->data, header->size_bytes);
-    writer->WriteData(body->data, body->size_bytes);
-    ++row_group_count;
+  void Flush(BufferedFileWriter& writer) {
+    writer.WriteData(header->data, header->size_bytes);
+    writer.WriteData(body->data, body->size_bytes);
+  }
+
+ private:
+  ClientProperties options;
+  Allocator& allocator;
+  ArrowSchema* schema{};
+  nanoarrow::ipc::UniqueEncoder encoder;
+  ArrowConverter converter;
+  nanoarrow::UniqueArrayView chunk_view;
+  nanoarrow::UniqueArray chunk_arrow;
+  nanoarrow::UniqueBuffer header;
+  nanoarrow::UniqueBuffer body;
+  ArrowError error{};
+};
+
+struct ArrowStreamWriter {
+  ArrowStreamWriter(ClientContext& context, FileSystem& fs, const string& file_path,
+                    const vector<LogicalType>& logical_types,
+                    const vector<string>& column_names,
+                    const vector<pair<string, string>>& metadata)
+      : options(context.GetClientProperties()),
+        allocator(BufferAllocator::Get(context)),
+        serializer(options, allocator) {
+    InitSchema(logical_types, column_names, metadata);
+    InitOutputFile(fs, file_path);
+  }
+
+  void InitSchema(const vector<LogicalType>& logical_types,
+                  const vector<string>& column_names,
+                  const vector<pair<string, string>>& metadata) {
+    nanoarrow::UniqueSchema tmp_schema;
+    ArrowConverter::ToArrowSchema(tmp_schema.get(), logical_types, column_names, options);
+
+    if (metadata.empty()) {
+      ArrowSchemaMove(tmp_schema.get(), schema.get());
+    } else {
+      nanoarrow::UniqueBuffer metadata_packed;
+      NANOARROW_THROW_NOT_OK(
+          ArrowMetadataBuilderInit(metadata_packed.get(), tmp_schema->metadata));
+      ArrowStringView key;
+      ArrowStringView value;
+      for (const auto& item : metadata) {
+        key = {item.first.data(), static_cast<int64_t>(item.first.size())};
+        key = {item.second.data(), static_cast<int64_t>(item.second.size())};
+        NANOARROW_THROW_NOT_OK(
+            ArrowMetadataBuilderAppend(metadata_packed.get(), key, value));
+      }
+
+      NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(tmp_schema.get(), schema.get()));
+      NANOARROW_THROW_NOT_OK(ArrowSchemaSetMetadata(
+          schema.get(), reinterpret_cast<char*>(metadata_packed->data)));
+    }
+
+    serializer.Init(schema.get());
+  }
+
+  void InitOutputFile(FileSystem& fs, const string& file_path) {
+    writer = make_uniq<BufferedFileWriter>(
+        fs, file_path.c_str(),
+        FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW);
+  }
+
+  void WriteSchema() {
+    serializer.SerializeSchema();
+    serializer.Flush(*writer);
+  }
+
+  unique_ptr<ColumnDataCollectionSerializer> NewSerializer() {
+    auto serializer = make_uniq<ColumnDataCollectionSerializer>(options, allocator);
+    serializer->Init(schema.get());
+    return serializer;
   }
 
   void Flush(ColumnDataCollection& buffer) {
-    PrepareRowGroup(buffer, encoder.get(), header.get(), body.get());
-    FlushPreparedRowGroup(header.get(), body.get());
+    serializer.Serialize(buffer);
+    serializer.Flush(*writer);
   }
+
+  void Flush(ColumnDataCollectionSerializer& serializer) { serializer.Flush(*writer); }
 
   void Finalize() {
     uint8_t end_of_stream[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
@@ -163,24 +202,19 @@ struct ArrowStreamWriter {
  private:
   ClientProperties options;
   Allocator& allocator;
-  nanoarrow::ipc::UniqueEncoder encoder;
-  ArrowConverter converter;
+  ColumnDataCollectionSerializer serializer;
   unique_ptr<BufferedFileWriter> writer;
   idx_t row_group_count{0};
   nanoarrow::UniqueSchema schema;
-  nanoarrow::UniqueArrayView chunk_view;
-  nanoarrow::UniqueArray chunk_arrow;
-  nanoarrow::UniqueBuffer header;
-  nanoarrow::UniqueBuffer body;
-  ArrowError error{};
 };
 
 struct ArrowWriteBindData : public TableFunctionData {
   vector<LogicalType> sql_types;
   vector<string> column_names;
   vector<pair<string, string>> kv_metadata;
-  // Storage::ROW_GROUP_SIZE is not defined in at least one CI job
-  idx_t row_group_size = STANDARD_ROW_GROUPS_SIZE;
+  // Storage::ROW_GROUP_SIZE (122880), which seems to be the default
+  // for Parquet, is higher than the usual number used in IPC writers (65536).
+  idx_t row_group_size = 65536;
   optional_idx row_groups_per_file;
   static constexpr const idx_t BYTES_PER_ROW = 1024;
   idx_t row_group_size_bytes;
@@ -278,6 +312,7 @@ unique_ptr<GlobalFunctionData> ArrowWriteInitializeGlobal(ClientContext& context
   global_state->writer =
       make_uniq<ArrowStreamWriter>(context, fs, file_path, arrow_bind.sql_types,
                                    arrow_bind.column_names, arrow_bind.kv_metadata);
+  global_state->writer->WriteSchema();
   return std::move(global_state);
 }
 
@@ -362,32 +397,19 @@ bool ArrowWriteRotateNextFile(GlobalFunctionData& gstate, FunctionData& bind_dat
 }
 
 struct ArrowWriteBatchData : public PreparedBatchData {
-  ArrowWriteBatchData(ClientContext& context) {
-    // In the future we might need to prime the encoder so that it knows about
-    // things like past dictionaries that were written
-    NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
-    InitArrowDuckBuffer(header.get(), BufferAllocator::Get(context));
-    InitArrowDuckBuffer(body.get(), BufferAllocator::Get(context));
-  }
-
-  nanoarrow::ipc::UniqueEncoder encoder;
-  nanoarrow::UniqueBuffer header;
-  nanoarrow::UniqueBuffer body;
+  unique_ptr<ColumnDataCollectionSerializer> serializer;
 };
 
 // This is called concurrently for large writes so it can't interact with the
-// writer except to read information needed to initialize. I still get
-// use-after-frees when sending large writes with small row groups to this
-// function
+// writer except to read information needed to initialize.
 unique_ptr<PreparedBatchData> ArrowWritePrepareBatch(
     ClientContext& context, FunctionData& bind_data, GlobalFunctionData& gstate,
     unique_ptr<ColumnDataCollection> collection) {
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
 
-  // std::cout << "PrepareBatch on thread " << std::this_thread::get_id() << std::endl;
-  auto batch = make_uniq<ArrowWriteBatchData>(context);
-  global_state.writer->PrepareRowGroup(*collection, batch->encoder.get(),
-                                       batch->header.get(), batch->body.get());
+  auto batch = make_uniq<ArrowWriteBatchData>();
+  batch->serializer = global_state.writer->NewSerializer();
+  batch->serializer->Serialize(*collection);
 
   return std::move(batch);
 }
@@ -396,14 +418,13 @@ void ArrowWriteFlushBatch(ClientContext& context, FunctionData& bind_data,
                           GlobalFunctionData& gstate, PreparedBatchData& batch_p) {
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
   auto& batch = batch_p.Cast<ArrowWriteBatchData>();
-  global_state.writer->FlushPreparedRowGroup(batch.header.get(), batch.body.get());
+  global_state.writer->Flush(*batch.serializer);
 }
 
 }  // namespace
 
 void RegisterArrowStreamCopyFunction(DatabaseInstance& db) {
   CopyFunction function("arrows");
-  // function.copy_to_select = ArrowWriteSelect;
   function.copy_to_bind = ArrowWriteBind;
   function.copy_to_initialize_global = ArrowWriteInitializeGlobal;
   function.copy_to_initialize_local = ArrowWriteInitializeLocal;

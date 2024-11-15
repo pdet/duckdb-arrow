@@ -5,13 +5,15 @@
 # Require statement will ensure this test is run with this extension loaded
 require nanoarrow
 
-# TODO: Implement the writer so that we don't have to hard-code a file path
-#query I
-#SELECT count(*) FROM read_arrow_stream('/home/dewey/gh/duckdb-nanoarrow/test/sql/test.arrows');
-#----
-#15487
+statement ok
+COPY (SELECT 42 as foofy) TO "__TEST_DIR__/test.arrows" (FORMAT ARROWS);
 
-#query I
-#SELECT message FROM read_arrow_stream('/home/dewey/gh/duckdb-nanoarrow/test/sql/test.arrows') WHERE commit = 'fa5f0299f046c46e1b2f671e5e3b4f1956522711'
-#----
-#ARROW-1: Initial Arrow Code Commit
+query I
+SELECT count(*) FROM read_arrow_stream('__TEST_DIR__/test.arrows');
+----
+1
+
+query I
+SELECT foofy FROM read_arrow_stream('__TEST_DIR__/test.arrows')
+----
+42
