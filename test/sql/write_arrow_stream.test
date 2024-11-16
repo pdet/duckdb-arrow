@@ -1,0 +1,11 @@
+# name: test/sql/read_arrow_stream.test
+# description: test nanoarrow extension
+# group: [nanoarrow]
+
+# Require statement will ensure this test is run with this extension loaded
+require nanoarrow
+
+# Check a basic roundtrip
+statement ok
+CREATE TABLE test AS SELECT * FROM read_arrow_stream('__WORKING_DIRECTORY__/data/test.arrows');
+
