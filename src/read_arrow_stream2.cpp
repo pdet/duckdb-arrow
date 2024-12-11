@@ -56,7 +56,7 @@ class ArrowIpcArrowArrayStreamFactory {
                                            const std::string& src_string)
       : fs(FileSystem::GetFileSystem(context)),
         allocator(BufferAllocator::Get(context)),
-        src_string(src_string) {};
+        src_string(src_string){};
 
   // Called once when initializing Scan States
   static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr,
@@ -111,13 +111,13 @@ class ArrowIpcArrowArrayStreamFactory {
   ArrowError error{};
 };
 
-struct ReadArrowStream {
+struct ReadArrowStream2 {
   // Define the function. Unlike arrow_scan(), which takes integer pointers
   // as arguments, we keep the factory alive by making it a member of the bind
   // data (instead of as a Python object whose ownership is kept alive via the
   // DependencyItem mechanism).
   static TableFunction Function() {
-    TableFunction fn("read_arrow_stream", {LogicalType::VARCHAR}, Scan, Bind,
+    TableFunction fn("read_arrow_stream2", {LogicalType::VARCHAR}, Scan, Bind,
                      ArrowTableFunction::ArrowScanInitGlobal,
                      ArrowTableFunction::ArrowScanInitLocal);
     fn.cardinality = Cardinality;
@@ -131,7 +131,7 @@ struct ReadArrowStream {
                                               ReplacementScanInput& input,
                                               optional_ptr<ReplacementScanData> data) {
     auto table_name = ReplacementScan::GetFullPath(input);
-    if (!ReplacementScan::CanReplace(table_name, {"arrows"})) {
+    if (!ReplacementScan::CanReplace(table_name, {"arrows2"})) {
       return nullptr;
     }
 
@@ -140,7 +140,7 @@ struct ReadArrowStream {
     auto table_name_expr = make_uniq<ConstantExpression>(Value(table_name));
     children.push_back(std::move(table_name_expr));
     auto function_expr =
-        make_uniq<FunctionExpression>("read_arrow_stream", std::move(children));
+        make_uniq<FunctionExpression>("read_arrow_stream2", std::move(children));
     table_function->function = std::move(function_expr);
 
     if (!FileSystem::HasGlob(table_name)) {
@@ -161,7 +161,7 @@ struct ReadArrowStream {
     std::unique_ptr<ArrowIpcArrowArrayStreamFactory> factory;
   };
 
-  // Our Bind() function is different from the arrow_scan because our input
+  // Our Bind() function is differenct from the arrow_scan because our input
   // is a filename (and their input is three pointer addresses).
   static unique_ptr<FunctionData> Bind(ClientContext& context,
                                        TableFunctionBindInput& input,
@@ -278,18 +278,18 @@ inline void InitDuckDBInputStream(unique_ptr<FileHandle> handle,
 
 }  // namespace
 
-unique_ptr<FunctionData> ReadArrowStreamBindCopy(ClientContext& context, CopyInfo& info,
+unique_ptr<FunctionData> ReadArrowStream2BindCopy(ClientContext& context, CopyInfo& info,
                                                  vector<string>& expected_names,
                                                  vector<LogicalType>& expected_types) {
-  return ReadArrowStream::BindCopy(context, info, expected_names, expected_types);
+  return ReadArrowStream2::BindCopy(context, info, expected_names, expected_types);
 }
 
-TableFunction ReadArrowStreamFunction() { return ReadArrowStream::Function(); }
+TableFunction ReadArrowStream2Function() { return ReadArrowStream2::Function(); }
 
-void RegisterReadArrowStream(DatabaseInstance& db) {
-  ExtensionUtil::RegisterFunction(db, ReadArrowStream::Function());
+void RegisterReadArrowStream2(DatabaseInstance& db) {
+  ExtensionUtil::RegisterFunction(db, ReadArrowStream2::Function());
   auto& config = DBConfig::GetConfig(db);
-  config.replacement_scans.emplace_back(ReadArrowStream::ScanReplacement);
+  config.replacement_scans.emplace_back(ReadArrowStream2::ScanReplacement);
 }
 
 }  // namespace ext_nanoarrow
