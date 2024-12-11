@@ -1,7 +1,9 @@
+#include "duckdb/common/radix.hpp"
 #include "read_arrow_stream.hpp"
 
 #include "duckdb/common/atomic.hpp"
 #include "duckdb/common/constants.hpp"
+#include "duckdb/common/serializer/buffered_file_reader.hpp"
 #include "duckdb/function/copy_function.hpp"
 #include "duckdb/function/table/arrow.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -41,6 +43,116 @@ namespace ext_nanoarrow {
 
 namespace {
 
+struct ArrowIpcMessagePrefix {
+  uint32_t continuation_token;
+  int32_t metadata_size;
+};
+
+class IpcStreamReader {
+ public:
+  IpcStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator)
+      : file_reader(fs, std::move(handle)), allocator(allocator) {
+    NANOARROW_THROW_NOT_OK(ArrowIpcDecoderInit(decoder.get()));
+  }
+
+ private:
+  nanoarrow::ipc::UniqueDecoder decoder{};
+  bool finished{false};
+  BufferedFileReader file_reader;
+  Allocator& allocator;
+  ArrowError error{};
+
+  ArrowIpcMessagePrefix message_prefix{};
+  AllocatedData message_header;
+  shared_ptr<AllocatedData> message_body;
+
+  nanoarrow::UniqueSchema schema;
+
+  static ArrowBufferView AllocatedDataView(const AllocatedData& data) {
+    ArrowBufferView view;
+    view.data.data = data.get();
+    view.size_bytes = UnsafeNumericCast<int64_t>(data.GetSize());
+    return view;
+  }
+
+  ArrowIpcMessageType ReadNextMessage() {
+    if (finished || file_reader.Finished()) {
+      finished = true;
+      return ArrowIpcMessageType::NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+    }
+
+    // If there is no more data to be read, we're done!
+    try {
+      EnsureInputStreamAligned();
+      file_reader.ReadData(reinterpret_cast<data_ptr_t>(&message_prefix),
+                           sizeof(message_prefix));
+    } catch (SerializationException& e) {
+      finished = true;
+      return ArrowIpcMessageType::NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+    }
+
+    if (message_prefix.continuation_token != kContinuationToken) {
+      throw IOException(std::string("Expected continuation token (0xFFFFFFFF) but got " +
+                                    std::to_string(message_prefix.continuation_token)));
+    }
+
+    idx_t metadata_size;
+    if (!Radix::IsLittleEndian()) {
+      metadata_size = static_cast<int32_t>(BSWAP32(message_prefix.metadata_size));
+    } else {
+      metadata_size = message_prefix.metadata_size;
+    }
+
+    if (metadata_size < 0) {
+      throw IOException(std::string("Expected metadata size >= 0 but got " +
+                                    std::to_string(metadata_size)));
+    }
+
+    // Ensure we have enough space to read the header
+    idx_t message_header_size = metadata_size + sizeof(message_prefix);
+    if (message_header.GetSize() < message_header_size) {
+      message_header = allocator.Allocate(message_header_size);
+    }
+
+    // Read the message header. I believe the fact that this loops and calls
+    // the file handle's Read() method with relatively small chunks will ensure that
+    // an attempt to read a very large message_header_size can be cancelled. If this
+    // is not the case, we might want to implement our own buffering.
+    std::memcpy(message_header.get(), &message_prefix, sizeof(message_prefix));
+    file_reader.ReadData(message_header.get() + sizeof(message_prefix),
+                         message_prefix.metadata_size);
+
+    THROW_NOT_OK(IOException, &error,
+                 ArrowIpcDecoderDecodeHeader(decoder.get(),
+                                             AllocatedDataView(message_header), &error));
+
+    if (decoder->body_size_bytes > 0) {
+      EnsureInputStreamAligned();
+      message_body =
+          make_shared_ptr<AllocatedData>(allocator.Allocate(decoder->body_size_bytes));
+
+      // Again, this is possibly a long running Read() call for a large body.
+      // We could possibly be smarter about how we do this, particularly if we
+      // are reading a small portion of the input from a seekable file.
+      file_reader.ReadData(message_body->get(), decoder->body_size_bytes);
+    }
+
+    return decoder->message_type;
+  }
+
+  void EnsureInputStreamAligned() {
+    uint8_t padding[8];
+    int padding_bytes = 8 - (file_reader.CurrentOffset() % 8);
+    if (padding_bytes != 8) {
+      file_reader.ReadData(padding, padding_bytes);
+    }
+
+    D_ASSERT((file_reader.CurrentOffset() % 8) == 0);
+  }
+
+  static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
+};
+
 // Initializes our ArrowIpcInputStream wrapper from DuckDB's file
 // abstraction. This lets us use their filesystems and any plugins that
 // add them (like httpfs).
@@ -56,7 +168,7 @@ class ArrowIpcArrowArrayStreamFactory {
                                            const std::string& src_string)
       : fs(FileSystem::GetFileSystem(context)),
         allocator(BufferAllocator::Get(context)),
-        src_string(src_string){};
+        src_string(src_string) {};
 
   // Called once when initializing Scan States
   static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr,
@@ -279,8 +391,8 @@ inline void InitDuckDBInputStream(unique_ptr<FileHandle> handle,
 }  // namespace
 
 unique_ptr<FunctionData> ReadArrowStream2BindCopy(ClientContext& context, CopyInfo& info,
-                                                 vector<string>& expected_names,
-                                                 vector<LogicalType>& expected_types) {
+                                                  vector<string>& expected_names,
+                                                  vector<LogicalType>& expected_types) {
   return ReadArrowStream2::BindCopy(context, info, expected_names, expected_types);
 }
 
