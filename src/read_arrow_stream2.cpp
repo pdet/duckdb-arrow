@@ -68,12 +68,67 @@ class IpcStreamReader {
 
   bool HasProjection() { return !projected_fields.empty(); }
 
-  const ArrowSchema* GetOuputSchema() {
+  const ArrowSchema* GetOutputSchema() {
     if (HasProjection()) {
       return projected_schema.get();
     } else {
-      return file_schema.get();
+      return GetFileSchema();
     }
+  }
+
+  void PopulateNames(vector<string>& names) {
+    GetFileSchema();
+
+    for (int64_t i = 0; i < file_schema->n_children; i++) {
+      const ArrowSchema* column = file_schema->children[i];
+      if (!column->name) {
+        names.push_back("");
+      } else {
+        names.push_back(column->name);
+      }
+    }
+  }
+
+  bool GetNextBatch(ArrowArray* out) {
+    // When nanoarrow supports dictionary batches, we'd accept either a
+    // RecordBatch or DictionaryBatch message, recording the dictionary batch
+    // (or possibly ignoring it if it is for a field that we don't care about),
+    // but looping until we end up with a RecordBatch in the decoder.
+    ArrowIpcMessageType message_type =
+        ReadNextMessage({NANOARROW_IPC_MESSAGE_TYPE_RECORD_BATCH});
+    if (message_type == NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED) {
+      out->release = nullptr;
+      return false;
+    }
+
+    nanoarrow::UniqueArray array;
+    ArrowBufferView body_view = AllocatedDataView(*message_body);
+    // Can use this to get around the no-custom-allocator thing in a sec
+    // THROW_NOT_OK(InternalException, &error,
+    //              ArrowArrayInitFromSchema(array.get(), GetOutputSchema(), &error));
+    // ArrowIpcDecoderDecodeArrayView() + nanoarrow::BufferInit<> to borrow buffers from
+    // the message_body.
+
+    if (HasProjection()) {
+      NANOARROW_THROW_NOT_OK(ArrowArrayInitFromType(array.get(), NANOARROW_TYPE_STRUCT));
+      NANOARROW_THROW_NOT_OK(
+          ArrowArrayAllocateChildren(array.get(), GetOutputSchema()->n_children));
+
+      for (int64_t i = 0; i < array->n_children; i++) {
+        THROW_NOT_OK(InternalException, &error,
+                     ArrowIpcDecoderDecodeArray(
+                         decoder.get(), body_view, projected_fields[i],
+                         array->children[i], NANOARROW_VALIDATION_LEVEL_DEFAULT, &error));
+      }
+    } else {
+      THROW_NOT_OK(
+          InternalException, &error,
+          ArrowIpcDecoderDecodeArray(decoder.get(), body_view, -1, array.get(),
+                                     NANOARROW_VALIDATION_LEVEL_DEFAULT, &error));
+    }
+
+    ArrowArrayMove(array.get(), out);
+    return true;
   }
 
   void SetColumnProjection(vector<string> column_names) {
@@ -90,14 +145,14 @@ class IpcStreamReader {
 
     // The ArrowArray builder needs the flattened field index, which we need to
     // keep track of.
-    unordered_map<string, pair<idx_t, const ArrowSchema*>> name_to_flat_field_map;
+    unordered_map<string, pair<int64_t, const ArrowSchema*>> name_to_flat_field_map;
 
     // Duplicate column names are in theory fine as long as they are not queried,
     // so we need to make a list of them to check.
     unordered_set<string> duplicate_column_names;
 
     // Loop over columns to build the field map
-    idx_t field_count = 0;
+    int64_t field_count = 0;
     for (int64_t i = 0; i < file_schema->n_children; i++) {
       const ArrowSchema* column = file_schema->children[i];
       string name;
@@ -154,7 +209,7 @@ class IpcStreamReader {
 
   nanoarrow::UniqueSchema file_schema;
   nanoarrow::UniqueSchema projected_schema;
-  vector<idx_t> projected_fields;
+  vector<int64_t> projected_fields;
 
   ArrowIpcMessageType ReadNextMessage(vector<ArrowIpcMessageType> expected_types,
                                       bool end_of_stream_ok = true) {
@@ -264,8 +319,8 @@ class IpcStreamReader {
     D_ASSERT((file_reader.CurrentOffset() % 8) == 0);
   }
 
-  static idx_t CountFields(const ArrowSchema* schema) {
-    idx_t n_fields = 1;
+  static int64_t CountFields(const ArrowSchema* schema) {
+    int64_t n_fields = 1;
     for (int64_t i = 0; i < schema->n_children; i++) {
       n_fields += CountFields(schema->children[i]);
     }
@@ -301,85 +356,13 @@ class IpcStreamReader {
   static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
 };
 
-// Initializes our ArrowIpcInputStream wrapper from DuckDB's file
-// abstraction. This lets us use their filesystems and any plugins that
-// add them (like httpfs).
-inline void InitDuckDBInputStream(unique_ptr<FileHandle> handle,
-                                  ArrowIpcInputStream* out);
-
-// This Factory is a type invented by DuckDB. Notably, the Produce()
-// function pointer is passed to the constructor of the ArrowScanFunctionData
-// constructor (which we wrap).
-class ArrowIpcArrowArrayStreamFactory {
- public:
-  explicit ArrowIpcArrowArrayStreamFactory(ClientContext& context,
-                                           const std::string& src_string)
-      : fs(FileSystem::GetFileSystem(context)),
-        allocator(BufferAllocator::Get(context)),
-        src_string(src_string) {};
-
-  // Called once when initializing Scan States
-  static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr,
-                                                     ArrowStreamParameters& parameters) {
-    auto factory = static_cast<ArrowIpcArrowArrayStreamFactory*>(
-        reinterpret_cast<void*>(factory_ptr));
-
-    if (!factory->stream->release) {
-      throw InternalException("ArrowArrayStream was not initialized");
-    }
-
-    auto out = make_uniq<ArrowArrayStreamWrapper>();
-    ArrowArrayStreamMove(factory->stream.get(), &out->arrow_array_stream);
-
-    return out;
-  }
-
-  // Get the schema of the arrow object
-  void GetSchema(ArrowSchemaWrapper& schema) {
-    if (!stream->release) {
-      throw InternalException("ArrowArrayStream was released by another thread/library");
-    }
-
-    THROW_NOT_OK(IOException, &error,
-                 ArrowArrayStreamGetSchema(stream.get(), &schema.arrow_schema, &error));
-  }
-
-  // Opens the file, wraps it in the ArrowIpcInputStream, and wraps it in
-  // the ArrowArrayStream reader.
-  void InitStream() {
-    if (stream->release) {
-      throw InternalException("ArrowArrayStream is already initialized");
-    }
-
-    unique_ptr<FileHandle> handle =
-        fs.OpenFile(src_string, FileOpenFlags::FILE_FLAGS_READ);
-
-    nanoarrow::ipc::UniqueInputStream input_stream;
-    InitDuckDBInputStream(std::move(handle), input_stream.get());
-
-    NANOARROW_THROW_NOT_OK(
-        ArrowIpcArrayStreamReaderInit(stream.get(), input_stream.get(), nullptr));
-  }
-
-  FileSystem& fs;
-  // Not currently used; however, the nanoarrow stream implementation should
-  // accept an ArrowBufferAllocator so that we can plug this in (or we should
-  // wrap the ArrowIpcDecoder ourselves)
-  Allocator& allocator;
-  std::string src_string;
-  nanoarrow::UniqueArrayStream stream;
-  ArrowError error{};
-};
-
 struct ReadArrowStream2 {
   // Define the function. Unlike arrow_scan(), which takes integer pointers
   // as arguments, we keep the factory alive by making it a member of the bind
   // data (instead of as a Python object whose ownership is kept alive via the
   // DependencyItem mechanism).
   static TableFunction Function() {
-    TableFunction fn("read_arrow_stream2", {LogicalType::VARCHAR}, Scan, Bind,
-                     ArrowTableFunction::ArrowScanInitGlobal,
-                     ArrowTableFunction::ArrowScanInitLocal);
+    TableFunction fn("read_arrow_stream2", {LogicalType::VARCHAR}, Scan, Bind);
     fn.cardinality = Cardinality;
     fn.projection_pushdown = true;
     fn.filter_pushdown = false;
@@ -413,12 +396,13 @@ struct ReadArrowStream2 {
 
   // Our FunctionData is the same as the ArrowScanFunctionData except we extend it
   // it to keep the ArrowIpcArrowArrayStreamFactory alive.
-  struct Data : public ArrowScanFunctionData {
-    Data(std::unique_ptr<ArrowIpcArrowArrayStreamFactory> factory)
-        : ArrowScanFunctionData(ArrowIpcArrowArrayStreamFactory::Produce,
-                                reinterpret_cast<uintptr_t>(factory.get())),
-          factory(std::move(factory)) {}
-    std::unique_ptr<ArrowIpcArrowArrayStreamFactory> factory;
+  struct Data : public TableFunctionData {
+    Data(std::unique_ptr<IpcStreamReader> reader) : reader(std::move(reader)) {}
+
+    std::unique_ptr<IpcStreamReader> reader;
+    ArrowTableType table_type;
+    ArrowSchemaWrapper schema_root;
+    vector<LogicalType> schema_root_types;
   };
 
   // Our Bind() function is differenct from the arrow_scan because our input
@@ -439,21 +423,31 @@ struct ReadArrowStream2 {
   static unique_ptr<FunctionData> BindInternal(ClientContext& context, std::string src,
                                                vector<LogicalType>& return_types,
                                                vector<string>& names) {
-    auto stream_factory = make_uniq<ArrowIpcArrowArrayStreamFactory>(context, src);
-    auto res = make_uniq<Data>(std::move(stream_factory));
-    res->factory->InitStream();
-    res->factory->GetSchema(res->schema_root);
+    FileSystem& fs = FileSystem::GetFileSystem(context);
+    unique_ptr<FileHandle> handle = fs.OpenFile(src, FileOpenFlags::FILE_FLAGS_READ);
+    Allocator& allocator = Allocator::Get(context);
 
-    ArrowTableFunction::PopulateArrowTableType(res->arrow_table, res->schema_root, names,
-                                               return_types);
+    auto reader = make_uniq<IpcStreamReader>(fs, std::move(handle), allocator);
+    auto res = make_uniq<Data>(std::move(reader));
+
+    // Pull the schema and store it how DuckDB expects it to be
+    NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(res->reader->GetFileSchema(),
+                                               &res->schema_root.arrow_schema));
+
+    // Populate names. This will also pull the schema from the source.
+    res->reader->PopulateNames(names);
     QueryResult::DeduplicateColumns(names);
-    res->all_types = return_types;
+
+    ArrowTableFunction::PopulateArrowTableType(res->table_type, res->schema_root, names,
+                                               return_types);
+
+    res->schema_root_types = return_types;
     if (return_types.empty()) {
       throw InvalidInputException(
           "Provided table/dataframe must have at least one column");
     }
 
-    return unique_ptr<FunctionData>(res.release());
+    return std::move(res);
   }
 
   // This is almost the same as ArrowTableFunction::Scan() except we need to pass
@@ -503,38 +497,6 @@ struct ReadArrowStream2 {
     return make_uniq<NodeStatistics>();
   }
 };
-
-// Implementation of the ArrowIpcInputStream wrapper around DuckDB's input stream
-struct DuckDBArrowInputStream {
-  unique_ptr<FileHandle> handle;
-
-  static ArrowErrorCode Read(ArrowIpcInputStream* stream, uint8_t* buf,
-                             int64_t buf_size_bytes, int64_t* size_read_out,
-                             ArrowError* error) {
-    try {
-      auto private_data = reinterpret_cast<DuckDBArrowInputStream*>(stream->private_data);
-      *size_read_out = private_data->handle->Read(buf, buf_size_bytes);
-      return NANOARROW_OK;
-    } catch (std::exception& e) {
-      ArrowErrorSet(error, "Uncaught exception in DuckDBArrowInputStream::Read(): %s",
-                    e.what());
-      return EIO;
-    }
-  }
-
-  static void Release(ArrowIpcInputStream* stream) {
-    auto private_data = reinterpret_cast<DuckDBArrowInputStream*>(stream->private_data);
-    private_data->handle->Close();
-    delete private_data;
-  }
-};
-
-inline void InitDuckDBInputStream(unique_ptr<FileHandle> handle,
-                                  ArrowIpcInputStream* out) {
-  out->private_data = new DuckDBArrowInputStream{std::move(handle)};
-  out->read = &DuckDBArrowInputStream::Read;
-  out->release = &DuckDBArrowInputStream::Release;
-}
 
 }  // namespace
 
