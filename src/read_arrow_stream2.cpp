@@ -55,6 +55,92 @@ class IpcStreamReader {
     NANOARROW_THROW_NOT_OK(ArrowIpcDecoderInit(decoder.get()));
   }
 
+  const ArrowSchema* GetFileSchema() {
+    if (file_schema->release) {
+      return file_schema.get();
+    }
+
+    ReadNextMessage({NANOARROW_IPC_MESSAGE_TYPE_SCHEMA}, /*end_of_stream_ok*/ false);
+    THROW_NOT_OK(IOException, &error,
+                 ArrowIpcDecoderDecodeSchema(decoder.get(), file_schema.get(), &error));
+    return file_schema.get();
+  }
+
+  bool HasProjection() { return !projected_fields.empty(); }
+
+  const ArrowSchema* GetOuputSchema() {
+    if (HasProjection()) {
+      return projected_schema.get();
+    } else {
+      return file_schema.get();
+    }
+  }
+
+  void SetColumnProjection(vector<string> column_names) {
+    if (column_names.size() == 0) {
+      throw InternalException("Can't request zero fields projected from IpcStreamReader");
+    }
+
+    GetFileSchema();
+
+    nanoarrow::UniqueSchema projected_schema;
+    ArrowSchemaInit(projected_schema.get());
+    NANOARROW_THROW_NOT_OK(ArrowSchemaSetTypeStruct(
+        projected_schema.get(), UnsafeNumericCast<int64_t>(column_names.size())));
+
+    // The ArrowArray builder needs the flattened field index, which we need to
+    // keep track of.
+    unordered_map<string, pair<idx_t, const ArrowSchema*>> name_to_flat_field_map;
+
+    // Duplicate column names are in theory fine as long as they are not queried,
+    // so we need to make a list of them to check.
+    unordered_set<string> duplicate_column_names;
+
+    // Loop over columns to build the field map
+    idx_t field_count = 0;
+    for (int64_t i = 0; i < file_schema->n_children; i++) {
+      const ArrowSchema* column = file_schema->children[i];
+      string name;
+      if (!column->name) {
+        name = "";
+      } else {
+        name = column->name;
+      }
+
+      if (name_to_flat_field_map.find(name) != name_to_flat_field_map.end()) {
+        duplicate_column_names.insert(name);
+      }
+
+      name_to_flat_field_map.insert({name, {field_count, column}});
+
+      field_count += CountFields(column);
+    }
+
+    // Loop over projected column names to build the projection information
+    int64_t output_column_index = 0;
+    for (const auto& column_name : column_names) {
+      if (duplicate_column_names.find(column_name) != duplicate_column_names.end()) {
+        throw InternalException(string("Field '") + column_name +
+                                "' refers to a duplicate column name in IPC file schema");
+      }
+
+      auto field_id_item = name_to_flat_field_map.find(column_name);
+      if (field_id_item == name_to_flat_field_map.end()) {
+        throw InternalException(string("Field '") + column_name +
+                                "' does not exist in IPC file schema");
+      }
+
+      // Record the flat field index for this column
+      projected_fields.push_back(field_id_item->second.first);
+
+      // Record the Schema for this column
+      NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(
+          field_id_item->second.second, projected_schema->children[output_column_index]));
+
+      ++output_column_index;
+    }
+  }
+
  private:
   nanoarrow::ipc::UniqueDecoder decoder{};
   bool finished{false};
@@ -66,19 +152,47 @@ class IpcStreamReader {
   AllocatedData message_header;
   shared_ptr<AllocatedData> message_body;
 
-  nanoarrow::UniqueSchema schema;
+  nanoarrow::UniqueSchema file_schema;
+  nanoarrow::UniqueSchema projected_schema;
+  vector<idx_t> projected_fields;
 
-  static ArrowBufferView AllocatedDataView(const AllocatedData& data) {
-    ArrowBufferView view;
-    view.data.data = data.get();
-    view.size_bytes = UnsafeNumericCast<int64_t>(data.GetSize());
-    return view;
+  ArrowIpcMessageType ReadNextMessage(vector<ArrowIpcMessageType> expected_types,
+                                      bool end_of_stream_ok = true) {
+    ArrowIpcMessageType actual_type = ReadNextMessage();
+    if (end_of_stream_ok && actual_type == NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED) {
+      return actual_type;
+    }
+
+    for (const auto expected_type : expected_types) {
+      if (expected_type == actual_type) {
+        return actual_type;
+      }
+    }
+
+    std::stringstream expected_types_label;
+    for (size_t i = 0; i < expected_types.size(); i++) {
+      if (i > 0) {
+        expected_types_label << " or ";
+      }
+
+      expected_types_label << MessageTypeString(expected_types[i]);
+    }
+
+    string actual_type_label;
+    if (actual_type == NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED) {
+      actual_type_label = "end of stream";
+    } else {
+      actual_type_label = MessageTypeString(actual_type);
+    }
+
+    throw IOException(string("Expected ") + expected_types_label.str() +
+                      " Arrow IPC message but got " + actual_type_label);
   }
 
   ArrowIpcMessageType ReadNextMessage() {
     if (finished || file_reader.Finished()) {
       finished = true;
-      return ArrowIpcMessageType::NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+      return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
     }
 
     // If there is no more data to be read, we're done!
@@ -88,7 +202,7 @@ class IpcStreamReader {
                            sizeof(message_prefix));
     } catch (SerializationException& e) {
       finished = true;
-      return ArrowIpcMessageType::NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+      return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
     }
 
     if (message_prefix.continuation_token != kContinuationToken) {
@@ -148,6 +262,40 @@ class IpcStreamReader {
     }
 
     D_ASSERT((file_reader.CurrentOffset() % 8) == 0);
+  }
+
+  static idx_t CountFields(const ArrowSchema* schema) {
+    idx_t n_fields = 1;
+    for (int64_t i = 0; i < schema->n_children; i++) {
+      n_fields += CountFields(schema->children[i]);
+    }
+    return n_fields;
+  }
+
+  static ArrowBufferView AllocatedDataView(const AllocatedData& data) {
+    ArrowBufferView view;
+    view.data.data = data.get();
+    view.size_bytes = UnsafeNumericCast<int64_t>(data.GetSize());
+    return view;
+  }
+
+  static const char* MessageTypeString(ArrowIpcMessageType message_type) {
+    switch (message_type) {
+      case NANOARROW_IPC_MESSAGE_TYPE_SCHEMA:
+        return "Schema";
+      case NANOARROW_IPC_MESSAGE_TYPE_RECORD_BATCH:
+        return "RecordBatch";
+      case NANOARROW_IPC_MESSAGE_TYPE_DICTIONARY_BATCH:
+        return "DictionaryBatch";
+      case NANOARROW_IPC_MESSAGE_TYPE_TENSOR:
+        return "Tensor";
+      case NANOARROW_IPC_MESSAGE_TYPE_SPARSE_TENSOR:
+        return "SparseTensor";
+      case NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED:
+        return "Uninitialized";
+      default:
+        return "";
+    }
   }
 
   static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
