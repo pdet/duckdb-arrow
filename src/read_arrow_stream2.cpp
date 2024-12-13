@@ -356,13 +356,121 @@ class IpcStreamReader {
   static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
 };
 
+class IpcArrayStream {
+ public:
+  IpcArrayStream(unique_ptr<IpcStreamReader> reader) : reader(std::move(reader)) {}
+
+  IpcStreamReader& Reader() { return *reader; }
+
+  void ToArrayStream(ArrowArrayStream* stream) {
+    nanoarrow::ArrayStreamFactory<IpcArrayStream>::InitArrayStream(
+        new IpcArrayStream(std::move(reader)), stream);
+  }
+
+  int GetSchema(ArrowSchema* schema) {
+    return Wrap([&]() {
+      NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(reader->GetOutputSchema(), schema));
+    });
+  }
+
+  int GetNext(ArrowArray* array) {
+    return Wrap([&]() { reader->GetNextBatch(array); });
+  }
+
+  const char* GetLastError() { return last_msg.c_str(); }
+
+ private:
+  unique_ptr<IpcStreamReader> reader;
+  string last_msg;
+
+  template <typename Func>
+  int Wrap(Func&& func) {
+    try {
+      func();
+      return NANOARROW_OK;
+    } catch (IOException& e) {
+      last_msg = std::string("IOException: ") + e.what();
+      return EIO;
+    } catch (InternalException& e) {
+      last_msg = std::string("InternalException: ") + e.what();
+      return EINVAL;
+    } catch (nanoarrow::Exception& e) {
+      last_msg = std::string("nanoarrow::Exception: ") + e.what();
+      // Could probably find a way to pass on this code, usually ENOMEM
+      return ENOMEM;
+    } catch (std::exception& e) {
+      last_msg = e.what();
+      return EINVAL;
+    }
+  }
+};
+
+// This Factory is a type invented by DuckDB. Notably, the Produce()
+// function pointer is passed to the constructor of the ArrowScanFunctionData
+// constructor (which we wrap).
+class ArrowIpcArrowArrayStreamFactory {
+ public:
+  explicit ArrowIpcArrowArrayStreamFactory(ClientContext& context,
+                                           const std::string& src_string)
+      : fs(FileSystem::GetFileSystem(context)),
+        allocator(BufferAllocator::Get(context)),
+        src_string(src_string) {};
+
+  // Called once when initializing Scan States
+  static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr,
+                                                     ArrowStreamParameters& parameters) {
+    auto factory = static_cast<ArrowIpcArrowArrayStreamFactory*>(
+        reinterpret_cast<void*>(factory_ptr));
+
+    if (!factory->reader) {
+      throw InternalException("IpcStreamReader was not initialized or was already moved");
+    }
+
+    factory->reader->SetColumnProjection(parameters.projected_columns.columns);
+
+    auto out = make_uniq<ArrowArrayStreamWrapper>();
+    IpcArrayStream(std::move(factory->reader)).ToArrayStream(&out->arrow_array_stream);
+    return out;
+  }
+
+  // Get the schema of the arrow object
+  void GetFileSchema(ArrowSchemaWrapper& schema) {
+    if (!reader) {
+      throw InternalException("IpcStreamReader is no longer valid");
+    }
+
+    NANOARROW_THROW_NOT_OK(
+        ArrowSchemaDeepCopy(reader->GetFileSchema(), &schema.arrow_schema));
+  }
+
+  // Opens the file, wraps it in the ArrowIpcInputStream, and wraps it in
+  // the ArrowArrayStream reader.
+  void InitReader() {
+    if (reader) {
+      throw InternalException("ArrowArrayStream or IpcStreamReader already initialized");
+    }
+
+    unique_ptr<FileHandle> handle =
+        fs.OpenFile(src_string, FileOpenFlags::FILE_FLAGS_READ);
+    reader = make_uniq<IpcStreamReader>(fs, std::move(handle), allocator);
+  }
+
+  FileSystem& fs;
+  Allocator& allocator;
+  std::string src_string;
+  unique_ptr<IpcStreamReader> reader;
+  ArrowError error{};
+};
+
 struct ReadArrowStream2 {
   // Define the function. Unlike arrow_scan(), which takes integer pointers
   // as arguments, we keep the factory alive by making it a member of the bind
   // data (instead of as a Python object whose ownership is kept alive via the
   // DependencyItem mechanism).
   static TableFunction Function() {
-    TableFunction fn("read_arrow_stream2", {LogicalType::VARCHAR}, Scan, Bind);
+    TableFunction fn("read_arrow_stream2", {LogicalType::VARCHAR}, Scan, Bind,
+                     ArrowTableFunction::ArrowScanInitGlobal,
+                     ArrowTableFunction::ArrowScanInitLocal);
     fn.cardinality = Cardinality;
     fn.projection_pushdown = true;
     fn.filter_pushdown = false;
@@ -383,7 +491,7 @@ struct ReadArrowStream2 {
     auto table_name_expr = make_uniq<ConstantExpression>(Value(table_name));
     children.push_back(std::move(table_name_expr));
     auto function_expr =
-        make_uniq<FunctionExpression>("read_arrow_stream2", std::move(children));
+        make_uniq<FunctionExpression>("read_arrow_stream", std::move(children));
     table_function->function = std::move(function_expr);
 
     if (!FileSystem::HasGlob(table_name)) {
@@ -396,16 +504,15 @@ struct ReadArrowStream2 {
 
   // Our FunctionData is the same as the ArrowScanFunctionData except we extend it
   // it to keep the ArrowIpcArrowArrayStreamFactory alive.
-  struct Data : public TableFunctionData {
-    Data(std::unique_ptr<IpcStreamReader> reader) : reader(std::move(reader)) {}
-
-    std::unique_ptr<IpcStreamReader> reader;
-    ArrowTableType table_type;
-    ArrowSchemaWrapper schema_root;
-    vector<LogicalType> schema_root_types;
+  struct Data : public ArrowScanFunctionData {
+    Data(std::unique_ptr<ArrowIpcArrowArrayStreamFactory> factory)
+        : ArrowScanFunctionData(ArrowIpcArrowArrayStreamFactory::Produce,
+                                reinterpret_cast<uintptr_t>(factory.get())),
+          factory(std::move(factory)) {}
+    std::unique_ptr<ArrowIpcArrowArrayStreamFactory> factory;
   };
 
-  // Our Bind() function is differenct from the arrow_scan because our input
+  // Our Bind() function is different from the arrow_scan because our input
   // is a filename (and their input is three pointer addresses).
   static unique_ptr<FunctionData> Bind(ClientContext& context,
                                        TableFunctionBindInput& input,
@@ -423,25 +530,15 @@ struct ReadArrowStream2 {
   static unique_ptr<FunctionData> BindInternal(ClientContext& context, std::string src,
                                                vector<LogicalType>& return_types,
                                                vector<string>& names) {
-    FileSystem& fs = FileSystem::GetFileSystem(context);
-    unique_ptr<FileHandle> handle = fs.OpenFile(src, FileOpenFlags::FILE_FLAGS_READ);
-    Allocator& allocator = Allocator::Get(context);
+    auto stream_factory = make_uniq<ArrowIpcArrowArrayStreamFactory>(context, src);
+    auto res = make_uniq<Data>(std::move(stream_factory));
+    res->factory->InitReader();
+    res->factory->GetFileSchema(res->schema_root);
 
-    auto reader = make_uniq<IpcStreamReader>(fs, std::move(handle), allocator);
-    auto res = make_uniq<Data>(std::move(reader));
-
-    // Pull the schema and store it how DuckDB expects it to be
-    NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(res->reader->GetFileSchema(),
-                                               &res->schema_root.arrow_schema));
-
-    // Populate names. This will also pull the schema from the source.
-    res->reader->PopulateNames(names);
-    QueryResult::DeduplicateColumns(names);
-
-    ArrowTableFunction::PopulateArrowTableType(res->table_type, res->schema_root, names,
+    ArrowTableFunction::PopulateArrowTableType(res->arrow_table, res->schema_root, names,
                                                return_types);
-
-    res->schema_root_types = return_types;
+    QueryResult::DeduplicateColumns(names);
+    res->all_types = return_types;
     if (return_types.empty()) {
       throw InvalidInputException(
           "Provided table/dataframe must have at least one column");
@@ -450,45 +547,9 @@ struct ReadArrowStream2 {
     return std::move(res);
   }
 
-  // This is almost the same as ArrowTableFunction::Scan() except we need to pass
-  // arrow_scan_is_projected = false to ArrowToDuckDB(). It's a bit unfortunate
-  // we have to copy this much (although the spatial extension also copies this
-  // as it does something vaguely similar).
   static void Scan(ClientContext& context, TableFunctionInput& data_p,
                    DataChunk& output) {
-    if (!data_p.local_state) {
-      return;
-    }
-    auto& data = data_p.bind_data->CastNoConst<ArrowScanFunctionData>();  // FIXME
-    auto& state = data_p.local_state->Cast<ArrowScanLocalState>();
-    auto& global_state = data_p.global_state->Cast<ArrowScanGlobalState>();
-
-    //! Out of tuples in this chunk
-    if (state.chunk_offset >= (idx_t)state.chunk->arrow_array.length) {
-      if (!ArrowTableFunction::ArrowScanParallelStateNext(context, data_p.bind_data.get(),
-                                                          state, global_state)) {
-        return;
-      }
-    }
-    auto output_size = MinValue<idx_t>(
-        STANDARD_VECTOR_SIZE,
-        NumericCast<idx_t>(state.chunk->arrow_array.length) - state.chunk_offset);
-    data.lines_read += output_size;
-    if (global_state.CanRemoveFilterColumns()) {
-      state.all_columns.Reset();
-      state.all_columns.SetCardinality(output_size);
-      ArrowTableFunction::ArrowToDuckDB(state, data.arrow_table.GetColumns(),
-                                        state.all_columns, data.lines_read - output_size,
-                                        false);
-      output.ReferenceColumns(state.all_columns, global_state.projection_ids);
-    } else {
-      output.SetCardinality(output_size);
-      ArrowTableFunction::ArrowToDuckDB(state, data.arrow_table.GetColumns(), output,
-                                        data.lines_read - output_size, false);
-    }
-
-    output.Verify();
-    state.chunk_offset += output.size();
+    ArrowTableFunction::ArrowScanFunction(context, data_p, output);
   }
 
   // Identical to the ArrowTableFunction, but that version is marked protected
