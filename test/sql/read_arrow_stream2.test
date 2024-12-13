@@ -48,3 +48,9 @@ query I
 SELECT count(*) from read_arrow_stream2('__WORKING_DIRECTORY__/data/test.arrows') WHERE dayname(time::TIMESTAMP) = 'Wednesday';
 ----
 2927
+
+# Check that we can also read the arrow file format
+query I
+SELECT count(*) from read_arrow_stream2('__WORKING_DIRECTORY__/data/test.arrow') WHERE dayname(time::TIMESTAMP) = 'Wednesday';
+----
+2927

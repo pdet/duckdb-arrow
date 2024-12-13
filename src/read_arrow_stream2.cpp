@@ -17,25 +17,18 @@
 
 #include "nanoarrow_errors.hpp"
 
-// read_arrow_stream() implementation
+// read_arrow_stream2() implementation
 //
-// This currently uses the "easy" IPC Reader route, which wraps
-// an ArrowIpcInputStream (wrapper around a FileHandle) with an
-// ArrowArrayStream implementation. This works but involves copying
-// quite a lot of DuckDB's internals and doesn't use DuckDB's allocator,
-// Really this should use the ArrowIpcEncoder() and implement the various
-// pieces of the scan specific to Arrow IPC.
+// Same results as read_arrow_stream(), but this version uses the
+// ArrowIpcDecoder directly. This lets it use DuckDB's allocator at the
+// expense of a bit more verbosity. Because we can apply the projection
+// it reduces some of the verbosity of the actual DuckDB part (although the
+// ArrayStreamReader from nanoarrow could support a projection, which
+// would handle that too).
 //
-// This version is based on the Python scanner; the ArrowArrayStreamWrapper
-// was discovered towards the end of writing this. We probably do want the
-// version based on the Python scanner (and when we support Arrow files,
-// this will make a bit more sense, since we'll have a queue of record batch
-// file offsets instead of an indeterminate stream.
-//
-// DuckDB could improve this process by making it easier
-// to build an efficient file scanner around an ArrowArrayStream;
-// nanoarrow could make this easier by allowing the ArrowIpcArrayStreamReader
-// to plug in an ArrowBufferAllocator().
+// I like this version better than the simpler one, and there are more parts
+// that could get optimized here (whereas with the array stream version you
+// don't have much control).
 
 namespace duckdb {
 
@@ -121,11 +114,11 @@ class IpcStreamReader {
 
     nanoarrow::UniqueArray array;
     ArrowBufferView body_view = AllocatedDataView(*message_body);
-    // Can use this to get around the no-custom-allocator thing in a sec
-    // THROW_NOT_OK(InternalException, &error,
-    //              ArrowArrayInitFromSchema(array.get(), GetOutputSchema(), &error));
-    // ArrowIpcDecoderDecodeArrayView() + nanoarrow::BufferInit<> to borrow buffers from
-    // the message_body.
+
+    // There is a way to actually get zero copy here...probably the ArrowIpcSharedBuffer
+    // approach is easiest but we can also work with the array view directly and borrow
+    // the requisite buffers using nanoarrow::BufferInit<> to add references to the
+    // shared_ptr<AllocatedData>.
 
     if (HasProjection()) {
       NANOARROW_THROW_NOT_OK(ArrowArrayInitFromType(array.get(), NANOARROW_TYPE_STRUCT));
@@ -134,19 +127,18 @@ class IpcStreamReader {
 
       for (int64_t i = 0; i < array->n_children; i++) {
         THROW_NOT_OK(InternalException, &error,
-                     ArrowIpcDecoderDecodeArray(
-                         decoder.get(), body_view, projected_fields[i],
-                         array->children[i], NANOARROW_VALIDATION_LEVEL_DEFAULT, &error));
+                     ArrowIpcDecoderDecodeArray(decoder.get(), body_view,
+                                                projected_fields[i], array->children[i],
+                                                NANOARROW_VALIDATION_LEVEL_FULL, &error));
       }
 
       D_ASSERT(array->n_children > 0);
       array->length = array->children[0]->length;
       array->null_count = 0;
     } else {
-      THROW_NOT_OK(
-          InternalException, &error,
-          ArrowIpcDecoderDecodeArray(decoder.get(), body_view, -1, array.get(),
-                                     NANOARROW_VALIDATION_LEVEL_DEFAULT, &error));
+      THROW_NOT_OK(InternalException, &error,
+                   ArrowIpcDecoderDecodeArray(decoder.get(), body_view, -1, array.get(),
+                                              NANOARROW_VALIDATION_LEVEL_FULL, &error));
     }
 
     ArrowArrayMove(array.get(), out);
@@ -283,6 +275,20 @@ class IpcStreamReader {
     } catch (SerializationException& e) {
       finished = true;
       return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+    }
+
+    // If we're at the beginning of the read and we see the Arrow file format
+    // header bytes, skip them and try to read the stream anyway. This works because
+    // there's a full stream within an Arrow file (including the EOS indicator, which
+    // is key to success. This EOS indicator is unfortunately missing in Rust releases
+    // prior to ~September 2024).
+    //
+    // When we support dictionary encoding we will possibly need to seek to the footer
+    // here, parse that, and maybe lazily seek and read dictionaries for if/when they are
+    // required.
+    if (file_reader.CurrentOffset() == 8 &&
+        std::memcmp("ARROW1\0\0", &message_prefix, 8) == 0) {
+      return ReadNextMessage();
     }
 
     if (message_prefix.continuation_token != kContinuationToken) {
