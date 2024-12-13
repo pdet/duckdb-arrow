@@ -61,8 +61,26 @@ class IpcStreamReader {
     }
 
     ReadNextMessage({NANOARROW_IPC_MESSAGE_TYPE_SCHEMA}, /*end_of_stream_ok*/ false);
+
+    // Error for features we don't support
+    if (decoder->feature_flags & NANOARROW_IPC_FEATURE_COMPRESSED_BODY) {
+      throw IOException("This stream uses unsupported feature COMPRESSED_BODY");
+    }
+
+    if (decoder->feature_flags & NANOARROW_IPC_FEATURE_DICTIONARY_REPLACEMENT) {
+      throw IOException("This stream uses unsupported feature DICTIONARY_REPLACEMENT");
+    }
+
+    // Decode the schema
     THROW_NOT_OK(IOException, &error,
                  ArrowIpcDecoderDecodeSchema(decoder.get(), file_schema.get(), &error));
+
+    // Set up the decoder to decode batches
+    THROW_NOT_OK(InternalException, &error,
+                 ArrowIpcDecoderSetEndianness(decoder.get(), decoder->endianness));
+    THROW_NOT_OK(InternalException, &error,
+                 ArrowIpcDecoderSetSchema(decoder.get(), file_schema.get(), &error));
+
     return file_schema.get();
   }
 
@@ -120,6 +138,10 @@ class IpcStreamReader {
                          decoder.get(), body_view, projected_fields[i],
                          array->children[i], NANOARROW_VALIDATION_LEVEL_DEFAULT, &error));
       }
+
+      D_ASSERT(array->n_children > 0);
+      array->length = array->children[0]->length;
+      array->null_count = 0;
     } else {
       THROW_NOT_OK(
           InternalException, &error,
@@ -136,12 +158,13 @@ class IpcStreamReader {
       throw InternalException("Can't request zero fields projected from IpcStreamReader");
     }
 
+    // Ensure we have a file schema to work with
     GetFileSchema();
 
-    nanoarrow::UniqueSchema projected_schema;
-    ArrowSchemaInit(projected_schema.get());
+    nanoarrow::UniqueSchema schema;
+    ArrowSchemaInit(schema.get());
     NANOARROW_THROW_NOT_OK(ArrowSchemaSetTypeStruct(
-        projected_schema.get(), UnsafeNumericCast<int64_t>(column_names.size())));
+        schema.get(), UnsafeNumericCast<int64_t>(column_names.size())));
 
     // The ArrowArray builder needs the flattened field index, which we need to
     // keep track of.
@@ -189,11 +212,13 @@ class IpcStreamReader {
       projected_fields.push_back(field_id_item->second.first);
 
       // Record the Schema for this column
-      NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(
-          field_id_item->second.second, projected_schema->children[output_column_index]));
+      NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(field_id_item->second.second,
+                                                 schema->children[output_column_index]));
 
       ++output_column_index;
     }
+
+    projected_schema = std::move(schema);
   }
 
  private:
@@ -291,9 +316,14 @@ class IpcStreamReader {
     file_reader.ReadData(message_header.get() + sizeof(message_prefix),
                          message_prefix.metadata_size);
 
-    THROW_NOT_OK(IOException, &error,
-                 ArrowIpcDecoderDecodeHeader(decoder.get(),
-                                             AllocatedDataView(message_header), &error));
+    ArrowErrorCode decode_header_status = ArrowIpcDecoderDecodeHeader(
+        decoder.get(), AllocatedDataView(message_header), &error);
+    if (decode_header_status == ENODATA) {
+      finished = true;
+      return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+    } else {
+      THROW_NOT_OK(IOException, &error, decode_header_status);
+    }
 
     if (decoder->body_size_bytes > 0) {
       EnsureInputStreamAligned();
@@ -426,7 +456,9 @@ class ArrowIpcArrowArrayStreamFactory {
       throw InternalException("IpcStreamReader was not initialized or was already moved");
     }
 
-    factory->reader->SetColumnProjection(parameters.projected_columns.columns);
+    if (!parameters.projected_columns.columns.empty()) {
+      factory->reader->SetColumnProjection(parameters.projected_columns.columns);
+    }
 
     auto out = make_uniq<ArrowArrayStreamWrapper>();
     IpcArrayStream(std::move(factory->reader)).ToArrayStream(&out->arrow_array_stream);

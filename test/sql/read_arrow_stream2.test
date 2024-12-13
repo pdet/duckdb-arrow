@@ -1,4 +1,4 @@
-# name: test/sql/read_arrow_stream.test
+# name: test/sql/read_arrow_stream2.test
 # description: test nanoarrow extension
 # group: [nanoarrow]
 
@@ -10,7 +10,7 @@ statement ok
 COPY (SELECT 42 as foofy, 'string' as stringy) TO "__TEST_DIR__/test.arrows2" (FORMAT ARROWS);
 
 query II
-SELECT * FROM read_arrow_stream('__TEST_DIR__/test.arrows2');
+SELECT * FROM read_arrow_stream2('__TEST_DIR__/test.arrows2');
 ----
 42	string
 
@@ -22,12 +22,12 @@ SELECT * FROM "__TEST_DIR__/test.arrows2";
 
 # Make sure these project correctly
 query I
-SELECT foofy FROM read_arrow_stream('__TEST_DIR__/test.arrows2')
+SELECT foofy FROM read_arrow_stream2('__TEST_DIR__/test.arrows2')
 ----
 42
 
 query I
-SELECT stringy FROM read_arrow_stream('__TEST_DIR__/test.arrows2')
+SELECT stringy FROM read_arrow_stream2('__TEST_DIR__/test.arrows2')
 ----
 string
 
