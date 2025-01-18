@@ -7,6 +7,7 @@
 #include "duckdb/function/copy_function.hpp"
 #include "duckdb/function/table/arrow.hpp"
 #include "duckdb/function/table_function.hpp"
+#include "duckdb/main/database.hpp"
 #include "duckdb/main/extension_util.hpp"
 #include "duckdb/parser/expression/constant_expression.hpp"
 #include "duckdb/parser/expression/function_expression.hpp"
@@ -450,7 +451,7 @@ class ArrowIpcArrowArrayStreamFactory {
                                            const std::string& src_string)
       : fs(FileSystem::GetFileSystem(context)),
         allocator(BufferAllocator::Get(context)),
-        src_string(src_string) {};
+        src_string(src_string){};
 
   // Called once when initializing Scan States
   static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr,
@@ -573,8 +574,9 @@ struct ReadArrowStream2 {
     res->factory->InitReader();
     res->factory->GetFileSchema(res->schema_root);
 
-    ArrowTableFunction::PopulateArrowTableType(res->arrow_table, res->schema_root, names,
-                                               return_types);
+    DBConfig& config = DatabaseInstance::GetDatabase(context).config;
+    ArrowTableFunction::PopulateArrowTableType(config, res->arrow_table, res->schema_root,
+                                               names, return_types);
     QueryResult::DeduplicateColumns(names);
     res->all_types = return_types;
     if (return_types.empty()) {

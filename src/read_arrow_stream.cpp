@@ -5,6 +5,7 @@
 #include "duckdb/function/copy_function.hpp"
 #include "duckdb/function/table/arrow.hpp"
 #include "duckdb/function/table_function.hpp"
+#include "duckdb/main/database.hpp"
 #include "duckdb/main/extension_util.hpp"
 #include "duckdb/parser/expression/constant_expression.hpp"
 #include "duckdb/parser/expression/function_expression.hpp"
@@ -184,7 +185,8 @@ struct ReadArrowStream {
     res->factory->InitStream();
     res->factory->GetSchema(res->schema_root);
 
-    ArrowTableFunction::PopulateArrowTableType(res->arrow_table, res->schema_root, names,
+    DBConfig &config = DatabaseInstance::GetDatabase(context).config;
+    ArrowTableFunction::PopulateArrowTableType(config, res->arrow_table, res->schema_root, names,
                                                return_types);
     QueryResult::DeduplicateColumns(names);
     res->all_types = return_types;

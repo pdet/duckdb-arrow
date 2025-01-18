@@ -54,7 +54,7 @@ class ColumnDataCollectionSerializer {
   ColumnDataCollectionSerializer(ClientProperties& options, Allocator& allocator)
       : options(options), allocator(allocator) {}
 
-  void Init(ArrowSchema* schema_p) {
+  void Init(ArrowSchema* schema_p, const vector<LogicalType>& logical_types) {
     InitArrowDuckBuffer(header.get(), allocator);
     InitArrowDuckBuffer(body.get(), allocator);
     NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
@@ -62,6 +62,9 @@ class ColumnDataCollectionSerializer {
                  ArrowArrayViewInitFromSchema(chunk_view.get(), schema_p, &error));
 
     schema = schema_p;
+
+    auto extension_types =
+        ArrowTypeExtensionData::GetExtensionTypes(*options.client_context, logical_types);
   }
 
   void SerializeSchema() {
@@ -94,7 +97,8 @@ class ColumnDataCollectionSerializer {
     }
 
     chunk_arrow.reset();
-    converter.ToArrowArray(chunk, chunk_arrow.get(), options);
+
+    converter.ToArrowArray(chunk, chunk_arrow.get(), options, extension_types);
     THROW_NOT_OK(InternalException, &error,
                  ArrowArrayViewSetArray(chunk_view.get(), chunk_arrow.get(), &error));
 
@@ -117,6 +121,7 @@ class ColumnDataCollectionSerializer {
   ClientProperties options;
   Allocator& allocator;
   ArrowSchema* schema{};
+  unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>> extension_types;
   nanoarrow::ipc::UniqueEncoder encoder;
   ArrowConverter converter;
   nanoarrow::UniqueArrayView chunk_view;
@@ -134,7 +139,8 @@ struct ArrowStreamWriter {
       : options(context.GetClientProperties()),
         allocator(BufferAllocator::Get(context)),
         serializer(options, allocator),
-        file_name(file_path) {
+        file_name(file_path),
+        logical_types(logical_types) {
     InitSchema(logical_types, column_names, metadata);
     InitOutputFile(fs, file_path);
   }
@@ -165,7 +171,7 @@ struct ArrowStreamWriter {
           schema.get(), reinterpret_cast<char*>(metadata_packed->data)));
     }
 
-    serializer.Init(schema.get());
+    serializer.Init(schema.get(), logical_types);
   }
 
   void InitOutputFile(FileSystem& fs, const string& file_path) {
@@ -181,7 +187,7 @@ struct ArrowStreamWriter {
 
   unique_ptr<ColumnDataCollectionSerializer> NewSerializer() {
     auto serializer = make_uniq<ColumnDataCollectionSerializer>(options, allocator);
-    serializer->Init(schema.get());
+    serializer->Init(schema.get(), logical_types);
     return serializer;
   }
 
@@ -212,6 +218,7 @@ struct ArrowStreamWriter {
   Allocator& allocator;
   ColumnDataCollectionSerializer serializer;
   string file_name;
+  vector<LogicalType> logical_types;
   unique_ptr<BufferedFileWriter> writer;
   idx_t row_group_count{0};
   nanoarrow::UniqueSchema schema;
