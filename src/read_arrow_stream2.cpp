@@ -53,9 +53,7 @@ class IpcStreamReader {
   IpcStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator)
       : decoder(NewDuckDBArrowDecoder()),
         file_reader(fs, std::move(handle)),
-        allocator(allocator) {
-    NANOARROW_THROW_NOT_OK(ArrowIpcDecoderInit(decoder.get()));
-  }
+        allocator(allocator) {}
 
   const ArrowSchema* GetFileSchema() {
     if (file_schema->release) {
@@ -638,7 +636,10 @@ nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder() {
 
   nanoarrow::ipc::UniqueDecoder decoder;
   NANOARROW_THROW_NOT_OK(ArrowIpcDecoderInit(decoder.get()));
-  ArrowIpcDecoderSetDecompressor(decoder.get(), decompressor.get());
+  NANOARROW_THROW_NOT_OK(
+      ArrowIpcDecoderSetDecompressor(decoder.get(), decompressor.get()));
+  // Bug in nanoarrow!
+  decompressor->release = nullptr;
   return decoder;
 }
 
