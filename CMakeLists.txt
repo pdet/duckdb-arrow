@@ -4,13 +4,11 @@ include(FetchContent)
 # Set extension name here
 set(TARGET_NAME nanoarrow)
 
-set(DUCKDB_NANOARROW_TARGET_VERSION "0.6.0")
 set(NANOARROW_IPC ON)
 set(NANOARROW_NAMESPACE "DuckDBExt${TARGET_NAME}")
 fetchcontent_declare(nanoarrow
-                     URL "https://www.apache.org/dyn/closer.lua?action=download&filename=arrow/apache-arrow-nanoarrow-${DUCKDB_NANOARROW_TARGET_VERSION}/apache-arrow-nanoarrow-${DUCKDB_NANOARROW_TARGET_VERSION}.tar.gz"
-                         "https://github.com/apache/arrow-nanoarrow/releases/download/apache-arrow-nanoarrow-${DUCKDB_NANOARROW_TARGET_VERSION}/apache-arrow-nanoarrow-${DUCKDB_NANOARROW_TARGET_VERSION}.tar.gz"
-                     URL_HASH SHA256=e4a02ac51002ad1875bf09317e70adb959005fad52b240ff59f73b970fa485d1
+                     URL "https://github.com/apache/arrow-nanoarrow/archive/4bf5a9322626e95e3717e43de7616c0a256179eb.zip"
+                     URL_HASH SHA256=49d588ee758a2a1d099ed4525c583a04adf71ce40405011e0190aa1e75e61b59
 )
 fetchcontent_makeavailable(nanoarrow)
 

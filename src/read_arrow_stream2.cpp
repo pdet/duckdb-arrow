@@ -1,8 +1,12 @@
-#include "duckdb/common/radix.hpp"
 #include "read_arrow_stream.hpp"
+
+#include <inttypes.h>
+
+#include <zstd.h>
 
 #include "duckdb/common/atomic.hpp"
 #include "duckdb/common/constants.hpp"
+#include "duckdb/common/radix.hpp"
 #include "duckdb/common/serializer/buffered_file_reader.hpp"
 #include "duckdb/function/copy_function.hpp"
 #include "duckdb/function/table/arrow.hpp"
@@ -42,10 +46,14 @@ struct ArrowIpcMessagePrefix {
   int32_t metadata_size;
 };
 
+nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder();
+
 class IpcStreamReader {
  public:
   IpcStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator)
-      : file_reader(fs, std::move(handle)), allocator(allocator) {
+      : decoder(NewDuckDBArrowDecoder()),
+        file_reader(fs, std::move(handle)),
+        allocator(allocator) {
     NANOARROW_THROW_NOT_OK(ArrowIpcDecoderInit(decoder.get()));
   }
 
@@ -55,11 +63,6 @@ class IpcStreamReader {
     }
 
     ReadNextMessage({NANOARROW_IPC_MESSAGE_TYPE_SCHEMA}, /*end_of_stream_ok*/ false);
-
-    // Error for features we don't support
-    if (decoder->feature_flags & NANOARROW_IPC_FEATURE_COMPRESSED_BODY) {
-      throw IOException("This stream uses unsupported feature COMPRESSED_BODY");
-    }
 
     if (decoder->feature_flags & NANOARROW_IPC_FEATURE_DICTIONARY_REPLACEMENT) {
       throw IOException("This stream uses unsupported feature DICTIONARY_REPLACEMENT");
@@ -598,6 +601,46 @@ struct ReadArrowStream2 {
     return make_uniq<NodeStatistics>();
   }
 };
+
+// A version of ArrowDecompressZstd that uses DuckDB's C++ namespaceified
+// zstd.h header that doesn't work with a C compiler
+static ArrowErrorCode DuckDBDecompressZstd(struct ArrowBufferView src, uint8_t* dst,
+                                           int64_t dst_size, struct ArrowError* error) {
+  size_t code = duckdb_zstd::ZSTD_decompress((void*)dst, (size_t)dst_size, src.data.data,
+                                             src.size_bytes);
+  if (duckdb_zstd::ZSTD_isError(code)) {
+    ArrowErrorSet(error,
+                  "ZSTD_decompress([buffer with %" PRId64
+                  " bytes] -> [buffer with %" PRId64 " bytes]) failed with error '%s'",
+                  src.size_bytes, dst_size, duckdb_zstd::ZSTD_getErrorName(code));
+    return EIO;
+  }
+
+  if (dst_size != (int64_t)code) {
+    ArrowErrorSet(error,
+                  "Expected decompressed size of %" PRId64 " bytes but got %" PRId64
+                  " bytes",
+                  dst_size, (int64_t)code);
+    return EIO;
+  }
+
+  return NANOARROW_OK;
+}
+
+// Create an ArrowIpcDecoder() with the appropriate decompressor set.
+// We could also define a decompressor that uses threads to parellelize
+// decompression for batches with many columns.
+nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder() {
+  nanoarrow::ipc::UniqueDecompressor decompressor;
+  NANOARROW_THROW_NOT_OK(ArrowIpcSerialDecompressor(decompressor.get()));
+  NANOARROW_THROW_NOT_OK(ArrowIpcSerialDecompressorSetFunction(
+      decompressor.get(), NANOARROW_IPC_COMPRESSION_TYPE_ZSTD, DuckDBDecompressZstd));
+
+  nanoarrow::ipc::UniqueDecoder decoder;
+  NANOARROW_THROW_NOT_OK(ArrowIpcDecoderInit(decoder.get()));
+  ArrowIpcDecoderSetDecompressor(decoder.get(), decompressor.get());
+  return decoder;
+}
 
 }  // namespace
 
