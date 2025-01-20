@@ -53,7 +53,7 @@ class ColumnDataCollectionSerializer {
   ColumnDataCollectionSerializer(ClientProperties& options, Allocator& allocator)
       : options(options), allocator(allocator) {}
 
-  void Init(ArrowSchema* schema_p, const vector<LogicalType>& logical_types) {
+  void Init(const ArrowSchema* schema_p, const vector<LogicalType>& logical_types) {
     InitArrowDuckBuffer(header.get(), allocator);
     InitArrowDuckBuffer(body.get(), allocator);
     NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
@@ -62,7 +62,7 @@ class ColumnDataCollectionSerializer {
 
     schema = schema_p;
 
-    auto extension_types =
+    extension_types =
         ArrowTypeExtensionData::GetExtensionTypes(*options.client_context, logical_types);
   }
 
@@ -119,7 +119,7 @@ class ColumnDataCollectionSerializer {
  private:
   ClientProperties options;
   Allocator& allocator;
-  ArrowSchema* schema{};
+  const ArrowSchema* schema{};
   unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>> extension_types;
   nanoarrow::ipc::UniqueEncoder encoder;
   ArrowConverter converter;
