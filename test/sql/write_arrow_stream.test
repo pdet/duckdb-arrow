@@ -1,4 +1,4 @@
-# name: test/sql/read_arrow_stream.test
+# name: test/sql/write_arrow_stream.test
 # description: test nanoarrow extension
 # group: [nanoarrow]
 
@@ -6,16 +6,16 @@
 require nanoarrow
 
 statement ok
-CREATE TABLE test AS SELECT * FROM read_arrow_stream('__WORKING_DIRECTORY__/data/test.arrows');
+CREATE TABLE test AS SELECT * FROM read_arrow('__WORKING_DIRECTORY__/data/test.arrows');
 
 statement ok
 COPY test TO '__TEST_DIR__/test.arrows' (FORMAT ARROWS, BATCH_SIZE 100)
 
 statement ok
-CREATE OR REPLACE TABLE written AS SELECT * FROM read_arrow_stream('__TEST_DIR__/test.arrows');
+CREATE OR REPLACE TABLE written AS SELECT * FROM read_arrow('__TEST_DIR__/test.arrows');
 
 query I
-SELECT count(*) FROM read_arrow_stream('__TEST_DIR__/test.arrows');
+SELECT count(*) FROM read_arrow('__TEST_DIR__/test.arrows');
 ----
 15487
 
