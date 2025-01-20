@@ -4,11 +4,8 @@
 
 #include <zstd.h>
 
-#include "duckdb/common/atomic.hpp"
-#include "duckdb/common/constants.hpp"
 #include "duckdb/common/radix.hpp"
 #include "duckdb/common/serializer/buffered_file_reader.hpp"
-#include "duckdb/function/copy_function.hpp"
 #include "duckdb/function/table/arrow.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/database.hpp"
