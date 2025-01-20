@@ -43,6 +43,17 @@ struct ArrowIpcMessagePrefix {
   int32_t metadata_size;
 };
 
+// Missing in nanoarrow_ipc.hpp
+struct UniqueSharedBuffer {
+  struct ArrowIpcSharedBuffer data{};
+
+  ~UniqueSharedBuffer() {
+    if (data.private_src.allocator.free != NULL) {
+      ArrowIpcSharedBufferReset(&data);
+    }
+  }
+};
+
 nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder();
 
 class IpcStreamReader {
@@ -111,29 +122,45 @@ class IpcStreamReader {
       return false;
     }
 
+    // Use the ArrowIpcSharedBuffer if we have thread safety (i.e., if this was
+    // compiled with a compiler that supports C11 atomics, i.e., not gcc 4.8 or
+    // MSVC)
+    bool thread_safe_shared = ArrowIpcSharedBufferIsThreadSafe();
+    struct ArrowBufferView body_view = AllocatedDataView(*message_body);
+    nanoarrow::UniqueBuffer body_shared = AllocatedDataToOwningBuffer(message_body);
+    UniqueSharedBuffer shared;
+    NANOARROW_THROW_NOT_OK(ArrowIpcSharedBufferInit(&shared.data, body_shared.get()));
+
     nanoarrow::UniqueArray array;
-    ArrowBufferView body_view = AllocatedDataView(*message_body);
-
-    // There is a way to actually get zero copy here...probably the ArrowIpcSharedBuffer
-    // approach is easiest but we can also work with the array view directly and borrow
-    // the requisite buffers using nanoarrow::BufferInit<> to add references to the
-    // shared_ptr<AllocatedData>.
-
     if (HasProjection()) {
       NANOARROW_THROW_NOT_OK(ArrowArrayInitFromType(array.get(), NANOARROW_TYPE_STRUCT));
       NANOARROW_THROW_NOT_OK(
           ArrowArrayAllocateChildren(array.get(), GetOutputSchema()->n_children));
 
-      for (int64_t i = 0; i < array->n_children; i++) {
-        THROW_NOT_OK(InternalException, &error,
-                     ArrowIpcDecoderDecodeArray(decoder.get(), body_view,
-                                                projected_fields[i], array->children[i],
-                                                NANOARROW_VALIDATION_LEVEL_FULL, &error));
+      if (thread_safe_shared) {
+        for (int64_t i = 0; i < array->n_children; i++) {
+          THROW_NOT_OK(InternalException, &error,
+                       ArrowIpcDecoderDecodeArrayFromShared(
+                           decoder.get(), &shared.data, projected_fields[i],
+                           array->children[i], NANOARROW_VALIDATION_LEVEL_FULL, &error));
+        }
+      } else {
+        for (int64_t i = 0; i < array->n_children; i++) {
+          THROW_NOT_OK(InternalException, &error,
+                       ArrowIpcDecoderDecodeArray(
+                           decoder.get(), body_view, projected_fields[i],
+                           array->children[i], NANOARROW_VALIDATION_LEVEL_FULL, &error));
+        }
       }
 
       D_ASSERT(array->n_children > 0);
       array->length = array->children[0]->length;
       array->null_count = 0;
+    } else if (thread_safe_shared) {
+      THROW_NOT_OK(InternalException, &error,
+                   ArrowIpcDecoderDecodeArrayFromShared(
+                       decoder.get(), &shared.data, -1, array.get(),
+                       NANOARROW_VALIDATION_LEVEL_FULL, &error));
     } else {
       THROW_NOT_OK(InternalException, &error,
                    ArrowIpcDecoderDecodeArray(decoder.get(), body_view, -1, array.get(),
@@ -369,6 +396,14 @@ class IpcStreamReader {
     return view;
   }
 
+  static nanoarrow::UniqueBuffer AllocatedDataToOwningBuffer(
+      shared_ptr<AllocatedData> data) {
+    nanoarrow::UniqueBuffer out;
+    nanoarrow::BufferInitWrapped(out.get(), data, data->get(),
+                                 UnsafeNumericCast<int64_t>(data->GetSize()));
+    return out;
+  }
+
   static const char* MessageTypeString(ArrowIpcMessageType message_type) {
     switch (message_type) {
       case NANOARROW_IPC_MESSAGE_TYPE_SCHEMA:
@@ -527,8 +562,7 @@ struct ReadArrowStream {
     vector<unique_ptr<ParsedExpression>> children;
     auto table_name_expr = make_uniq<ConstantExpression>(Value(table_name));
     children.push_back(std::move(table_name_expr));
-    auto function_expr =
-        make_uniq<FunctionExpression>("read_arrow", std::move(children));
+    auto function_expr = make_uniq<FunctionExpression>("read_arrow", std::move(children));
     table_function->function = std::move(function_expr);
 
     if (!FileSystem::HasGlob(table_name)) {
