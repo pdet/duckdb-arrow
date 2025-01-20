@@ -34,7 +34,6 @@ struct NanoarrowVersion {
 void LoadInternal(DatabaseInstance& db) {
   NanoarrowVersion::Register(db);
   ext_nanoarrow::RegisterReadArrowStream(db);
-  ext_nanoarrow::RegisterReadArrowStream2(db);
   ext_nanoarrow::RegisterArrowStreamCopyFunction(db);
 }
 

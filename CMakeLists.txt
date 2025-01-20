@@ -19,7 +19,7 @@ project(${TARGET_NAME})
 include_directories(src/include)
 
 set(EXTENSION_SOURCES src/nanoarrow_extension.cpp src/read_arrow_stream.cpp
-                      src/read_arrow_stream2.cpp src/write_arrow_stream.cpp)
+                      src/write_arrow_stream.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
