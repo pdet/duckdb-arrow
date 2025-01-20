@@ -1,6 +1,5 @@
 
 #include "write_arrow_stream.hpp"
-#include <thread>
 
 #include "duckdb/common/arrow/arrow_converter.hpp"
 #include "duckdb/common/serializer/buffered_file_writer.hpp"
@@ -10,7 +9,7 @@
 #include "nanoarrow/nanoarrow_ipc.hpp"
 
 #include "nanoarrow_errors.hpp"
-#include "read_arrow_stream.hpp"
+#include "read_arrow.hpp"
 
 namespace duckdb {
 

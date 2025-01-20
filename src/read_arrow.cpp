@@ -1,4 +1,4 @@
-#include "read_arrow_stream.hpp"
+#include "read_arrow.hpp"
 
 #include <inttypes.h>
 
@@ -19,10 +19,10 @@
 
 #include "nanoarrow_errors.hpp"
 
-// read_arrow_stream() implementation
+// read_arrow() implementation
 //
-// Same results as read_arrow_stream(), but this version uses the
-// ArrowIpcDecoder directly. This lets it use DuckDB's allocator at the
+// This version uses the ArrowIpcDecoder directly. instead of nanoarrow's
+// ArrowArrayStream wrapper. This lets it use DuckDB's allocator at the
 // expense of a bit more verbosity. Because we can apply the projection
 // it reduces some of the verbosity of the actual DuckDB part (although the
 // ArrayStreamReader from nanoarrow could support a projection, which
@@ -505,7 +505,7 @@ struct ReadArrowStream {
   // data (instead of as a Python object whose ownership is kept alive via the
   // DependencyItem mechanism).
   static TableFunction Function() {
-    TableFunction fn("read_arrow_stream", {LogicalType::VARCHAR}, Scan, Bind,
+    TableFunction fn("read_arrow", {LogicalType::VARCHAR}, Scan, Bind,
                      ArrowTableFunction::ArrowScanInitGlobal,
                      ArrowTableFunction::ArrowScanInitLocal);
     fn.cardinality = Cardinality;
@@ -528,7 +528,7 @@ struct ReadArrowStream {
     auto table_name_expr = make_uniq<ConstantExpression>(Value(table_name));
     children.push_back(std::move(table_name_expr));
     auto function_expr =
-        make_uniq<FunctionExpression>("read_arrow_stream", std::move(children));
+        make_uniq<FunctionExpression>("read_arrow", std::move(children));
     table_function->function = std::move(function_expr);
 
     if (!FileSystem::HasGlob(table_name)) {

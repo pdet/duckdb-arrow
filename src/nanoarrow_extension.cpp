@@ -1,18 +1,15 @@
 #define DUCKDB_EXTENSION_MAIN
 
-#include <string>
-
 #include "nanoarrow_extension.hpp"
 
-#include "duckdb.hpp"
-#include "duckdb/common/string_util.hpp"
+#include <string>
+
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/extension_util.hpp"
 
 #include "nanoarrow/nanoarrow.hpp"
 
-#include "read_arrow_stream.hpp"
-#include "read_arrow_stream2.hpp"
+#include "read_arrow.hpp"
 #include "write_arrow_stream.hpp"
 
 namespace duckdb {

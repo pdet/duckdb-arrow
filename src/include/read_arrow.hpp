@@ -1,6 +1,6 @@
 
-#include "duckdb/function/copy_function.hpp"
 #include "duckdb/function/table_function.hpp"
+#include "duckdb/parser/parsed_data/copy_info.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
