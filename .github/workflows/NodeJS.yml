@@ -1,0 +1,46 @@
+on: [push, pull_request,repository_dispatch]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  nodejs:
+    if: false
+    name: NodeJS
+    runs-on: macos-latest
+    env:
+      GEN: ninja
+
+    steps:
+      - name: Install Ninja
+        run: brew install ninja
+
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          submodules: 'true'
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install required node packages
+        run: |
+          sudo npm install -g duckdb apache-arrow mocha
+          sudo npm install duckdb apache-arrow mocha
+          npm -v
+          node -v
+
+
+      - name: Build duckdb
+        run: |
+          make
+
+      - name: Run JS tests
+        run: |
+          make test_release_js
