@@ -52,7 +52,7 @@ class IpcStreamReader {
 
   bool GetNextBatch(ArrowArray* out);
 
-  void SetColumnProjection(vector<string> column_names);
+  void SetColumnProjection(const vector<string>& column_names);
 
  private:
     static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;

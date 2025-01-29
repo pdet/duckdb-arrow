@@ -78,9 +78,9 @@ struct ReadArrowStream {
   }
 
   // Our FunctionData is the same as the ArrowScanFunctionData except we extend it
-  // it to keep the ArrowIpcArrowArrayStreamFactory alive.
+  // to keep the ArrowIpcArrowArrayStreamFactory alive.
   struct Data : public ArrowScanFunctionData {
-    Data(std::unique_ptr<ArrowIpcArrowArrayStreamFactory> factory)
+    explicit Data(std::unique_ptr<ArrowIpcArrowArrayStreamFactory> factory)
         : ArrowScanFunctionData(ArrowIpcArrowArrayStreamFactory::Produce,
                                 reinterpret_cast<uintptr_t>(factory.get())),
           factory(std::move(factory)) {}
@@ -149,11 +149,11 @@ static ArrowErrorCode DuckDBDecompressZstd(struct ArrowBufferView src, uint8_t* 
     return EIO;
   }
 
-  if (dst_size != (int64_t)code) {
+  if (dst_size != static_cast<int64_t>(code)) {
     ArrowErrorSet(error,
                   "Expected decompressed size of %" PRId64 " bytes but got %" PRId64
                   " bytes",
-                  dst_size, (int64_t)code);
+                  dst_size, static_cast<int64_t>(code));
     return EIO;
   }
 

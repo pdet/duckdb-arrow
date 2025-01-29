@@ -117,8 +117,8 @@ namespace ext_nanoarrow {
     return true;
   }
 
-  void IpcStreamReader::SetColumnProjection(vector<string> column_names) {
-    if (column_names.size() == 0) {
+  void IpcStreamReader::SetColumnProjection(const vector<string>& column_names) {
+    if (column_names.empty()) {
       throw InternalException("Can't request zero fields projected from IpcStreamReader");
     }
 
