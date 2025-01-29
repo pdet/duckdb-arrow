@@ -1,7 +1,7 @@
 //===----------------------------------------------------------------------===//
 //                         DuckDB - NanoArrow
 //
-// array_stream.hpp
+// ipc/array_stream.hpp
 //
 //
 //===----------------------------------------------------------------------===//
@@ -14,32 +14,19 @@ namespace duckdb{
 namespace ext_nanoarrow {
 class IpcArrayStream {
  public:
-  IpcArrayStream(unique_ptr<IpcStreamReader> reader) : reader(std::move(reader)) {}
+  explicit IpcArrayStream(unique_ptr<IpcStreamReader> reader);
 
-  IpcStreamReader& Reader() { return *reader; }
+  IpcStreamReader& Reader() const;
 
-  void ToArrayStream(ArrowArrayStream* stream) {
-    nanoarrow::ArrayStreamFactory<IpcArrayStream>::InitArrayStream(
-        new IpcArrayStream(std::move(reader)), stream);
-  }
+  void ToArrayStream(ArrowArrayStream* stream);
 
-  int GetSchema(ArrowSchema* schema) {
-    return Wrap([&]() {
-      NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(reader->GetOutputSchema(), schema));
-    });
-  }
+  int GetSchema(ArrowSchema* schema);
 
-  int GetNext(ArrowArray* array) {
-    return Wrap([&]() { reader->GetNextBatch(array); });
-  }
+  int GetNext(ArrowArray* array);
 
-  const char* GetLastError() { return last_msg.c_str(); }
+  const char* GetLastError() const;
 
- private:
-  unique_ptr<IpcStreamReader> reader;
-  string last_msg;
-
-  template <typename Func>
+   template <typename Func>
   int Wrap(Func&& func) {
     try {
       func();
@@ -59,6 +46,9 @@ class IpcArrayStream {
       return EINVAL;
     }
   }
+ private:
+  unique_ptr<IpcStreamReader> reader;
+  string last_msg;
 };
 }
 }

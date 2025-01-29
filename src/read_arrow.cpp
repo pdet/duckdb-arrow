@@ -190,8 +190,6 @@ TableFunction ReadArrowStreamFunction() { return ReadArrowStream::Function(); }
 void RegisterReadArrowStream(DatabaseInstance& db) {
   auto function = ReadArrowStream::Function();
   ExtensionUtil::RegisterFunction(db, function);
-  function.name = "scan_arrow_ipc";
-  ExtensionUtil::RegisterFunction(db, function);
   auto& config = DBConfig::GetConfig(db);
   config.replacement_scans.emplace_back(ReadArrowStream::ScanReplacement);
 }
