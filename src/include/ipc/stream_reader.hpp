@@ -42,9 +42,11 @@ class IpcStreamReader {
 
   const ArrowSchema* GetFileSchema();
 
-  bool HasProjection();
+  bool HasProjection() const;
 
   const ArrowSchema* GetOutputSchema();
+
+  static void DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, ArrowArray* out,  ArrowBufferView& body_view, ArrowError *error);
 
   void PopulateNames(vector<string>& names);
 

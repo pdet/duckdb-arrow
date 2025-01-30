@@ -1,16 +1,18 @@
-//
-// #include "duckdb/function/function.hpp"
-// #include "duckdb/function/table/arrow/arrow_duck_schema.hpp"
-// #include "duckdb/function/table_function.hpp"
-// #include "duckdb/main/config.hpp"
-// namespace duckdb {
-//
-// namespace ext_nanoarrow {
-// //! This function receives a list of structs [{ptr:size}] with the encoded buffers
+
+#include "ipc/stream_reader.hpp"
+
+#include "duckdb/function/function.hpp"
+#include "duckdb/function/table/arrow/arrow_duck_schema.hpp"
+#include "duckdb/function/table_function.hpp"
+#include "duckdb/main/config.hpp"
+namespace duckdb {
+
+namespace ext_nanoarrow {
+//! This function receives a list of structs [{ptr:size}] with the encoded buffers
 // unique_ptr<FunctionData> ArrowScanBind(
 //     ClientContext &context, TableFunctionBindInput &input,
 //     vector<LogicalType> &return_types, vector<string> &names) {
-//   auto stream_decoder = make_uniq<BufferingArrowIPCStreamDecoder>();
+//     auto decoder = IpcStreamReader::NewDuckDBArrowDecoder();
 //
 //   // Decode buffer ptr list
 //   auto buffer_ptr_list = ListValue::GetChildren(input.inputs[0]);
@@ -20,7 +22,12 @@
 //     uint64_t size = unpacked[1].GetValue<uint64_t>();
 //
 //     // Feed stream into decoder
-//     auto res = stream_decoder->Consume((const uint8_t *)ptr, size);
+//     ArrowBufferView body_view;
+//     body_view.data.as_uint8 = reinterpret_cast<const uint8_t*>(ptr);
+//     body_view.size_bytes = size;
+//     ArrowArray out;
+//     auto res = IpcStreamReader::DecodeArray();
+//     //stream_decoder->Consume((const uint8_t *)ptr, size);
 //
 //     if (!res.ok()) {
 //       throw IOException("Invalid IPC stream");
@@ -79,6 +86,6 @@
 //   QueryResult::DeduplicateColumns(names);
 //   return std::move(res);
 // }
-//
-// }
-// }
+
+}
+}

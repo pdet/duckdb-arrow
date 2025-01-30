@@ -80,11 +80,11 @@ struct ReadArrowStream {
   // Our FunctionData is the same as the ArrowScanFunctionData except we extend it
   // to keep the ArrowIpcArrowArrayStreamFactory alive.
   struct Data : public ArrowScanFunctionData {
-    explicit Data(std::unique_ptr<ArrowIpcArrowArrayStreamFactory> factory)
-        : ArrowScanFunctionData(ArrowIpcArrowArrayStreamFactory::Produce,
+    explicit Data(std::unique_ptr<ArrowFileIPCStreamFactory> factory)
+        : ArrowScanFunctionData(ArrowFileIPCStreamFactory::Produce,
                                 reinterpret_cast<uintptr_t>(factory.get())),
           factory(std::move(factory)) {}
-    std::unique_ptr<ArrowIpcArrowArrayStreamFactory> factory;
+    std::unique_ptr<ArrowFileIPCStreamFactory> factory;
   };
 
   // Our Bind() function is different from the arrow_scan because our input
@@ -105,7 +105,7 @@ struct ReadArrowStream {
   static unique_ptr<FunctionData> BindInternal(ClientContext& context, std::string src,
                                                vector<LogicalType>& return_types,
                                                vector<string>& names) {
-    auto stream_factory = make_uniq<ArrowIpcArrowArrayStreamFactory>(context, src);
+    auto stream_factory = make_uniq<ArrowFileIPCStreamFactory>(context, src);
     auto res = make_uniq<Data>(std::move(stream_factory));
     res->factory->InitReader();
     res->factory->GetFileSchema(res->schema_root);

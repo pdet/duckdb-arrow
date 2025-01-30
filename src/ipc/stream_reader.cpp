@@ -33,7 +33,7 @@ namespace ext_nanoarrow {
     return file_schema.get();
   }
 
-  bool IpcStreamReader::HasProjection() { return !projected_fields.empty(); }
+  bool IpcStreamReader::HasProjection() const { return !projected_fields.empty(); }
 
   const ArrowSchema* IpcStreamReader::GetOutputSchema() {
     if (HasProjection()) {
@@ -54,6 +54,17 @@ namespace ext_nanoarrow {
         names.push_back(column->name);
       }
     }
+  }
+
+void IpcStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, ArrowArray* out,  ArrowBufferView& body_view, ArrowError *error) {
+    // Use the ArrowIpcSharedBuffer if we have thread safety (i.e., if this was
+    // compiled with a compiler that supports C11 atomics, i.e., not gcc 4.8 or
+    // MSVC)
+    nanoarrow::UniqueArray array;
+    THROW_NOT_OK(InternalException, error,
+    ArrowIpcDecoderDecodeArray(decoder.get(), body_view, -1, array.get(),
+    NANOARROW_VALIDATION_LEVEL_FULL, error));
+    ArrowArrayMove(array.get(), out);
   }
 
   bool IpcStreamReader::GetNextBatch(ArrowArray* out) {
