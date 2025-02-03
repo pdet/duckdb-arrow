@@ -6,7 +6,6 @@ defaults:
 
 jobs:
   nodejs:
-    if: false
     name: NodeJS
     runs-on: macos-latest
     env:
