@@ -51,7 +51,7 @@ unique_ptr<ArrowArrayStreamWrapper> ArrowIPCStreamFactory::Produce(
         unique_ptr<FileHandle> handle = fs.OpenFile(src_string, FileOpenFlags::FILE_FLAGS_READ);
       reader = make_uniq<IPCFileStreamReader>(fs, std::move(handle), allocator);
     } else {
-      reader = make_uniq<IPCBufferStreamReader>(fs, buffers, allocator);
+      reader = make_uniq<IPCBufferStreamReader>( buffers, allocator);
     }
   }
 

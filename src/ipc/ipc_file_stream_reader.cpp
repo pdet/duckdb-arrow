@@ -34,8 +34,7 @@ static ArrowErrorCode DuckDBDecompressZstd(struct ArrowBufferView src, uint8_t* 
 
 
   IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator)
-      : file_reader(fs, std::move(handle)),
-        allocator(allocator) {}
+      : IPCStreamReader(allocator), file_reader(fs, std::move(handle)){}
 
 // Create an ArrowIpcDecoder() with the appropriate decompressor set.
 // We could also define a decompressor that uses threads to parellelize
@@ -174,7 +173,7 @@ void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
     return true;
   }
 
-  void IPCFileStreamReader::SetColumnProjection(const vector<string>& column_names) {
+  void IPCStreamReader::SetColumnProjection(const vector<string>& column_names) {
     if (column_names.empty()) {
       throw InternalException("Can't request zero fields projected from IpcStreamReader");
     }
@@ -238,7 +237,6 @@ void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
 
       ++output_column_index;
     }
-
     projected_schema = std::move(schema);
   }
 
@@ -376,7 +374,7 @@ void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
     D_ASSERT((file_reader.CurrentOffset() % 8) == 0);
   }
 
-  int64_t IPCFileStreamReader::CountFields(const ArrowSchema* schema) {
+  int64_t IPCStreamReader::CountFields(const ArrowSchema* schema) {
     int64_t n_fields = 1;
     for (int64_t i = 0; i < schema->n_children; i++) {
       n_fields += CountFields(schema->children[i]);

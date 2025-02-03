@@ -42,16 +42,14 @@ struct ArrowIpcMessagePrefix {
 class IPCStreamReader {
 public:
   virtual ~IPCStreamReader() = default;
-  IPCStreamReader(): decoder(NewDuckDBArrowDecoder()){};
+  explicit IPCStreamReader(Allocator& allocator): decoder(NewDuckDBArrowDecoder()), allocator(allocator){};
   //! Gets the output schema, which is the file schema with projection pushdown being considered
   const ArrowSchema* GetOutputSchema();
   //! Gets the next batch
  bool GetNextBatch(ArrowArray* out);
 
    //! Sets the projection pushdown for this reader
-  virtual void SetColumnProjection(const vector<string>& column_names) {
-    throw InternalException("IPCStreamReader::SetColumnProjection not implemented");
-  }
+  void SetColumnProjection(const vector<string>& column_names);
   //! Gets the base schema with no projection pushdown
   const ArrowSchema* GetBaseSchema();
 
@@ -69,6 +67,8 @@ protected:
 
   static const char* MessageTypeString(ArrowIpcMessageType message_type);
 
+  static int64_t CountFields(const ArrowSchema* schema);
+
   ArrowError error{};
   nanoarrow::ipc::UniqueDecoder decoder{};
   vector<int64_t> projected_fields;
@@ -79,13 +79,23 @@ protected:
   //! Information on current buffer
   data_ptr_t cur_ptr{};
   int64_t cur_size{};
+
+  //! Allocator used to allocate buffers with decoded arrow information
+  Allocator& allocator;
+
+  bool finished{false};
+
 };
 
 //! Buffer Stream
 class IPCBufferStreamReader final : public IPCStreamReader {
 public:
-  IPCBufferStreamReader(FileSystem& fs, vector<ArrowIPCBuffer> buffers, Allocator& allocator);
+  IPCBufferStreamReader(vector<ArrowIPCBuffer> buffers, Allocator& allocator);
 
+  ArrowIpcMessageType ReadNextMessage() override;
+private:
+  vector<ArrowIPCBuffer> buffers;
+  idx_t cur_idx = 0;
 };
 
 //! IPC File
@@ -93,16 +103,12 @@ class IPCFileStreamReader final : public IPCStreamReader {
  public:
   IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator);
 
-  void SetColumnProjection(const vector<string>& column_names) override;
-
   ArrowIpcMessageType ReadNextMessage() override;
 
  private:
   static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
 
-  bool finished{false};
   BufferedFileReader file_reader;
-  Allocator& allocator;
 
   ArrowIpcMessagePrefix message_prefix{};
   AllocatedData message_header;
@@ -110,12 +116,9 @@ class IPCFileStreamReader final : public IPCStreamReader {
 
   void EnsureInputStreamAligned();
 
-  static int64_t CountFields(const ArrowSchema* schema);
-
   static void DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, ArrowArray* out,  ArrowBufferView& body_view, ArrowError *error);
 
   void PopulateNames(vector<string>& names);
-
 };
 } // namespace ext_nanoarrow
 } // namespace duckdb

@@ -1,19 +1,25 @@
+#include <utility>
+
 #include "ipc/stream_reader.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
 
-IPCBufferStreamReader::IPCBufferStreamReader(FileSystem& fs, vector<ArrowIPCBuffer> buffers, Allocator& allocator){
+IPCBufferStreamReader::IPCBufferStreamReader(vector<ArrowIPCBuffer> buffers, Allocator& allocator): IPCStreamReader(allocator), buffers(std::move(buffers)){
 
 }
-//   //! Gets the output schema, which is the file schema with projection pushdown being considered
-// const ArrowSchema* IPCBufferStreamReader::GetOutputSchema(){
-//
-// }
-// bool IPCBufferStreamReader::GetNextBatch(ArrowArray* out){
-//
-// }
-//
+
+ArrowIpcMessageType IPCBufferStreamReader::ReadNextMessage() {
+  if (cur_idx >= buffers.size() || finished) {
+      finished = true;
+      return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+    }
+    cur_ptr = reinterpret_cast<data_ptr_t>(buffers[cur_idx].ptr);
+    cur_size = static_cast<int64_t>(buffers[cur_idx].size);
+    cur_idx++;
+    return NANOARROW_IPC_MESSAGE_TYPE_RECORD_BATCH;
+}
+
 
 
 } // namespace ext_nanoarrow
