@@ -50,5 +50,5 @@ class IpcArrayStream {
   unique_ptr<IPCStreamReader> reader;
   string last_msg;
 };
-}
-}
+} // namespace ext_nanoarrow
+} // namespace duckdb

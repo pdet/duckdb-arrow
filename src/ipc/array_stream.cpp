@@ -29,5 +29,5 @@ namespace ext_nanoarrow {
   }
 
 
-}
-}
+} // namespace ext_nanoarrow
+} // namespace duckdb

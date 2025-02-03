@@ -9,7 +9,8 @@
 
 #include "nanoarrow/nanoarrow.hpp"
 
-#include "read_arrow.hpp"
+#include "table_function/read_arrow.hpp"
+#include "table_function/scan_arrow_ipc.hpp"
 #include "write_arrow_stream.hpp"
 
 namespace duckdb {
@@ -31,6 +32,7 @@ struct NanoarrowVersion {
 void LoadInternal(DatabaseInstance& db) {
   NanoarrowVersion::Register(db);
   ext_nanoarrow::RegisterReadArrowStream(db);
+  // ext_nanoarrow::ScanArrowIPC::RegisterReadArrowStream(db);
   ext_nanoarrow::RegisterArrowStreamCopyFunction(db);
 }
 

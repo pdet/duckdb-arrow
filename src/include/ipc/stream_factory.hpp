@@ -43,5 +43,5 @@ public:
   unique_ptr<IPCStreamReader> reader;
   ArrowError error{};
 };
-}
-}
+} // namespace ext_nanoarrow
+} // namespace duckdb

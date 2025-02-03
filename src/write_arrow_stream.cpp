@@ -9,7 +9,7 @@
 #include "nanoarrow/nanoarrow_ipc.hpp"
 
 #include "nanoarrow_errors.hpp"
-#include "read_arrow.hpp"
+#include "table_function/read_arrow.hpp"
 
 namespace duckdb {
 

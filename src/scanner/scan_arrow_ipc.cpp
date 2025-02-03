@@ -1,4 +1,6 @@
 
+#include "duckdb/function/table/arrow.hpp"
+
 #include "ipc/stream_reader.hpp"
 
 #include "duckdb/function/function.hpp"
@@ -8,6 +10,37 @@
 namespace duckdb {
 
 namespace ext_nanoarrow {
+TableFunction GetScanArrowIPCFunction() {
+
+  child_list_t<LogicalType> make_buffer_struct_children{
+      {"ptr", LogicalType::UBIGINT}, {"size", LogicalType::UBIGINT}};
+  TableFunction scan_arrow_ipc_func(
+      "scan_arrow_ipc",
+      {LogicalType::LIST(LogicalType::STRUCT(make_buffer_struct_children))},
+      ScanArrowIPCScan,
+      ScanArrowIPCBind,
+      ArrowTableFunction::ArrowScanInitGlobal,
+      ArrowTableFunction::ArrowScanInitLocal);
+
+  scan_arrow_ipc_func.cardinality = ArrowTableFunction::ArrowScanCardinality;
+  scan_arrow_ipc_func.projection_pushdown = true;
+  scan_arrow_ipc_func.filter_pushdown = false;
+  scan_arrow_ipc_func.filter_prune = false;
+
+  return scan_arrow_ipc_func;
+}
+
+// static TableFunction Function() {
+//     TableFunction fn("read_arrow", {LogicalType::VARCHAR}, Scan, Bind,
+//                      ArrowTableFunction::ArrowScanInitGlobal,
+//                      ArrowTableFunction::ArrowScanInitLocal);
+//     fn.cardinality = Cardinality;
+//     fn.projection_pushdown = true;
+//     fn.filter_pushdown = false;
+//     fn.filter_prune = false;
+//     return fn;
+//   }
+
 //! This function receives a list of structs [{ptr:size}] with the encoded buffers
 // unique_ptr<FunctionData> ArrowScanBind(
 //     ClientContext &context, TableFunctionBindInput &input,

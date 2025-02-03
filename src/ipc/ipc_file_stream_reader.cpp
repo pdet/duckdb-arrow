@@ -365,5 +365,5 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
     }
   }
 
-};
-}
+} // namespace ext_nanoarrow
+} // namespace duckdb

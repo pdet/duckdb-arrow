@@ -1,4 +1,4 @@
-#include "read_arrow.hpp"
+#include "table_function/read_arrow.hpp"
 
 #include <inttypes.h>
 
@@ -38,16 +38,16 @@ namespace duckdb {
 
 namespace ext_nanoarrow {
 
-struct ReadArrowStream {
+struct ReadArrowStream : ArrowTableFunction {
   // Define the function. Unlike arrow_scan(), which takes integer pointers
   // as arguments, we keep the factory alive by making it a member of the bind
   // data (instead of as a Python object whose ownership is kept alive via the
   // DependencyItem mechanism).
   static TableFunction Function() {
     TableFunction fn("read_arrow", {LogicalType::VARCHAR}, Scan, Bind,
-                     ArrowTableFunction::ArrowScanInitGlobal,
-                     ArrowTableFunction::ArrowScanInitLocal);
-    fn.cardinality = Cardinality;
+                     ArrowScanInitGlobal,
+                     ArrowScanInitLocal);
+    fn.cardinality = ArrowScanCardinality;
     fn.projection_pushdown = true;
     fn.filter_pushdown = false;
     fn.filter_prune = false;
@@ -111,7 +111,7 @@ struct ReadArrowStream {
     res->factory->GetFileSchema(res->schema_root);
 
     DBConfig& config = DatabaseInstance::GetDatabase(context).config;
-    ArrowTableFunction::PopulateArrowTableType(config, res->arrow_table, res->schema_root,
+    PopulateArrowTableType(config, res->arrow_table, res->schema_root,
                                                names, return_types);
     QueryResult::DeduplicateColumns(names);
     res->all_types = return_types;
@@ -125,14 +125,9 @@ struct ReadArrowStream {
 
   static void Scan(ClientContext& context, TableFunctionInput& data_p,
                    DataChunk& output) {
-    ArrowTableFunction::ArrowScanFunction(context, data_p, output);
+    ArrowScanFunction(context, data_p, output);
   }
 
-  // Identical to the ArrowTableFunction, but that version is marked protected
-  static unique_ptr<NodeStatistics> Cardinality(ClientContext& context,
-                                                const FunctionData* data) {
-    return make_uniq<NodeStatistics>();
-  }
 };
 
 // A version of ArrowDecompressZstd that uses DuckDB's C++ namespaceified

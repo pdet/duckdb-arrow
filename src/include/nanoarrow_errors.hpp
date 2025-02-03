@@ -1,4 +1,12 @@
+//===----------------------------------------------------------------------===//
+//                         DuckDB - NanoArrow
+//
+// nanoarrow_errors.hpp
+//
+//
+//===----------------------------------------------------------------------===//
 
+#pragma once
 #define _DUCKDB_NANOARROW_THROW_NOT_OK_IMPL(NAME, ExceptionCls, ERROR_PTR, EXPR,      \
                                             EXPR_STR)                                 \
   do {                                                                                \

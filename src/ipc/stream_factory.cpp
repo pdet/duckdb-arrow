@@ -46,5 +46,6 @@ unique_ptr<ArrowArrayStreamWrapper> ArrowIPCStreamFactory::Produce(
     reader = make_uniq<IpcFileStreamReader>(fs, std::move(handle), allocator);
   }
 
-};
-}
+} // namespace ext_nanoarrow
+} // namespace duckdb
+

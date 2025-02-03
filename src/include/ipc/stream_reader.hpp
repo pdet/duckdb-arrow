@@ -45,7 +45,7 @@ public:
   virtual const ArrowSchema* GetOutputSchema() {
     throw InternalException("IPCStreamReader::GetOutputSchema not implemented");
   }
-
+  //! Gets the next batch
   virtual bool GetNextBatch(ArrowArray* out) {
     throw InternalException("IPCStreamReader::GetNextBatch not implemented");
   }
@@ -54,34 +54,28 @@ public:
   virtual void SetColumnProjection(const vector<string>& column_names) {
     throw InternalException("IPCStreamReader::SetColumnProjection not implemented");
   }
-
+  //! Gets the base schema with no projection pushdown
   virtual const ArrowSchema* GetBaseSchema() {
     throw InternalException("IPCStreamReader::GetBaseSchema not implemented");
   }
 };
 
-// //! Buffer Stream
-// class IPCBufferStreamReader {
-// public:
-//   IPCBufferStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator);
-//   //! Gets the output schema, which is the file schema with projection pushdown being considered
-//   const ArrowSchema* GetOutputSchema();
-//
-//   bool GetNextBatch(ArrowArray* out);
-// };
+//! Buffer Stream
+class IPCBufferStreamReader : public IPCStreamReader {
+public:
+  IPCBufferStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator);
+  //! Gets the output schema, which is the file schema with projection pushdown being considered
+  const ArrowSchema* GetOutputSchema();
+  bool GetNextBatch(ArrowArray* out);
+};
 
 //! IPC File
-class IpcFileStreamReader: public IPCStreamReader {
+class IpcFileStreamReader final : public IPCStreamReader {
  public:
   IpcFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator);
-  //! Gets the output schema, which is the file schema with projection pushdown being considered
   const ArrowSchema* GetOutputSchema() override;
-
   bool GetNextBatch(ArrowArray* out) override;
-  //! Sets the projection pushdown for this reader
   void SetColumnProjection(const vector<string>& column_names) override;
-
-  //! Gets the base schema with no projection pushdown
   const ArrowSchema* GetBaseSchema() override;
 
  private:
@@ -124,5 +118,5 @@ class IpcFileStreamReader: public IPCStreamReader {
   static nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder();
 
 };
-}
-}
+} // namespace ext_nanoarrow
+} // namespace duckdb
