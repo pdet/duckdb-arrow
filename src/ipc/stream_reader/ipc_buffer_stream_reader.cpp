@@ -1,6 +1,4 @@
-#include <utility>
-
-#include "ipc/stream_reader.hpp"
+#include "ipc/stream_reader/ipc_buffer_stream_reader.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {

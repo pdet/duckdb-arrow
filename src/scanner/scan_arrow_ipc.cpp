@@ -6,7 +6,7 @@
 
 #include "duckdb/function/table/arrow.hpp"
 
-#include "ipc/stream_reader.hpp"
+#include "ipc/stream_reader/stream_reader.hpp"
 
 #include "duckdb/function/function.hpp"
 #include "duckdb/function/table/arrow/arrow_duck_schema.hpp"
