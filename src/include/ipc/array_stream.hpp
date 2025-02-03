@@ -14,9 +14,9 @@ namespace duckdb{
 namespace ext_nanoarrow {
 class IpcArrayStream {
  public:
-  explicit IpcArrayStream(unique_ptr<IpcStreamReader> reader);
+  explicit IpcArrayStream(unique_ptr<IPCStreamReader> reader);
 
-  IpcStreamReader& Reader() const;
+  IPCStreamReader& Reader() const;
 
   void ToArrayStream(ArrowArrayStream* stream);
 
@@ -47,7 +47,7 @@ class IpcArrayStream {
     }
   }
  private:
-  unique_ptr<IpcStreamReader> reader;
+  unique_ptr<IPCStreamReader> reader;
   string last_msg;
 };
 }

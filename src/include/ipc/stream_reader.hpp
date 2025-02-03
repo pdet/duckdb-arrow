@@ -36,28 +36,56 @@ struct ArrowIpcMessagePrefix {
   int32_t metadata_size;
 };
 
-class IpcStreamReader {
+//! Base IPC Reader
+class IPCStreamReader {
+public:
+  virtual ~IPCStreamReader() = default;
+  IPCStreamReader() = default;
+  //! Gets the output schema, which is the file schema with projection pushdown being considered
+  virtual const ArrowSchema* GetOutputSchema() {
+    throw InternalException("IPCStreamReader::GetOutputSchema not implemented");
+  }
+
+  virtual bool GetNextBatch(ArrowArray* out) {
+    throw InternalException("IPCStreamReader::GetNextBatch not implemented");
+  }
+
+   //! Sets the projection pushdown for this reader
+  virtual void SetColumnProjection(const vector<string>& column_names) {
+    throw InternalException("IPCStreamReader::SetColumnProjection not implemented");
+  }
+
+  virtual const ArrowSchema* GetBaseSchema() {
+    throw InternalException("IPCStreamReader::GetBaseSchema not implemented");
+  }
+};
+
+// //! Buffer Stream
+// class IPCBufferStreamReader {
+// public:
+//   IPCBufferStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator);
+//   //! Gets the output schema, which is the file schema with projection pushdown being considered
+//   const ArrowSchema* GetOutputSchema();
+//
+//   bool GetNextBatch(ArrowArray* out);
+// };
+
+//! IPC File
+class IpcFileStreamReader: public IPCStreamReader {
  public:
-  IpcStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator);
+  IpcFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator);
+  //! Gets the output schema, which is the file schema with projection pushdown being considered
+  const ArrowSchema* GetOutputSchema() override;
 
-  const ArrowSchema* GetFileSchema();
+  bool GetNextBatch(ArrowArray* out) override;
+  //! Sets the projection pushdown for this reader
+  void SetColumnProjection(const vector<string>& column_names) override;
 
-  bool HasProjection() const;
-
-  const ArrowSchema* GetOutputSchema();
-
-  static void DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, ArrowArray* out,  ArrowBufferView& body_view, ArrowError *error);
-
-  void PopulateNames(vector<string>& names);
-
-  static nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder();
-
-  bool GetNextBatch(ArrowArray* out);
-
-  void SetColumnProjection(const vector<string>& column_names);
+  //! Gets the base schema with no projection pushdown
+  const ArrowSchema* GetBaseSchema() override;
 
  private:
-    static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
+  static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
   nanoarrow::ipc::UniqueDecoder decoder{};
   bool finished{false};
   BufferedFileReader file_reader;
@@ -86,6 +114,14 @@ class IpcStreamReader {
   static nanoarrow::UniqueBuffer AllocatedDataToOwningBuffer(shared_ptr<AllocatedData> data);
 
   static const char* MessageTypeString(ArrowIpcMessageType message_type);
+
+  bool HasProjection() const;
+
+  static void DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, ArrowArray* out,  ArrowBufferView& body_view, ArrowError *error);
+
+  void PopulateNames(vector<string>& names);
+
+  static nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder();
 
 };
 }

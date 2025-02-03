@@ -3,9 +3,9 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 
-  IpcArrayStream::IpcArrayStream(unique_ptr<IpcStreamReader> reader) : reader(std::move(reader)) {}
+  IpcArrayStream::IpcArrayStream(unique_ptr<IPCStreamReader> reader) : reader(std::move(reader)) {}
 
-  IpcStreamReader& IpcArrayStream::Reader() const {
+  IPCStreamReader& IpcArrayStream::Reader() const {
     return *reader;
   }
 

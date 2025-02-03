@@ -2,15 +2,15 @@
 
 namespace duckdb {
 namespace ext_nanoarrow {
-ArrowFileIPCStreamFactory::ArrowFileIPCStreamFactory(ClientContext& context,
+ArrowIPCStreamFactory::ArrowIPCStreamFactory(ClientContext& context,
                                            std::string  src_string)
       : fs(FileSystem::GetFileSystem(context)),
         allocator(BufferAllocator::Get(context)),
         src_string(std::move(src_string)) {};
 
-unique_ptr<ArrowArrayStreamWrapper> ArrowFileIPCStreamFactory::Produce(
+unique_ptr<ArrowArrayStreamWrapper> ArrowIPCStreamFactory::Produce(
      uintptr_t factory_ptr,  ArrowStreamParameters& parameters) {
-    auto factory = static_cast<ArrowFileIPCStreamFactory*>(
+    auto factory = static_cast<ArrowIPCStreamFactory*>(
         reinterpret_cast<void*>(factory_ptr));
 
     if (!factory->reader) {
@@ -26,24 +26,24 @@ unique_ptr<ArrowArrayStreamWrapper> ArrowFileIPCStreamFactory::Produce(
     return out;
   }
 
-  void ArrowFileIPCStreamFactory::GetFileSchema(ArrowSchemaWrapper& schema) const {
+  void ArrowIPCStreamFactory::GetFileSchema(ArrowSchemaWrapper& schema) const {
     if (!reader) {
       throw InternalException("IpcStreamReader is no longer valid");
     }
 
     NANOARROW_THROW_NOT_OK(
-        ArrowSchemaDeepCopy(reader->GetFileSchema(), &schema.arrow_schema));
+        ArrowSchemaDeepCopy(reader->GetBaseSchema(), &schema.arrow_schema));
   }
 
 
-  void ArrowFileIPCStreamFactory::InitReader() {
+  void ArrowIPCStreamFactory::InitReader() {
     if (reader) {
       throw InternalException("ArrowArrayStream or IpcStreamReader already initialized");
     }
 
     unique_ptr<FileHandle> handle =
         fs.OpenFile(src_string, FileOpenFlags::FILE_FLAGS_READ);
-    reader = make_uniq<IpcStreamReader>(fs, std::move(handle), allocator);
+    reader = make_uniq<IpcFileStreamReader>(fs, std::move(handle), allocator);
   }
 
 };

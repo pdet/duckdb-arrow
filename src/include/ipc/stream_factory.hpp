@@ -22,9 +22,9 @@ class ArrowStreamFactory {
 //! This Factory is a type invented by DuckDB. Notably, the Produce()
 //! function pointer is passed to the constructor of the ArrowScanFunctionData
 //! constructor (which we wrap).
-class ArrowFileIPCStreamFactory {
+class ArrowIPCStreamFactory {
 public:
-  explicit ArrowFileIPCStreamFactory(ClientContext& context,
+  explicit ArrowIPCStreamFactory(ClientContext& context,
                                            std::string  src_string);
 
   //! Called once when initializing Scan States
@@ -40,7 +40,7 @@ public:
   FileSystem& fs;
   Allocator& allocator;
   std::string src_string;
-  unique_ptr<IpcStreamReader> reader;
+  unique_ptr<IPCStreamReader> reader;
   ArrowError error{};
 };
 }
