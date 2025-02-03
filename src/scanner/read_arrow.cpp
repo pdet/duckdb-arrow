@@ -20,6 +20,7 @@
 #include "nanoarrow_errors.hpp"
 #include "ipc/stream_factory.hpp"
 #include "ipc/stream_reader.hpp"
+#include "table_function/arrow_ipc_function_data.hpp"
 
 // read_arrow() implementation
 //
@@ -77,16 +78,6 @@ struct ReadArrowStream : ArrowTableFunction {
     return std::move(table_function);
   }
 
-  // Our FunctionData is the same as the ArrowScanFunctionData except we extend it
-  // to keep the ArrowIpcArrowArrayStreamFactory alive.
-  struct Data : public ArrowScanFunctionData {
-    explicit Data(std::unique_ptr<ArrowIPCStreamFactory> factory)
-        : ArrowScanFunctionData(ArrowIPCStreamFactory::Produce,
-                                reinterpret_cast<uintptr_t>(factory.get())),
-          factory(std::move(factory)) {}
-    std::unique_ptr<ArrowIPCStreamFactory> factory;
-  };
-
   // Our Bind() function is different from the arrow_scan because our input
   // is a filename (and their input is three pointer addresses).
   static unique_ptr<FunctionData> Bind(ClientContext& context,
@@ -106,7 +97,7 @@ struct ReadArrowStream : ArrowTableFunction {
                                                vector<LogicalType>& return_types,
                                                vector<string>& names) {
     auto stream_factory = make_uniq<ArrowIPCStreamFactory>(context, src);
-    auto res = make_uniq<Data>(std::move(stream_factory));
+    auto res = make_uniq<ArrowIPCFunctionData>(std::move(stream_factory));
     res->factory->InitReader();
     res->factory->GetFileSchema(res->schema_root);
 

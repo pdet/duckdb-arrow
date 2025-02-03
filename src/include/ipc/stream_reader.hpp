@@ -17,6 +17,8 @@
 #include "duckdb/common/serializer/buffered_file_reader.hpp"
 #include "nanoarrow_errors.hpp"
 
+#include "table_function/scan_arrow_ipc.hpp"
+
 namespace duckdb {
 namespace ext_nanoarrow {
 
@@ -61,9 +63,9 @@ public:
 };
 
 //! Buffer Stream
-class IPCBufferStreamReader : public IPCStreamReader {
+class IPCBufferStreamReader final : public IPCStreamReader {
 public:
-  IPCBufferStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator);
+  IPCBufferStreamReader(FileSystem& fs, vector<ArrowIPCBuffer> buffers, Allocator& allocator);
   //! Gets the output schema, which is the file schema with projection pushdown being considered
   const ArrowSchema* GetOutputSchema();
   bool GetNextBatch(ArrowArray* out);

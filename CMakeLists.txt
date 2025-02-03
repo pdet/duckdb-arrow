@@ -19,7 +19,7 @@ project(${TARGET_NAME})
 include_directories(src/include)
 
 set(EXTENSION_SOURCES src/ipc/array_stream.cpp src/ipc/stream_factory.cpp src/ipc/ipc_file_stream_reader.cpp
-        src/ipc/ipc_buffer_stream_reader.cpp src/scanner/read_arrow.cpp
+        src/ipc/ipc_buffer_stream_reader.cpp src/scanner/read_arrow.cpp src/scanner/scan_arrow_ipc.cpp
         src/nanoarrow_extension.cpp src/write_arrow_stream.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})

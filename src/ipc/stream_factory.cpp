@@ -3,10 +3,15 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 ArrowIPCStreamFactory::ArrowIPCStreamFactory(ClientContext& context,
-                                           std::string  src_string)
+                                           std::string src_string)
       : fs(FileSystem::GetFileSystem(context)),
         allocator(BufferAllocator::Get(context)),
-        src_string(std::move(src_string)) {};
+        src_string(std::move(src_string)) {}
+
+ArrowIPCStreamFactory::ArrowIPCStreamFactory(ClientContext& context, vector<ArrowIPCBuffer> buffers): fs(FileSystem::GetFileSystem(context)),
+        allocator(BufferAllocator::Get(context)),
+        buffers(std::move(buffers)) {
+}
 
 unique_ptr<ArrowArrayStreamWrapper> ArrowIPCStreamFactory::Produce(
      uintptr_t factory_ptr,  ArrowStreamParameters& parameters) {
@@ -40,10 +45,14 @@ unique_ptr<ArrowArrayStreamWrapper> ArrowIPCStreamFactory::Produce(
     if (reader) {
       throw InternalException("ArrowArrayStream or IpcStreamReader already initialized");
     }
-
-    unique_ptr<FileHandle> handle =
-        fs.OpenFile(src_string, FileOpenFlags::FILE_FLAGS_READ);
-    reader = make_uniq<IpcFileStreamReader>(fs, std::move(handle), allocator);
+    // FIXME: bit hacky, clean this up
+    D_ASSERT(src_string.empty() || buffers.empty());
+    if (!src_string.empty()) {
+        unique_ptr<FileHandle> handle = fs.OpenFile(src_string, FileOpenFlags::FILE_FLAGS_READ);
+      reader = make_uniq<IpcFileStreamReader>(fs, std::move(handle), allocator);
+    } else {
+      reader = make_uniq<IPCBufferStreamReader>(fs, buffers, allocator);
+    }
   }
 
 } // namespace ext_nanoarrow

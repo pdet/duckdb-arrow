@@ -3,7 +3,7 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 
-IPCBufferStreamReader::IPCBufferStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator){
+IPCBufferStreamReader::IPCBufferStreamReader(FileSystem& fs, vector<ArrowIPCBuffer> buffers, Allocator& allocator){
 
 }
   //! Gets the output schema, which is the file schema with projection pushdown being considered

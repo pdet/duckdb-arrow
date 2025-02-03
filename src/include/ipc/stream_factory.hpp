@@ -12,6 +12,7 @@
 
 #include "duckdb/common/arrow/arrow_wrapper.hpp"
 #include "duckdb/function/table/arrow.hpp"
+#include "table_function/scan_arrow_ipc.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
@@ -27,6 +28,8 @@ public:
   explicit ArrowIPCStreamFactory(ClientContext& context,
                                            std::string  src_string);
 
+  explicit ArrowIPCStreamFactory(ClientContext& context, vector<ArrowIPCBuffer> buffers);
+
   //! Called once when initializing Scan States
   static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr,  ArrowStreamParameters& parameters);
 
@@ -40,6 +43,7 @@ public:
   FileSystem& fs;
   Allocator& allocator;
   std::string src_string;
+  vector<ArrowIPCBuffer> buffers;
   unique_ptr<IPCStreamReader> reader;
   ArrowError error{};
 };
