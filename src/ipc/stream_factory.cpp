@@ -49,7 +49,7 @@ unique_ptr<ArrowArrayStreamWrapper> ArrowIPCStreamFactory::Produce(
     D_ASSERT(src_string.empty() || buffers.empty());
     if (!src_string.empty()) {
         unique_ptr<FileHandle> handle = fs.OpenFile(src_string, FileOpenFlags::FILE_FLAGS_READ);
-      reader = make_uniq<IpcFileStreamReader>(fs, std::move(handle), allocator);
+      reader = make_uniq<IPCFileStreamReader>(fs, std::move(handle), allocator);
     } else {
       reader = make_uniq<IPCBufferStreamReader>(fs, buffers, allocator);
     }

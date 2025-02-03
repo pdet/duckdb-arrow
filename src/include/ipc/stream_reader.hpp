@@ -42,82 +42,79 @@ struct ArrowIpcMessagePrefix {
 class IPCStreamReader {
 public:
   virtual ~IPCStreamReader() = default;
-  IPCStreamReader() = default;
+  IPCStreamReader(): decoder(NewDuckDBArrowDecoder()){};
   //! Gets the output schema, which is the file schema with projection pushdown being considered
-  virtual const ArrowSchema* GetOutputSchema() {
-    throw InternalException("IPCStreamReader::GetOutputSchema not implemented");
-  }
+  const ArrowSchema* GetOutputSchema();
   //! Gets the next batch
-  virtual bool GetNextBatch(ArrowArray* out) {
-    throw InternalException("IPCStreamReader::GetNextBatch not implemented");
-  }
+ bool GetNextBatch(ArrowArray* out);
 
    //! Sets the projection pushdown for this reader
   virtual void SetColumnProjection(const vector<string>& column_names) {
     throw InternalException("IPCStreamReader::SetColumnProjection not implemented");
   }
   //! Gets the base schema with no projection pushdown
-  virtual const ArrowSchema* GetBaseSchema() {
-    throw InternalException("IPCStreamReader::GetBaseSchema not implemented");
+  const ArrowSchema* GetBaseSchema();
+
+  ArrowIpcMessageType ReadNextMessage(vector<ArrowIpcMessageType> expected_types,
+                                      bool end_of_stream_ok = true);
+  virtual ArrowIpcMessageType  ReadNextMessage() {
+    throw InternalException("IPCStreamReader::ReadNextMessage not implemented");
   }
+protected:
+  bool HasProjection() const;
+  static nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder();
+
+  static ArrowBufferView AllocatedDataView(const_data_ptr_t data, int64_t size);
+  static nanoarrow::UniqueBuffer AllocatedDataToOwningBuffer(shared_ptr<AllocatedData> data);
+
+  static const char* MessageTypeString(ArrowIpcMessageType message_type);
+
+  ArrowError error{};
+  nanoarrow::ipc::UniqueDecoder decoder{};
+  vector<int64_t> projected_fields;
+  nanoarrow::UniqueSchema projected_schema;
+  //! Schema without projection applied to it
+  nanoarrow::UniqueSchema base_schema;
+
+  //! Information on current buffer
+  data_ptr_t cur_ptr{};
+  int64_t cur_size{};
 };
 
 //! Buffer Stream
 class IPCBufferStreamReader final : public IPCStreamReader {
 public:
   IPCBufferStreamReader(FileSystem& fs, vector<ArrowIPCBuffer> buffers, Allocator& allocator);
-  //! Gets the output schema, which is the file schema with projection pushdown being considered
-  const ArrowSchema* GetOutputSchema();
-  bool GetNextBatch(ArrowArray* out);
+
 };
 
 //! IPC File
-class IpcFileStreamReader final : public IPCStreamReader {
+class IPCFileStreamReader final : public IPCStreamReader {
  public:
-  IpcFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator);
-  const ArrowSchema* GetOutputSchema() override;
-  bool GetNextBatch(ArrowArray* out) override;
+  IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator);
+
   void SetColumnProjection(const vector<string>& column_names) override;
-  const ArrowSchema* GetBaseSchema() override;
+
+  ArrowIpcMessageType ReadNextMessage() override;
 
  private:
   static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
-  nanoarrow::ipc::UniqueDecoder decoder{};
+
   bool finished{false};
   BufferedFileReader file_reader;
   Allocator& allocator;
-  ArrowError error{};
 
   ArrowIpcMessagePrefix message_prefix{};
   AllocatedData message_header;
   shared_ptr<AllocatedData> message_body;
 
-  nanoarrow::UniqueSchema file_schema;
-  nanoarrow::UniqueSchema projected_schema;
-  vector<int64_t> projected_fields;
-
-  ArrowIpcMessageType ReadNextMessage(vector<ArrowIpcMessageType> expected_types,
-                                      bool end_of_stream_ok = true);
-
-  ArrowIpcMessageType ReadNextMessage();
-
   void EnsureInputStreamAligned();
 
   static int64_t CountFields(const ArrowSchema* schema);
 
-  static ArrowBufferView AllocatedDataView(const AllocatedData& data);
-
-  static nanoarrow::UniqueBuffer AllocatedDataToOwningBuffer(shared_ptr<AllocatedData> data);
-
-  static const char* MessageTypeString(ArrowIpcMessageType message_type);
-
-  bool HasProjection() const;
-
   static void DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, ArrowArray* out,  ArrowBufferView& body_view, ArrowError *error);
 
   void PopulateNames(vector<string>& names);
-
-  static nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder();
 
 };
 } // namespace ext_nanoarrow

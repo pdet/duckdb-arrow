@@ -1,17 +1,63 @@
+#include <zstd.h>
+
+#include <cinttypes>
+
 #include "ipc/stream_reader.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
 
+// A version of ArrowDecompressZstd that uses DuckDB's C++ namespaceified
+// zstd.h header that doesn't work with a C compiler
+static ArrowErrorCode DuckDBDecompressZstd(struct ArrowBufferView src, uint8_t* dst,
+                                           int64_t dst_size, struct ArrowError* error) {
+  size_t code = duckdb_zstd::ZSTD_decompress((void*)dst, (size_t)dst_size, src.data.data,
+                                             src.size_bytes);
+  if (duckdb_zstd::ZSTD_isError(code)) {
+    ArrowErrorSet(error,
+                  "ZSTD_decompress([buffer with %" PRId64
+                  " bytes] -> [buffer with %" PRId64 " bytes]) failed with error '%s'",
+                  src.size_bytes, dst_size, duckdb_zstd::ZSTD_getErrorName(code));
+    return EIO;
+  }
 
-  IpcFileStreamReader::IpcFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator)
-      : decoder(NewDuckDBArrowDecoder()),
-        file_reader(fs, std::move(handle)),
+  if (dst_size != static_cast<int64_t>(code)) {
+    ArrowErrorSet(error,
+                  "Expected decompressed size of %" PRId64 " bytes but got %" PRId64
+                  " bytes",
+                  dst_size, static_cast<int64_t>(code));
+    return EIO;
+  }
+
+  return NANOARROW_OK;
+}
+
+
+  IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator)
+      : file_reader(fs, std::move(handle)),
         allocator(allocator) {}
 
-  const ArrowSchema* IpcFileStreamReader::GetBaseSchema() {
-    if (file_schema->release) {
-      return file_schema.get();
+// Create an ArrowIpcDecoder() with the appropriate decompressor set.
+// We could also define a decompressor that uses threads to parellelize
+// decompression for batches with many columns.
+nanoarrow::ipc::UniqueDecoder IPCStreamReader::NewDuckDBArrowDecoder() {
+  nanoarrow::ipc::UniqueDecompressor decompressor;
+  NANOARROW_THROW_NOT_OK(ArrowIpcSerialDecompressor(decompressor.get()));
+  NANOARROW_THROW_NOT_OK(ArrowIpcSerialDecompressorSetFunction(
+      decompressor.get(), NANOARROW_IPC_COMPRESSION_TYPE_ZSTD, DuckDBDecompressZstd));
+
+  nanoarrow::ipc::UniqueDecoder decoder;
+  NANOARROW_THROW_NOT_OK(ArrowIpcDecoderInit(decoder.get()));
+  NANOARROW_THROW_NOT_OK(
+      ArrowIpcDecoderSetDecompressor(decoder.get(), decompressor.get()));
+  // Bug in nanoarrow!
+  decompressor->release = nullptr;
+  return decoder;
+}
+
+  const ArrowSchema* IPCStreamReader::GetBaseSchema() {
+    if (base_schema->release) {
+      return base_schema.get();
     }
 
     ReadNextMessage({NANOARROW_IPC_MESSAGE_TYPE_SCHEMA}, /*end_of_stream_ok*/ false);
@@ -22,20 +68,20 @@ namespace ext_nanoarrow {
 
     // Decode the schema
     THROW_NOT_OK(IOException, &error,
-                 ArrowIpcDecoderDecodeSchema(decoder.get(), file_schema.get(), &error));
+                 ArrowIpcDecoderDecodeSchema(decoder.get(), base_schema.get(), &error));
 
     // Set up the decoder to decode batches
     THROW_NOT_OK(InternalException, &error,
                  ArrowIpcDecoderSetEndianness(decoder.get(), decoder->endianness));
     THROW_NOT_OK(InternalException, &error,
-                 ArrowIpcDecoderSetSchema(decoder.get(), file_schema.get(), &error));
+                 ArrowIpcDecoderSetSchema(decoder.get(), base_schema.get(), &error));
 
-    return file_schema.get();
+    return base_schema.get();
   }
 
-  bool IpcFileStreamReader::HasProjection() const { return !projected_fields.empty(); }
+  bool IPCStreamReader::HasProjection() const { return !projected_fields.empty(); }
 
-  const ArrowSchema* IpcFileStreamReader::GetOutputSchema() {
+  const ArrowSchema* IPCStreamReader::GetOutputSchema() {
     if (HasProjection()) {
       return projected_schema.get();
     } else {
@@ -43,11 +89,11 @@ namespace ext_nanoarrow {
     }
   }
 
-  void IpcFileStreamReader::PopulateNames(vector<string>& names) {
+  void IPCFileStreamReader::PopulateNames(vector<string>& names) {
     GetBaseSchema();
 
-    for (int64_t i = 0; i < file_schema->n_children; i++) {
-      const ArrowSchema* column = file_schema->children[i];
+    for (int64_t i = 0; i < base_schema->n_children; i++) {
+      const ArrowSchema* column = base_schema->children[i];
       if (!column->name) {
         names.push_back("");
       } else {
@@ -56,7 +102,7 @@ namespace ext_nanoarrow {
     }
   }
 
-void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, ArrowArray* out,  ArrowBufferView& body_view, ArrowError *error) {
+void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, ArrowArray* out,  ArrowBufferView& body_view, ArrowError *error) {
     // Use the ArrowIpcSharedBuffer if we have thread safety (i.e., if this was
     // compiled with a compiler that supports C11 atomics, i.e., not gcc 4.8 or
     // MSVC)
@@ -67,7 +113,7 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
     ArrowArrayMove(array.get(), out);
   }
 
-  bool IpcFileStreamReader::GetNextBatch(ArrowArray* out) {
+  bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
     // When nanoarrow supports dictionary batches, we'd accept either a
     // RecordBatch or DictionaryBatch message, recording the dictionary batch
     // (or possibly ignoring it if it is for a field that we don't care about),
@@ -82,11 +128,11 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
     // Use the ArrowIpcSharedBuffer if we have thread safety (i.e., if this was
     // compiled with a compiler that supports C11 atomics, i.e., not gcc 4.8 or
     // MSVC)
-    bool thread_safe_shared = ArrowIpcSharedBufferIsThreadSafe();
-    struct ArrowBufferView body_view = AllocatedDataView(*message_body);
-    nanoarrow::UniqueBuffer body_shared = AllocatedDataToOwningBuffer(message_body);
+    bool thread_safe_shared = ArrowIpcSharedBufferIsThreadSafe() && false;
+    struct ArrowBufferView body_view = AllocatedDataView(cur_ptr, cur_size);
+    // nanoarrow::UniqueBuffer body_shared = AllocatedDataToOwningBuffer(message_body);
     UniqueSharedBuffer shared;
-    NANOARROW_THROW_NOT_OK(ArrowIpcSharedBufferInit(&shared.data, body_shared.get()));
+    // NANOARROW_THROW_NOT_OK(ArrowIpcSharedBufferInit(&shared.data, body_shared.get()));
 
     nanoarrow::UniqueArray array;
     if (HasProjection()) {
@@ -128,7 +174,7 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
     return true;
   }
 
-  void IpcFileStreamReader::SetColumnProjection(const vector<string>& column_names) {
+  void IPCFileStreamReader::SetColumnProjection(const vector<string>& column_names) {
     if (column_names.empty()) {
       throw InternalException("Can't request zero fields projected from IpcStreamReader");
     }
@@ -151,8 +197,8 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
 
     // Loop over columns to build the field map
     int64_t field_count = 0;
-    for (int64_t i = 0; i < file_schema->n_children; i++) {
-      const ArrowSchema* column = file_schema->children[i];
+    for (int64_t i = 0; i < base_schema->n_children; i++) {
+      const ArrowSchema* column = base_schema->children[i];
       string name;
       if (!column->name) {
         name = "";
@@ -196,7 +242,7 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
     projected_schema = std::move(schema);
   }
 
-  ArrowIpcMessageType IpcFileStreamReader::ReadNextMessage(vector<ArrowIpcMessageType> expected_types,
+  ArrowIpcMessageType IPCStreamReader::ReadNextMessage(vector<ArrowIpcMessageType> expected_types,
                                       bool end_of_stream_ok) {
     ArrowIpcMessageType actual_type = ReadNextMessage();
     if (end_of_stream_ok && actual_type == NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED) {
@@ -229,7 +275,7 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
                       " Arrow IPC message but got " + actual_type_label);
   }
 
-    ArrowIpcMessageType IpcFileStreamReader::ReadNextMessage() {
+    ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
     if (finished || file_reader.Finished()) {
       finished = true;
       return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
@@ -245,7 +291,7 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
       return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
     }
 
-    // If we're at the beginning of the read and we see the Arrow file format
+    // If we're at the beginning of the read, and we see the Arrow file format
     // header bytes, skip them and try to read the stream anyway. This works because
     // there's a full stream within an Arrow file (including the EOS indicator, which
     // is key to success. This EOS indicator is unfortunately missing in Rust releases
@@ -291,14 +337,13 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
                          message_prefix.metadata_size);
 
     ArrowErrorCode decode_header_status = ArrowIpcDecoderDecodeHeader(
-        decoder.get(), AllocatedDataView(message_header), &error);
+        decoder.get(), AllocatedDataView(message_header.get(), static_cast<int64_t>(message_header.GetSize())), &error);
     if (decode_header_status == ENODATA) {
       finished = true;
       return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
     } else {
       THROW_NOT_OK(IOException, &error, decode_header_status);
     }
-
     if (decoder->body_size_bytes > 0) {
       EnsureInputStreamAligned();
       message_body =
@@ -309,11 +354,19 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
       // are reading a small portion of the input from a seekable file.
       file_reader.ReadData(message_body->get(), decoder->body_size_bytes);
     }
+  if (message_body) {
+    cur_ptr = message_body->get();
+    cur_size = static_cast<int64_t>(message_body->GetSize());
+  } else {
+    cur_ptr = nullptr;
+    cur_size = 0;
+  }
+
 
     return decoder->message_type;
   }
 
-  void IpcFileStreamReader::EnsureInputStreamAligned() {
+  void IPCFileStreamReader::EnsureInputStreamAligned() {
     uint8_t padding[8];
     int padding_bytes = 8 - (file_reader.CurrentOffset() % 8);
     if (padding_bytes != 8) {
@@ -323,7 +376,7 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
     D_ASSERT((file_reader.CurrentOffset() % 8) == 0);
   }
 
-  int64_t IpcFileStreamReader::CountFields(const ArrowSchema* schema) {
+  int64_t IPCFileStreamReader::CountFields(const ArrowSchema* schema) {
     int64_t n_fields = 1;
     for (int64_t i = 0; i < schema->n_children; i++) {
       n_fields += CountFields(schema->children[i]);
@@ -331,14 +384,14 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
     return n_fields;
   }
 
-  ArrowBufferView IpcFileStreamReader::AllocatedDataView(const AllocatedData& data) {
+  ArrowBufferView IPCStreamReader::AllocatedDataView(const_data_ptr_t data, int64_t size) {
     ArrowBufferView view;
-    view.data.data = data.get();
-    view.size_bytes = UnsafeNumericCast<int64_t>(data.GetSize());
+    view.data.data = data;
+    view.size_bytes = size;
     return view;
   }
 
-  nanoarrow::UniqueBuffer IpcFileStreamReader::AllocatedDataToOwningBuffer(
+  nanoarrow::UniqueBuffer IPCStreamReader::AllocatedDataToOwningBuffer(
       shared_ptr<AllocatedData> data) {
     nanoarrow::UniqueBuffer out;
     nanoarrow::BufferInitWrapped(out.get(), data, data->get(),
@@ -346,7 +399,7 @@ void IpcFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
     return out;
   }
 
-  const char* IpcFileStreamReader::MessageTypeString(ArrowIpcMessageType message_type) {
+  const char* IPCStreamReader::MessageTypeString(ArrowIpcMessageType message_type) {
     switch (message_type) {
       case NANOARROW_IPC_MESSAGE_TYPE_SCHEMA:
         return "Schema";
