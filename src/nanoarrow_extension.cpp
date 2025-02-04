@@ -32,7 +32,7 @@ struct NanoarrowVersion {
 void LoadInternal(DatabaseInstance& db) {
   NanoarrowVersion::Register(db);
   ext_nanoarrow::RegisterReadArrowStream(db);
-  // ext_nanoarrow::ScanArrowIPC::RegisterReadArrowStream(db);
+  ext_nanoarrow::ScanArrowIPC::RegisterReadArrowStream(db);
   ext_nanoarrow::RegisterArrowStreamCopyFunction(db);
 }
 
