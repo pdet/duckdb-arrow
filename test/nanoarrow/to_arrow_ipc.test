@@ -9,6 +9,9 @@
 require nanoarrow
 
 statement ok
+SET disabled_optimizers='column_lifetime'
+
+statement ok
 SELECT * FROM to_arrow_ipc((SELECT 'Its working!'));
 
 # Test operator caching behaviour is sane

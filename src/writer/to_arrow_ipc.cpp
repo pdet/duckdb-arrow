@@ -28,7 +28,7 @@ struct ToArrowIpcGlobalState : public GlobalTableFunctionState {
 };
 
 struct ToArrowIpcLocalState : public LocalTableFunctionState {
-  unique_ptr<ArrowAppender> appender;
+  // unique_ptr<ArrowAppender> appender;
   unique_ptr<ColumnDataCollectionSerializer> serializer;
   idx_t current_count = 0;
   bool checked_schema = false;
@@ -41,8 +41,6 @@ ToArrowIPCFunction::InitLocal(ExecutionContext &context,
   auto local_state = make_uniq<ToArrowIpcLocalState>();
   auto properties = context.client.GetClientProperties();
   local_state->serializer = make_uniq<ColumnDataCollectionSerializer>(properties, BufferAllocator::Get(context.client));
-  auto bind_data = input.bind_data->Cast<ToArrowIpcFunctionData>();
-  local_state->serializer->Init(&bind_data.schema, bind_data.logical_types);
   return local_state;
 }
 
@@ -101,9 +99,10 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
   }
 
   if (sending_schema) {
+    local_state.serializer->Init(&data.schema, data.logical_types);
     local_state.serializer->SerializeSchema();
     arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
-    output.data[1].SetValue(0, Value::BOOLEAN(1));
+    output.data[1].SetValue(0, Value::BOOLEAN(true));
   } else {
     // if (!local_state.appender) {
     //   local_state.appender = make_uniq<ArrowAppender>(input.GetTypes(), data.chunk_size,
@@ -120,6 +119,7 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
     if (caching_disabled || local_state.current_count >= data.chunk_size) {
       // Construct record batch from DataChunk
       // ArrowArray arr = local_state.appender->Finalize();
+      input.Print();
       local_state.serializer->Serialize(input);
       arrow_serialized_ipc_buffer = local_state.serializer->GetBody();
 
@@ -127,7 +127,7 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
       // local_state.appender.reset();
       local_state.current_count = 0;
 
-      output.data[1].SetValue(0, Value::BOOLEAN(0));
+      output.data[1].SetValue(0, Value::BOOLEAN(false));
     } else {
       return OperatorResultType::NEED_MORE_INPUT;
     }
@@ -153,10 +153,10 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
 
 OperatorFinalizeResultType ToArrowIPCFunction::FunctionFinal(
     ExecutionContext &context, TableFunctionInput &data_p, DataChunk &output) {
-  // auto &data = (ToArrowIpcFunctionData &)*data_p.bind_data;
-  // auto &local_state = (ToArrowIpcLocalState &)*data_p.local_state;
+  auto &data = (ToArrowIpcFunctionData &)*data_p.bind_data;
+  auto &local_state = (ToArrowIpcLocalState &)*data_p.local_state;
   // std::shared_ptr<arrow::Buffer> arrow_serialized_ipc_buffer;
-  //
+
   // // TODO clean up
   // if (local_state.appender) {
   //   ArrowArray arr = local_state.appender->Finalize();

@@ -34,9 +34,9 @@ void LoadInternal(DatabaseInstance& db) {
   NanoarrowVersion::Register(db);
   ext_nanoarrow::RegisterReadArrowStream(db);
   ext_nanoarrow::RegisterArrowStreamCopyFunction(db);
+
   ext_nanoarrow::ScanArrowIPC::RegisterReadArrowStream(db);
   ext_nanoarrow::ToArrowIPCFunction::RegisterToIPCFunction(db);
-
 }
 
 }  // namespace
