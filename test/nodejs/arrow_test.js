@@ -29,7 +29,7 @@ const to_ipc_functions = {
 }
 
 function getDatabase() {
-    return new duckdb.Database(':memory:', {"allow_unsigned_extensions":"true"});
+    return new duckdb.Database(':memory:', {"allow_unsigned_extensions":"true", "allow_extensions_metadata_mismatch":"true"});
 }
 
 function getConnection(db, done) {
