@@ -3,6 +3,7 @@
 #include "nanoarrow_extension.hpp"
 
 #include <string>
+#include <writer/to_arrow_ipc.hpp>
 
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/extension_util.hpp"
@@ -32,8 +33,10 @@ struct NanoarrowVersion {
 void LoadInternal(DatabaseInstance& db) {
   NanoarrowVersion::Register(db);
   ext_nanoarrow::RegisterReadArrowStream(db);
-  ext_nanoarrow::ScanArrowIPC::RegisterReadArrowStream(db);
   ext_nanoarrow::RegisterArrowStreamCopyFunction(db);
+  ext_nanoarrow::ScanArrowIPC::RegisterReadArrowStream(db);
+  ext_nanoarrow::ToArrowIPCFunction::RegisterToIPCFunction(db);
+
 }
 
 }  // namespace
