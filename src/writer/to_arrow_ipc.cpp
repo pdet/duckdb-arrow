@@ -119,7 +119,7 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
     if (caching_disabled || local_state.current_count >= data.chunk_size) {
       // Construct record batch from DataChunk
       // ArrowArray arr = local_state.appender->Finalize();
-      input.Print();
+      // input.Print();
       local_state.serializer->Serialize(input);
       arrow_serialized_ipc_buffer = local_state.serializer->GetBody();
 
@@ -193,7 +193,7 @@ TableFunction ToArrowIPCFunction::GetFunction() {
 }
 
 void ToArrowIPCFunction::RegisterToIPCFunction(DatabaseInstance& db) {
-  auto function = GetFunction();
+  const auto function = GetFunction();
   ExtensionUtil::RegisterFunction(db, function);
 }
 }  // namespace ext_nanoarrow

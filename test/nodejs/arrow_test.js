@@ -28,16 +28,25 @@ const to_ipc_functions = {
     'materialized': arrow_ipc_materialized,
 }
 
+function getDatabase() {
+    return new duckdb.Database(':memory:', {"allow_unsigned_extensions":"true"});
+}
 
+function getConnection(db, done) {
+    let conn = new duckdb.Connection(db);
+    conn.exec(`LOAD '${process.env.ARROW_EXTENSION_BINARY_PATH}';`, function (err) {
+        if (err) throw err;
+        done();
+    });
+    return conn
+}
 
 describe(`Arrow IPC`, () => {
     let db;
     let conn;
     before((done) => {
-        db = new duckdb.Database(':memory:', {"allow_unsigned_extensions":"true", "allow_extensions_metadata_mismatch":"true"});
-        conn = db.connect();
-        conn.exec(`LOAD '${process.env.ARROW_EXTENSION_BINARY_PATH}';`);
-        done();
+        db = getDatabase();
+        conn = getConnection(db, () => done())
     });
 
     it(`Basic examples`, async () => {
@@ -113,10 +122,8 @@ for (const [name, fun] of Object.entries(to_ipc_functions)) {
         let db;
         let conn;
         before((done) => {
-            db = new duckdb.Database(':memory:', {"allow_unsigned_extensions":"true", "allow_extensions_metadata_mismatch":"true"});
-            conn = db.connect();
-            conn.exec(`LOAD '${process.env.ARROW_EXTENSION_BINARY_PATH}';`);
-            done();
+            db = getDatabase();
+            conn = getConnection(db, () => done())
         });
 
         it(`Buffers are not garbage collected`, async () => {
@@ -215,11 +222,13 @@ describe('[Benchmark] Arrow IPC Single Int Column (50M tuples)',() => {
     let conn;
 
     before((done) => {
-        db = new duckdb.Database(':memory:', {"allow_unsigned_extensions":"true", "allow_extensions_metadata_mismatch":"true"});
-        conn = db.connect();
-        conn.exec(`LOAD '${process.env.ARROW_EXTENSION_BINARY_PATH}';`);
-        conn.run("CREATE TABLE test AS select * FROM range(0,?) tbl(i);", column_size);
-        done();
+        db = getDatabase();
+        conn = getConnection(db, () => {
+            conn.run("CREATE TABLE test AS select * FROM range(0,?) tbl(i);", column_size, (err) => {
+                if (err) throw err;
+                done()
+            });
+        })
     });
 
     it('DuckDB table -> DuckDB table', (done) => {
@@ -244,6 +253,132 @@ describe('[Benchmark] Arrow IPC Single Int Column (50M tuples)',() => {
     });
 });
 
+describe('Buffer registration',() => {
+    let db;
+    let conn1;
+    let conn2;
+
+    before((done) => {
+        db = new duckdb.Database(':memory:',  {"allow_unsigned_extensions":"true"});
+        conn1 = new duckdb.Connection(db);
+        conn2 = new duckdb.Connection(db);
+        done();
+    });
+
+    before((done) => {
+        db = getDatabase();
+        conn1 = getConnection(db, () => {
+            conn2 = getConnection(db, () => done());
+        })
+    });
+
+    it('Buffers can only be overwritten with force flag',  async () => {
+        const arrow_buffer = await arrow_ipc_materialized(conn1, "SELECT 1337 as a");
+
+        conn1.register_buffer('arrow_buffer', arrow_buffer, true, (err) => {
+            assert(!err);
+        })
+
+        await new Promise((resolve, reject) => {
+            try {
+                conn1.register_buffer('arrow_buffer', arrow_buffer, false);
+                reject("Expected query to fail");
+            } catch (err) {
+                assert(err.message.includes('Buffer with this name already exists and force_register is not enabled'));
+                resolve();
+            }
+        });
+    });
+
+    it('Existing tables are silently shadowed by registered buffers',  async () => {
+        // Unregister, in case other test has registered this
+        conn1.unregister_buffer('arrow_buffer', (err) => {
+            assert(!err);
+        });
+
+        conn1.run('CREATE TABLE arrow_buffer AS SELECT 7 as a;', (err) => {
+            assert(!err);
+        });
+
+        conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
+            assert(!err);
+            assert.deepEqual(result, [{'a': 7}]);
+        });
+
+        const arrow_buffer = await arrow_ipc_materialized(conn1, "SELECT 1337 as b");
+
+        conn1.register_buffer('arrow_buffer', arrow_buffer, true, (err) => {
+            assert(!err);
+        })
+
+        conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
+            assert(!err);
+            assert.deepEqual(result, [{'b': 1337}]);
+        });
+
+        conn1.unregister_buffer('arrow_buffer', (err) => {
+            assert(!err);
+        });
+
+        conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
+            assert(!err);
+            assert.deepEqual(result, [{'a': 7}]);
+        });
+
+        await new Promise((resolve, reject) => {
+            // Cleanup
+            conn1.run('DROP TABLE arrow_buffer;', (err) => {
+                if (err) reject(err);
+                resolve();
+            });
+
+        });
+    });
+
+    it('Registering buffers should only be visible within current connection', async () => {
+        const arrow_buffer1 = await arrow_ipc_materialized(conn1, "SELECT 1337 as a");
+        const arrow_buffer2 = await arrow_ipc_materialized(conn2, "SELECT 42 as b");
+
+        conn1.register_buffer('arrow_buffer', arrow_buffer1, true, (err) => {
+            assert(!err);
+        })
+        conn2.register_buffer('arrow_buffer', arrow_buffer2, true, (err) => {
+            assert(!err);
+        })
+
+        conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
+            assert(!err);
+            assert.deepEqual(result, [{'a': 1337}]);
+        });
+
+        conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
+            assert(!err);
+            assert.deepEqual(result, [{'b': 42}]);
+        });
+
+        conn1 = 0;
+
+        conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
+            assert(!err);
+            assert.deepEqual(result, [{'b': 42}]);
+        });
+
+        conn2.unregister_buffer('arrow_buffer', (err) => {
+            assert(!err);
+        })
+
+        await new Promise((resolve, reject) => {
+            conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
+                if (!err) {
+                    reject("Expected error");
+                }
+                assert(err.message.includes('Catalog Error: Table with name arrow_buffer does not exist!'));
+                resolve();
+            });
+        });
+    });
+});
+
 describe('[Benchmark] Arrow IPC TPC-H lineitem.parquet', () => {
     const sql = "SELECT sum(l_extendedprice * l_discount) AS revenue FROM lineitem WHERE l_shipdate >= CAST('1994-01-01' AS date) AND l_shipdate < CAST('1995-01-01' AS date) AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24"
     const answer = [{revenue: 1193053.2253}];
@@ -252,12 +387,9 @@ describe('[Benchmark] Arrow IPC TPC-H lineitem.parquet', () => {
     let conn;
 
     before((done) => {
-        db = new duckdb.Database(':memory:', {"allow_unsigned_extensions":"true", "allow_extensions_metadata_mismatch":"true"});
-        conn = db.connect();
-        conn.exec(`LOAD '${process.env.ARROW_EXTENSION_BINARY_PATH}';`);
-        done();
+        db = getDatabase();
+        conn = getConnection(db, () => done())
     });
-
 
     it('Parquet -> DuckDB Streaming-> Arrow IPC -> DuckDB Query', async () => {
         const ipc_buffers = await arrow_ipc_stream(conn, 'SELECT * FROM "' + parquet_file_path + '"');
@@ -341,10 +473,8 @@ for (const [name, fun] of Object.entries(to_ipc_functions)) {
         let db;
         let conn;
         before((done) => {
-            db = new duckdb.Database(':memory:', {"allow_unsigned_extensions":"true", "allow_extensions_metadata_mismatch":"true"});
-            conn = db.connect();
-            conn.exec(`LOAD '${process.env.ARROW_EXTENSION_BINARY_PATH}';`);
-            done();
+            db = getDatabase();
+            conn = getConnection(db, () => done())
         });
 
         for (const query of queries) {
