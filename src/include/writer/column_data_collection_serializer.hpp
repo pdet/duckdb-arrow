@@ -86,8 +86,6 @@ class ColumnDataCollectionSerializer {
     ArrowConverter::ToArrowArray(chunk, chunk_arrow.get(), options, extension_types);
     THROW_NOT_OK(duckdb::InternalException, &error,
                  ArrowArrayViewSetArray(chunk_view.get(), chunk_arrow.get(), &error));
-// FIXME THIS HAS TO BE CONCATENATED INTO ONE BUFFER
-
     THROW_NOT_OK(InternalException, &error,
                  ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(),
                                                         body.get(), &error));
