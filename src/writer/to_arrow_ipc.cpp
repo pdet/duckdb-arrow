@@ -84,8 +84,10 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
   bool sending_schema = false;
 
   bool caching_disabled = !PhysicalOperator::OperatorCachingAllowed(context);
+  local_state.serializer->Init(&data.schema, data.logical_types);
 
   if (!local_state.checked_schema) {
+
     if (!global_state.sent_schema) {
       lock_guard<mutex> init_lock(global_state.lock);
       if (!global_state.sent_schema) {
@@ -99,7 +101,6 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
   }
 
   if (sending_schema) {
-    local_state.serializer->Init(&data.schema, data.logical_types);
     local_state.serializer->SerializeSchema();
     arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
     output.data[1].SetValue(0, Value::BOOLEAN(true));
@@ -119,9 +120,14 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
     if (caching_disabled || local_state.current_count >= data.chunk_size) {
       // Construct record batch from DataChunk
       // ArrowArray arr = local_state.appender->Finalize();
-      // input.Print();
       local_state.serializer->Serialize(input);
-      arrow_serialized_ipc_buffer = local_state.serializer->GetBody();
+      arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
+      auto body = local_state.serializer->GetBody();
+      idx_t ipc_buffer_size = arrow_serialized_ipc_buffer->size_bytes;
+      arrow_serialized_ipc_buffer->data = arrow_serialized_ipc_buffer->allocator.reallocate(&arrow_serialized_ipc_buffer->allocator,arrow_serialized_ipc_buffer->data,ipc_buffer_size,ipc_buffer_size + body->size_bytes);
+      arrow_serialized_ipc_buffer->size_bytes+=body->size_bytes;
+      arrow_serialized_ipc_buffer->capacity_bytes +=body->size_bytes;
+      memcpy(arrow_serialized_ipc_buffer->data + ipc_buffer_size,body->data,body->size_bytes);
 
       // Reset appender
       // local_state.appender.reset();
@@ -143,7 +149,7 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
   auto data_ptr = (string_t *)vector.GetData();
   *data_ptr = string_t(ptr,len);
   output.SetCardinality(1);
-
+  output.Verify();
   if (sending_schema) {
     return OperatorResultType::HAVE_MORE_OUTPUT;
   } else {
@@ -153,8 +159,8 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
 
 OperatorFinalizeResultType ToArrowIPCFunction::FunctionFinal(
     ExecutionContext &context, TableFunctionInput &data_p, DataChunk &output) {
-  auto &data = (ToArrowIpcFunctionData &)*data_p.bind_data;
-  auto &local_state = (ToArrowIpcLocalState &)*data_p.local_state;
+  // auto &data = (ToArrowIpcFunctionData &)*data_p.bind_data;
+  // auto &local_state = (ToArrowIpcLocalState &)*data_p.local_state;
   // std::shared_ptr<arrow::Buffer> arrow_serialized_ipc_buffer;
 
   // // TODO clean up

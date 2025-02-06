@@ -83,14 +83,14 @@ class ColumnDataCollectionSerializer {
      body->size_bytes = 0;
      chunk_arrow.reset();
 
-    converter.ToArrowArray(chunk, chunk_arrow.get(), options, extension_types);
+    ArrowConverter::ToArrowArray(chunk, chunk_arrow.get(), options, extension_types);
     THROW_NOT_OK(duckdb::InternalException, &error,
                  ArrowArrayViewSetArray(chunk_view.get(), chunk_arrow.get(), &error));
+// FIXME THIS HAS TO BE CONCATENATED INTO ONE BUFFER
 
     THROW_NOT_OK(InternalException, &error,
                  ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(),
                                                         body.get(), &error));
-
     NANOARROW_THROW_NOT_OK(
         ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
 
@@ -139,7 +139,7 @@ class ColumnDataCollectionSerializer {
   ArrowSchema* schema;
   unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>> extension_types;
   nanoarrow::ipc::UniqueEncoder encoder;
-  ArrowConverter converter;
+  // ArrowConverter converter;
   nanoarrow::UniqueArrayView chunk_view;
   nanoarrow::UniqueArray chunk_arrow;
   nanoarrow::UniqueBuffer header;

@@ -48,6 +48,7 @@ struct ScanArrowIPCFunction : ArrowTableFunction {
 static void ScanArrowIPCScan(ClientContext &context, TableFunctionInput &data_p,
                                               DataChunk &output) {
   if (!data_p.local_state) {
+
     return;
   }
   auto &data = data_p.bind_data->CastNoConst<ArrowScanFunctionData>();
@@ -89,7 +90,7 @@ static void ScanArrowIPCScan(ClientContext &context, TableFunctionInput &data_p,
       {LogicalType::LIST(LogicalType::STRUCT(make_buffer_struct_children))},
       ScanArrowIPCScan,
       ScanArrowIPCBind,
-     ArrowScanInitGlobal,
+      ArrowScanInitGlobal,
       ArrowScanInitLocal);
 
   scan_arrow_ipc_func.cardinality = ArrowScanCardinality;
