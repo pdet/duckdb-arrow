@@ -2,7 +2,7 @@
 
 #include <inttypes.h>
 
-#include <zstd.h>
+#include "zstd.h"
 
 #include "duckdb/common/radix.hpp"
 #include "duckdb/common/serializer/buffered_file_reader.hpp"

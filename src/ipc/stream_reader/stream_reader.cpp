@@ -1,5 +1,5 @@
 #include "ipc/stream_reader/stream_reader.hpp"
-#include <zstd.h>
+#include "zstd.h"
 #include <cinttypes>
 
 namespace duckdb {
