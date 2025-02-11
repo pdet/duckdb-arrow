@@ -14,13 +14,19 @@ ArrowIpcMessageType IPCBufferStreamReader::ReadNextMessage() {
       finished = true;
       return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
     }
-    std::cout << cur_idx;
     cur_ptr = reinterpret_cast<data_ptr_t>(buffers[cur_idx].ptr);
     cur_size = static_cast<int64_t>(buffers[cur_idx].size);
+    cur_buffer_pos = 0;
     cur_idx++;
-    return NANOARROW_IPC_MESSAGE_TYPE_RECORD_BATCH;
+    ReadData(reinterpret_cast<data_ptr_t>(&message_prefix),sizeof(message_prefix));
+    return DecodeMessage();
 }
 
+void IPCBufferStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
+  D_ASSERT(size + cur_buffer_pos< cur_size);
+  memcpy(ptr, cur_ptr + cur_buffer_pos, size);
+  cur_buffer_pos += size;
+}
 
 
 } // namespace ext_nanoarrow

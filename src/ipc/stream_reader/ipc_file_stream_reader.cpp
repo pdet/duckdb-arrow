@@ -35,6 +35,7 @@ void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
  void IPCFileStreamReader::ReadData(data_ptr_t ptr, idx_t size)  {
   file_reader.ReadData(ptr, size);
   }
+
 ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
     if (finished || file_reader.Finished()) {
       finished = true;
@@ -70,7 +71,6 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
                                     std::to_string(message_prefix.continuation_token)));
     }
     return DecodeMessage();
-
   }
 
   void IPCFileStreamReader::EnsureInputStreamAligned() {

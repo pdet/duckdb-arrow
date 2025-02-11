@@ -81,23 +81,23 @@ describe(`Arrow IPC`, () => {
             })
         });
 
-        // const reader3 = await arrow.RecordBatchReader.from(result_materialized);
-        // const table3 = await arrow.tableFromIPC(reader3);
-        // const array_from_arrow3 = table3.toArray();
-        // assert.deepEqual(array_from_arrow3, arrow_table_expected.toArray());
-        //
-        // // Scanning materialized IPC buffers from DuckDB
-        // db.register_buffer("ipc_table", result_materialized, true);
-        // await new Promise((resolve, reject) => {
-        //     db.arrowIPCAll(`SELECT * FROM ipc_table`, function (err, result) {
-        //         if (err) {
-        //             reject(err);
-        //         }
-        //
-        //         assert.deepEqual(result, result_materialized);
-        //         resolve()
-        //     });
-        // });
+        const reader3 = await arrow.RecordBatchReader.from(result_materialized);
+        const table3 = await arrow.tableFromIPC(reader3);
+        const array_from_arrow3 = table3.toArray();
+        assert.deepEqual(array_from_arrow3, arrow_table_expected.toArray());
+
+        // Scanning materialized IPC buffers from DuckDB
+        db.register_buffer("ipc_table", result_materialized, true);
+        await new Promise((resolve, reject) => {
+            db.arrowIPCAll(`SELECT * FROM ipc_table`, function (err, result) {
+                if (err) {
+                    reject(err);
+                }
+
+                assert.deepEqual(result, result_materialized);
+                resolve()
+            });
+        });
     });
 
     // Ensure we handle empty result properly
@@ -115,104 +115,104 @@ describe(`Arrow IPC`, () => {
     }
 })
 
-// for (const [name, fun] of Object.entries(to_ipc_functions)) {
-//     describe(`DuckDB <-> Arrow IPC (${name})`, () => {
-//         const total = 1000;
-//
-//         let db;
-//         let conn;
-//         before((done) => {
-//             db = getDatabase();
-//             conn = getConnection(db, () => done())
-//         });
-//
-//         // it(`Buffers are not garbage collected`, async () => {
-//         //     let ipc_buffers = await fun(conn, 'SELECT * FROM range(1001, 2001) tbl(i)');
-//         //
-//         //     // Now to scan the buffer, we first need to register it
-//         //     conn.register_buffer(`ipc_table_${name}`, ipc_buffers, true);
-//         //
-//         //     // Delete JS reference to arrays
-//         //     ipc_buffers = 0;
-//         //
-//         //     // Run GC to ensure file is deleted
-//         //     if (global.gc) {
-//         //         global.gc();
-//         //     } else {
-//         //         throw "should run with --expose-gc";
-//         //     }
-//         //
-//         //     // Spray memory overwriting hopefully old buffer
-//         //     let spray_results = [];
-//         //     for (let i = 0; i < 3000; i++) {
-//         //         spray_results.push(await fun(db, 'SELECT * FROM range(2001, 3001) tbl(i)'));
-//         //     }
-//         //
-//         //     // Now we can query the ipc buffer using DuckDB by providing an object with an alias and the materialized ipc buffers
-//         //     await new Promise((resolve, reject) => {
-//         //         conn.all(`SELECT avg(i) as average, count(1) as total
-//         //                 FROM ipc_table_${name};`, function (err, result) {
-//         //             if (err) {
-//         //                 reject(err);
-//         //             }
-//         //             // assert.deepEqual(result, [{average: 1500.5, total: 1000}]);
-//         //             resolve();
-//         //         });
-//         //     });
-//         // });
-//
-//         it(`Round-trip int column`, async () => {
-//             // Now we fetch the ipc stream object and construct the RecordBatchReader
-//             const ipc_buffers = await fun(db, 'SELECT * FROM range(1001, 2001) tbl(i)');
-//
-//             // Now to scan the buffer, we first need to register it
-//             conn.register_buffer("ipc_table", ipc_buffers, true, (err) => {
-//                 assert(!err);
-//             });
-//
-//             // Now we can query the ipc buffer using DuckDB by providing an object with an alias and the materialized ipc buffers
-//             await new Promise((resolve, reject) => {
-//                 conn.all(`SELECT avg(i) as average, count(1) as total
-//                         FROM ipc_table;`, function (err, result) {
-//                     if (err) {
-//                         reject(err)
-//                     }
-//                     assert.deepEqual(result, [{average: 1500.5, total: 1000}]);
-//                     resolve();
-//                 });
-//             });
-//         });
-//
-//
-//         it(`Joining 2 IPC buffers in DuckDB`, async () => {
-//             // Insert first table
-//             const ipc_buffers1 = await fun(db, 'SELECT * FROM range(1, 3) tbl(i)');
-//
-//             // Insert second table
-//             const ipc_buffers2 = await fun(db, 'SELECT * FROM range(2, 4) tbl(i)');
-//
-//             // Register buffers for scanning from DuckDB
-//             conn.register_buffer("table1", ipc_buffers1, true, (err) => {
-//                 assert(!err);
-//             });
-//             conn.register_buffer("table2", ipc_buffers2, true, (err) => {
-//                 assert(!err);
-//             });
-//
-//             await new Promise((resolve, reject) => {
-//                 conn.all(`SELECT *
-//                         FROM table1
-//                                  JOIN table2 ON table1.i = table2.i;`, function (err, result) {
-//                     if (err) {
-//                         reject(err);
-//                     }
-//                     assert.deepEqual(result, [{i: 2}]);
-//                     resolve()
-//                 });
-//             });
-//         });
-//     })
-// }
+for (const [name, fun] of Object.entries(to_ipc_functions)) {
+    describe(`DuckDB <-> Arrow IPC (${name})`, () => {
+        const total = 1000;
+
+        let db;
+        let conn;
+        before((done) => {
+            db = getDatabase();
+            conn = getConnection(db, () => done())
+        });
+
+        it(`Buffers are not garbage collected`, async () => {
+            let ipc_buffers = await fun(conn, 'SELECT * FROM range(1001, 2001) tbl(i)');
+
+            // Now to scan the buffer, we first need to register it
+            conn.register_buffer(`ipc_table_${name}`, ipc_buffers, true);
+
+            // Delete JS reference to arrays
+            ipc_buffers = 0;
+
+            // Run GC to ensure file is deleted
+            if (global.gc) {
+                global.gc();
+            } else {
+                throw "should run with --expose-gc";
+            }
+
+            // Spray memory overwriting hopefully old buffer
+            let spray_results = [];
+            for (let i = 0; i < 3000; i++) {
+                spray_results.push(await fun(db, 'SELECT * FROM range(2001, 3001) tbl(i)'));
+            }
+
+            // Now we can query the ipc buffer using DuckDB by providing an object with an alias and the materialized ipc buffers
+            await new Promise((resolve, reject) => {
+                conn.all(`SELECT avg(i) as average, count(1) as total
+                        FROM ipc_table_${name};`, function (err, result) {
+                    if (err) {
+                        reject(err);
+                    }
+                    assert.deepEqual(result, [{average: 1500.5, total: 1000}]);
+                    resolve();
+                });
+            });
+        });
+
+        it(`Round-trip int column`, async () => {
+            // Now we fetch the ipc stream object and construct the RecordBatchReader
+            const ipc_buffers = await fun(db, 'SELECT * FROM range(1001, 2001) tbl(i)');
+
+            // Now to scan the buffer, we first need to register it
+            conn.register_buffer("ipc_table", ipc_buffers, true, (err) => {
+                assert(!err);
+            });
+
+            // Now we can query the ipc buffer using DuckDB by providing an object with an alias and the materialized ipc buffers
+            await new Promise((resolve, reject) => {
+                conn.all(`SELECT avg(i) as average, count(1) as total
+                        FROM ipc_table;`, function (err, result) {
+                    if (err) {
+                        reject(err)
+                    }
+                    assert.deepEqual(result, [{average: 1500.5, total: 1000}]);
+                    resolve();
+                });
+            });
+        });
+
+
+        it(`Joining 2 IPC buffers in DuckDB`, async () => {
+            // Insert first table
+            const ipc_buffers1 = await fun(db, 'SELECT * FROM range(1, 3) tbl(i)');
+
+            // Insert second table
+            const ipc_buffers2 = await fun(db, 'SELECT * FROM range(2, 4) tbl(i)');
+
+            // Register buffers for scanning from DuckDB
+            conn.register_buffer("table1", ipc_buffers1, true, (err) => {
+                assert(!err);
+            });
+            conn.register_buffer("table2", ipc_buffers2, true, (err) => {
+                assert(!err);
+            });
+
+            await new Promise((resolve, reject) => {
+                conn.all(`SELECT *
+                        FROM table1
+                                 JOIN table2 ON table1.i = table2.i;`, function (err, result) {
+                    if (err) {
+                        reject(err);
+                    }
+                    assert.deepEqual(result, [{i: 2}]);
+                    resolve()
+                });
+            });
+        });
+    })
+}
 
 describe('[Benchmark] Arrow IPC Single Int Column (50M tuples)',() => {
     // Config
@@ -253,172 +253,172 @@ describe('[Benchmark] Arrow IPC Single Int Column (50M tuples)',() => {
     });
 });
 
-// describe('Buffer registration',() => {
-//     let db;
-//     let conn1;
-//     let conn2;
+describe('Buffer registration',() => {
+    let db;
+    let conn1;
+    let conn2;
 
-//     before((done) => {
-//         db = new duckdb.Database(':memory:',  {"allow_unsigned_extensions":"true"});
-//         conn1 = new duckdb.Connection(db);
-//         conn2 = new duckdb.Connection(db);
-//         done();
-//     });
+    before((done) => {
+        db = new duckdb.Database(':memory:',  {"allow_unsigned_extensions":"true"});
+        conn1 = new duckdb.Connection(db);
+        conn2 = new duckdb.Connection(db);
+        done();
+    });
 
-//     before((done) => {
-//         db = getDatabase();
-//         conn1 = getConnection(db, () => {
-//             conn2 = getConnection(db, () => done());
-//         })
-//     });
+    before((done) => {
+        db = getDatabase();
+        conn1 = getConnection(db, () => {
+            conn2 = getConnection(db, () => done());
+        })
+    });
 
-//     // it('Buffers can only be overwritten with force flag',  async () => {
-//     //     const arrow_buffer = await arrow_ipc_materialized(conn1, "SELECT 1337 as a");
-//     //
-//     //     conn1.register_buffer('arrow_buffer', arrow_buffer, true, (err) => {
-//     //         assert(!err);
-//     //     })
-//     //
-//     //     await new Promise((resolve, reject) => {
-//     //         try {
-//     //             conn1.register_buffer('arrow_buffer', arrow_buffer, false);
-//     //             reject("Expected query to fail");
-//     //         } catch (err) {
-//     //             assert(err.message.includes('Buffer with this name already exists and force_register is not enabled'));
-//     //             resolve();
-//     //         }
-//     //     });
-//     // });
+    it('Buffers can only be overwritten with force flag',  async () => {
+        const arrow_buffer = await arrow_ipc_materialized(conn1, "SELECT 1337 as a");
 
-//     // it('Existing tables are silently shadowed by registered buffers',  async () => {
-//     //     // Unregister, in case other test has registered this
-//     //     conn1.unregister_buffer('arrow_buffer', (err) => {
-//     //         assert(!err);
-//     //     });
+        conn1.register_buffer('arrow_buffer', arrow_buffer, true, (err) => {
+            assert(!err);
+        })
 
-//     //     conn1.run('CREATE TABLE arrow_buffer AS SELECT 7 as a;', (err) => {
-//     //         assert(!err);
-//     //     });
+        await new Promise((resolve, reject) => {
+            try {
+                conn1.register_buffer('arrow_buffer', arrow_buffer, false);
+                reject("Expected query to fail");
+            } catch (err) {
+                assert(err.message.includes('Buffer with this name already exists and force_register is not enabled'));
+                resolve();
+            }
+        });
+    });
 
-//     //     conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
-//     //         assert(!err);
-//     //         assert.deepEqual(result, [{'a': 7}]);
-//     //     });
+    it('Existing tables are silently shadowed by registered buffers',  async () => {
+        // Unregister, in case other test has registered this
+        conn1.unregister_buffer('arrow_buffer', (err) => {
+            assert(!err);
+        });
 
-//     //     const arrow_buffer = await arrow_ipc_materialized(conn1, "SELECT 1337 as b");
+        conn1.run('CREATE TABLE arrow_buffer AS SELECT 7 as a;', (err) => {
+            assert(!err);
+        });
 
-//     //     conn1.register_buffer('arrow_buffer', arrow_buffer, true, (err) => {
-//     //         assert(!err);
-//     //     })
+        conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
+            assert(!err);
+            assert.deepEqual(result, [{'a': 7}]);
+        });
 
-//     //     conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
-//     //         assert(!err);
-//     //         assert.deepEqual(result, [{'b': 1337}]);
-//     //     });
+        const arrow_buffer = await arrow_ipc_materialized(conn1, "SELECT 1337 as b");
 
-//     //     conn1.unregister_buffer('arrow_buffer', (err) => {
-//     //         assert(!err);
-//     //     });
+        conn1.register_buffer('arrow_buffer', arrow_buffer, true, (err) => {
+            assert(!err);
+        })
 
-//     //     conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
-//     //         assert(!err);
-//     //         assert.deepEqual(result, [{'a': 7}]);
-//     //     });
+        conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
+            assert(!err);
+            assert.deepEqual(result, [{'b': 1337}]);
+        });
 
-//     //     await new Promise((resolve, reject) => {
-//     //         // Cleanup
-//     //         conn1.run('DROP TABLE arrow_buffer;', (err) => {
-//     //             if (err) reject(err);
-//     //             resolve();
-//     //         });
+        conn1.unregister_buffer('arrow_buffer', (err) => {
+            assert(!err);
+        });
 
-//     //     });
-//     // });
+        conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
+            assert(!err);
+            assert.deepEqual(result, [{'a': 7}]);
+        });
 
-//     it('Registering buffers should only be visible within current connection', async () => {
-//         const arrow_buffer1 = await arrow_ipc_materialized(conn1, "SELECT 1337 as a");
-//         const arrow_buffer2 = await arrow_ipc_materialized(conn2, "SELECT 42 as b");
+        await new Promise((resolve, reject) => {
+            // Cleanup
+            conn1.run('DROP TABLE arrow_buffer;', (err) => {
+                if (err) reject(err);
+                resolve();
+            });
 
-//         conn1.register_buffer('arrow_buffer', arrow_buffer1, true, (err) => {
-//             assert(!err);
-//         })
-//         conn2.register_buffer('arrow_buffer', arrow_buffer2, true, (err) => {
-//             assert(!err);
-//         })
+        });
+    });
 
-//         conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
-//             assert(!err);
-//             assert.deepEqual(result, [{'a': 1337}]);
-//         });
-
-//         conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
-//             assert(!err);
-//             assert.deepEqual(result, [{'b': 42}]);
-//         });
-
-//         conn1 = 0;
-
-//         conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
-//             assert(!err);
-//             assert.deepEqual(result, [{'b': 42}]);
-//         });
-
-//         conn2.unregister_buffer('arrow_buffer', (err) => {
-//             assert(!err);
-//         })
-
-//         await new Promise((resolve, reject) => {
-//             conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
-//                 if (!err) {
-//                     reject("Expected error");
-//                 }
-//                 assert(err.message.includes('Catalog Error: Table with name arrow_buffer does not exist!'));
-//                 resolve();
-//             });
-//         });
-//     });
-// });
+    // it('Registering buffers should only be visible within current connection', async () => {
+    //     const arrow_buffer1 = await arrow_ipc_materialized(conn1, "SELECT 1337 as a");
+    //     const arrow_buffer2 = await arrow_ipc_materialized(conn2, "SELECT 42 as b");
+    //
+    //     conn1.register_buffer('arrow_buffer', arrow_buffer1, true, (err) => {
+    //         assert(!err);
+    //     })
+    //     conn2.register_buffer('arrow_buffer', arrow_buffer2, true, (err) => {
+    //         assert(!err);
+    //     })
+    //
+    //     conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
+    //         assert(!err);
+    //         assert.deepEqual(result, [{'a': 1337}]);
+    //     });
+    //
+    //     conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
+    //         assert(!err);
+    //         assert.deepEqual(result, [{'b': 42}]);
+    //     });
+    //
+    //     conn1 = 0;
+    //
+    //     conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
+    //         assert(!err);
+    //         assert.deepEqual(result, [{'b': 42}]);
+    //     });
+    //
+    //     conn2.unregister_buffer('arrow_buffer', (err) => {
+    //         assert(!err);
+    //     })
+    //
+    //     await new Promise((resolve, reject) => {
+    //         conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
+    //             if (!err) {
+    //                 reject("Expected error");
+    //             }
+    //             assert(err.message.includes('Catalog Error: Table with name arrow_buffer does not exist!'));
+    //             resolve();
+    //         });
+    //     });
+    // });
+});
 
 // describe('[Benchmark] Arrow IPC TPC-H lineitem.parquet', () => {
 //     const sql = "SELECT sum(l_extendedprice * l_discount) AS revenue FROM lineitem WHERE l_shipdate >= CAST('1994-01-01' AS date) AND l_shipdate < CAST('1995-01-01' AS date) AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24"
 //     const answer = [{revenue: 1193053.2253}];
-
+//
 //     let db;
 //     let conn;
-
+//
 //     before((done) => {
 //         db = getDatabase();
 //         conn = getConnection(db, () => done())
 //     });
-
+//
 //     it('Parquet -> DuckDB Streaming-> Arrow IPC -> DuckDB Query', async () => {
 //         const ipc_buffers = await arrow_ipc_stream(conn, 'SELECT * FROM "' + parquet_file_path + '"');
-
+//
 //         const query = sql.replace("lineitem", "my_arrow_ipc_stream");
 //         conn.register_buffer("my_arrow_ipc_stream", ipc_buffers, true, (err) => {
 //             assert(!err);
 //         });
-
+//
 //         await new Promise((resolve, reject) => {
 //             conn.all(query, function (err, result) {
 //                 if (err) {
 //                     reject(err)
 //                 }
-
+//
 //                 assert.deepEqual(result, answer);
 //                 resolve();
 //             })
 //         });
 //     });
-
+//
 //     it('Parquet -> DuckDB Materialized -> Arrow IPC -> DuckDB' , async () => {
 //         const ipc_buffers = await arrow_ipc_materialized(conn, 'SELECT * FROM "' + parquet_file_path + '"');
-
+//
 //         const query = sql.replace("lineitem", "my_arrow_ipc_stream_2");
 //         conn.register_buffer("my_arrow_ipc_stream_2", ipc_buffers, true, (err) => {
 //             assert(!err);
 //         });
-
+//
 //         await new Promise((resolve, reject) => {
 //             conn.all(query, function (err, result) {
 //                 if (err) {
@@ -430,7 +430,7 @@ describe('[Benchmark] Arrow IPC Single Int Column (50M tuples)',() => {
 //             })
 //         });
 //     });
-
+//
 //     it('Parquet -> DuckDB', async () => {
 //         await new Promise((resolve, reject) => {
 //             conn.run('CREATE TABLE load_parquet_directly AS SELECT * FROM "' + parquet_file_path + '";', (err) => {
@@ -440,9 +440,9 @@ describe('[Benchmark] Arrow IPC Single Int Column (50M tuples)',() => {
 //                 resolve()
 //             });
 //         });
-
+//
 //         const query = sql.replace("lineitem", "load_parquet_directly");
-
+//
 //         const result = await new Promise((resolve, reject) => {
 //             conn.all(query, function (err, result) {
 //                 if (err) {
@@ -451,66 +451,66 @@ describe('[Benchmark] Arrow IPC Single Int Column (50M tuples)',() => {
 //                 resolve(result)
 //             });
 //         });
-
+//
 //         assert.deepEqual(result, answer);
 //     });
 // });
 
-// for (const [name, fun] of Object.entries(to_ipc_functions)) {
-//     describe(`Arrow IPC TPC-H lineitem SF0.01 (${name})`, () => {
-//         // `table_name` in these queries will be replaced by either the parquet file directly, or the ipc buffer
-//         const queries = [
-//             "select count(*) from table_name LIMIT 10",
-//             "select sum(l_orderkey) as sum_orderkey FROM table_name",
-//             "select * from table_name",
-//             "select l_orderkey from table_name WHERE l_orderkey=2 LIMIT 2",
-//             "select l_extendedprice from table_name",
-//             "select l_extendedprice from table_name WHERE l_extendedprice > 53468 and l_extendedprice < 53469  LIMIT 2",
-//             "select count(l_orderkey) from table_name where l_commitdate > '1996-10-28'",
-//             "SELECT sum(l_extendedprice * l_discount) AS revenue FROM table_name WHERE l_shipdate >= CAST('1994-01-01' AS date) AND l_shipdate < CAST('1995-01-01' AS date) AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24"
-//         ];
+for (const [name, fun] of Object.entries(to_ipc_functions)) {
+    describe(`Arrow IPC TPC-H lineitem SF0.01 (${name})`, () => {
+        // `table_name` in these queries will be replaced by either the parquet file directly, or the ipc buffer
+        const queries = [
+            "select count(*) from table_name LIMIT 10",
+            "select sum(l_orderkey) as sum_orderkey FROM table_name",
+            "select * from table_name",
+            // "select l_orderkey from table_name WHERE l_orderkey=2 LIMIT 2",
+            // "select l_extendedprice from table_name",
+            // "select l_extendedprice from table_name WHERE l_extendedprice > 53468 and l_extendedprice < 53469  LIMIT 2",
+            // "select count(l_orderkey) from table_name where l_commitdate > '1996-10-28'",
+            // "SELECT sum(l_extendedprice * l_discount) AS revenue FROM table_name WHERE l_shipdate >= CAST('1994-01-01' AS date) AND l_shipdate < CAST('1995-01-01' AS date) AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24"
+        ];
 
-//         let db;
-//         let conn;
-//         before((done) => {
-//             db = getDatabase();
-//             conn = getConnection(db, () => done())
-//         });
+        let db;
+        let conn;
+        before((done) => {
+            db = getDatabase();
+            conn = getConnection(db, () => done())
+        });
 
-//         for (const query of queries) {
-//             it(` ${query}`, async () => {
-//                 // First do query directly on parquet file
-//                 const expected_value = await new Promise((resolve, reject) => {
-//                     conn.all(query.replace("table_name", `'${parquet_file_path}'`), function (err, result) {
-//                         if (err) {
-//                             reject(err);
-//                         }
+        for (const query of queries) {
+            it(` ${query}`, async () => {
+                // First do query directly on parquet file
+                const expected_value = await new Promise((resolve, reject) => {
+                    conn.all(query.replace("table_name", `'${parquet_file_path}'`), function (err, result) {
+                        if (err) {
+                            reject(err);
+                        }
 
-//                         resolve(result);
-//                     });
-//                 });
+                        resolve(result);
+                    });
+                });
 
-//                 // Copy parquet file completely into Arrow IPC format
-//                 const ipc_buffers = await fun(conn, 'SELECT * FROM "' + parquet_file_path + '"');
+                // Copy parquet file completely into Arrow IPC format
+                const ipc_buffers = await fun(conn, 'SELECT * FROM "' + parquet_file_path + '"');
 
-//                 // Register the ipc buffers as table in duckdb, using force to override the previously registered buffers
-//                 conn.register_buffer("table_name", ipc_buffers, true, (err) => {
-//                     assert(!err);
-//                 });
+                // Register the ipc buffers as table in duckdb, using force to override the previously registered buffers
+                conn.register_buffer("table_name", ipc_buffers, true, (err) => {
+                    assert(!err);
+                });
 
-//                 await new Promise((resolve, reject) => {
-//                     conn.all(query, function (err, result) {
-//                         if (err) {
-//                             reject(err)
-//                         }
+                await new Promise((resolve, reject) => {
+                    conn.all(query, function (err, result) {
+                        if (err) {
+                            reject(err)
+                        }
 
-//                         assert.deepEqual(result, expected_value, `Query failed: ${query}`);
-//                         resolve();
-//                     })
-//                 });
-//             });
-//         }
-//     })
-// }
+                        assert.deepEqual(result, expected_value, `Query failed: ${query}`);
+                        resolve();
+                    })
+                });
+            });
+        }
+    })
+}
 
 

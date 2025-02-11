@@ -36,15 +36,9 @@ struct ScanArrowIPCFunction : ArrowTableFunction {
     DBConfig& config = DatabaseInstance::GetDatabase(context).config;
     PopulateArrowTableType(config, res->arrow_table, res->schema_root,
                                                names, return_types);
-          std::cout << "here ";
-
     QueryResult::DeduplicateColumns(names);
     res->all_types = return_types;
-      std::cout << "here im happt ";
-
     if (return_types.empty()) {
-            std::cout << "here im sad ";
-
       throw InvalidInputException(
           "Provided table/dataframe must have at least one column");
     }
@@ -53,9 +47,6 @@ struct ScanArrowIPCFunction : ArrowTableFunction {
 }
 static void ScanArrowIPCScan(ClientContext &context, TableFunctionInput &data_p,
                                               DataChunk &output) {
-    output.Print();
-          std::cout << "here ";
-
   if (!data_p.local_state) {
 
     return;
@@ -88,7 +79,6 @@ static void ScanArrowIPCScan(ClientContext &context, TableFunctionInput &data_p,
   }
 
   output.Verify();
-    output.Print();
   state.chunk_offset += output.size();
 }
 

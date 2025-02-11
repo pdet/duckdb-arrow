@@ -50,7 +50,6 @@ nanoarrow::ipc::UniqueDecoder IPCStreamReader::NewDuckDBArrowDecoder() {
 }
 
   const ArrowSchema* IPCStreamReader::GetBaseSchema() {
-  std::cout << " Get base schema baby";
     if (base_schema->release) {
       return base_schema.get();
     }
@@ -85,8 +84,6 @@ nanoarrow::ipc::UniqueDecoder IPCStreamReader::NewDuckDBArrowDecoder() {
   }
 
   bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
-        std::cout << "here ";
-
     // When nanoarrow supports dictionary batches, we'd accept either a
     // RecordBatch or DictionaryBatch message, recording the dictionary batch
     // (or possibly ignoring it if it is for a field that we don't care about),
@@ -106,7 +103,6 @@ nanoarrow::ipc::UniqueDecoder IPCStreamReader::NewDuckDBArrowDecoder() {
     // nanoarrow::UniqueBuffer body_shared = AllocatedDataToOwningBuffer(message_body);
     UniqueSharedBuffer shared;
     // NANOARROW_THROW_NOT_OK(ArrowIpcSharedBufferInit(&shared.data, body_shared.get()));
-  std::cout << "here ";
     nanoarrow::UniqueArray array;
     if (HasProjection()) {
       NANOARROW_THROW_NOT_OK(ArrowArrayInitFromType(array.get(), NANOARROW_TYPE_STRUCT));
