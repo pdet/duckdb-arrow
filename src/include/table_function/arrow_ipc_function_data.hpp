@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - NanoArrow
+//                         DuckDB - nanoarrow
 //
 // table_function/arrow_ipc_function_data.hpp
 //

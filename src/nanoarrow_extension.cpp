@@ -3,7 +3,7 @@
 #include "nanoarrow_extension.hpp"
 
 #include <string>
-#include <writer/to_arrow_ipc.hpp>
+#include "writer/to_arrow_ipc.hpp"
 
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/extension_util.hpp"

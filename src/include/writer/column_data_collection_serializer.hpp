@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - NanoArrow
+//                         DuckDB - nanoarrow
 //
 // writer/column_data_collection_serializer.hpp
 //
@@ -135,7 +135,6 @@ class ColumnDataCollectionSerializer {
   ArrowSchema* schema;
   unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>> extension_types;
   nanoarrow::ipc::UniqueEncoder encoder;
-  // ArrowConverter converter;
   nanoarrow::UniqueArrayView chunk_view;
   nanoarrow::UniqueArray chunk_arrow;
   nanoarrow::UniqueBuffer header;

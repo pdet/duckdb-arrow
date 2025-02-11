@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - NanoArrow
+//                         DuckDB - nanoarrow
 //
 // writer/arrow_stream_writer.hpp
 //
@@ -41,7 +41,7 @@ struct ArrowStreamWriter {
       ArrowStringView value;
       for (const auto& item : metadata) {
         key = {item.first.data(), static_cast<int64_t>(item.first.size())};
-        key = {item.second.data(), static_cast<int64_t>(item.second.size())};
+        value = {item.second.data(), static_cast<int64_t>(item.second.size())};
         NANOARROW_THROW_NOT_OK(
             ArrowMetadataBuilderAppend(metadata_packed.get(), key, value));
       }

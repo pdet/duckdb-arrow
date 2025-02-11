@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - NanoArrow
+//                         DuckDB - nanoarrow
 //
 // ipc/stream_reader/ipc_file_stream_reader.hpp
 //

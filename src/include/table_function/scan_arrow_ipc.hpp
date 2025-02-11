@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - NanoArrow
+//                         DuckDB - nanoarrow
 //
 // table_function/scan_arrow_ipc.hpp
 //
@@ -9,7 +9,6 @@
 #pragma once
 
 #include "duckdb/function/table/arrow.hpp"
-// #include "arrow_stream_buffer.hpp"
 
 #include "duckdb.hpp"
 

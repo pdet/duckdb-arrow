@@ -80,7 +80,6 @@ void IPCFileStreamReader::EnsureInputStreamAligned() {
   if (padding_bytes != 8) {
     file_reader.ReadData(padding, padding_bytes);
   }
-
   D_ASSERT((file_reader.CurrentOffset() % 8) == 0);
 }
 

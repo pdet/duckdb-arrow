@@ -102,7 +102,9 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
     arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
     output.data[1].SetValue(0, Value::BOOLEAN(true));
   } else {
-    // if (!local_state.appender) {
+    // TODO The following code is necessary in the future to avoid creating a message per
+    // chunk: By using an appender that appends multiple chunks and serializes the whole
+    // thing if (!local_state.appender) {
     //   local_state.appender = make_uniq<ArrowAppender>(input.GetTypes(),
     //   data.chunk_size,
     //                                context.client.GetClientProperties(),
@@ -117,6 +119,11 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
     // If chunk size is reached, we can flush to IPC blob
     if (caching_disabled || local_state.current_count >= data.chunk_size) {
       // Construct record batch from DataChunk
+      // TODO The following code is necessary in the future to avoid creating a message
+      // per chunk:
+      // TODO  By using an appender that appends multiple chunks and serializes the whole
+      // thing
+
       // ArrowArray arr = local_state.appender->Finalize();
       local_state.serializer->Serialize(input);
       arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
@@ -130,6 +137,10 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
       arrow_serialized_ipc_buffer->capacity_bytes += body->size_bytes;
       memcpy(arrow_serialized_ipc_buffer->data + ipc_buffer_size, body->data,
              body->size_bytes);
+      // TODO The following code is necessary in the future to avoid creating a message
+      // per chunk:
+      // TODO By using an appender that appends multiple chunks and serializes the whole
+      // thing
 
       // Reset appender
       // local_state.appender.reset();
@@ -141,7 +152,6 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
     }
   }
 
-  // TODO clean up
   auto ptr = reinterpret_cast<const char*>(arrow_serialized_ipc_buffer->data);
   auto len = arrow_serialized_ipc_buffer->size_bytes;
   auto wrapped_buffer =
@@ -162,11 +172,14 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
 OperatorFinalizeResultType ToArrowIPCFunction::FunctionFinal(ExecutionContext& context,
                                                              TableFunctionInput& data_p,
                                                              DataChunk& output) {
+  // TODO The following code is necessary in the future to avoid creating a message per
+  // chunk:
+  // TODO By using an appender that appends multiple chunks and serializes the whole thing
+
   // auto &data = (ToArrowIpcFunctionData &)*data_p.bind_data;
   // auto &local_state = (ToArrowIpcLocalState &)*data_p.local_state;
   // std::shared_ptr<arrow::Buffer> arrow_serialized_ipc_buffer;
 
-  // // TODO clean up
   // if (local_state.appender) {
   //   ArrowArray arr = local_state.appender->Finalize();
   //   auto record_batch =
