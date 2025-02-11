@@ -63,7 +63,8 @@ class IPCStreamReader {
 
  protected:
   virtual void EnsureInputStreamAligned() {
-    // nop
+    // nop by default. This method is called in the DecodeMessage() and necessary only for
+    // the file reader, for the buffer reader it does nothing.
   }
   virtual void ReadData(data_ptr_t ptr, idx_t size) {
     throw InternalException("IPCStreamReader::ReadData not implemented");
