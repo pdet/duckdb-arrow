@@ -1,7 +1,7 @@
 //===----------------------------------------------------------------------===//
 //                         DuckDB - NanoArrow
 //
-// ipc/stream_reader/stream_reader.hpp
+// ipc/stream_reader/base_stream_reader.hpp
 //
 //
 //===----------------------------------------------------------------------===//
@@ -59,6 +59,13 @@ public:
     throw InternalException("IPCStreamReader::ReadNextMessage not implemented");
   }
 protected:
+  virtual void EnsureInputStreamAligned() {
+    //nop
+  }
+  virtual void ReadData(data_ptr_t ptr, idx_t size) {
+    throw InternalException("IPCStreamReader::ReadData not implemented");
+  }
+  ArrowIpcMessageType DecodeMessage();
   bool HasProjection() const;
   static nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder();
 
@@ -85,6 +92,9 @@ protected:
 
   bool finished{false};
 
+  ArrowIpcMessagePrefix message_prefix{};
+  AllocatedData message_header;
+  shared_ptr<AllocatedData> message_body;
 };
 
 } // namespace ext_nanoarrow

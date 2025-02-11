@@ -1,5 +1,7 @@
 #include "ipc/stream_reader/ipc_buffer_stream_reader.hpp"
 
+#include <iostream>
+
 namespace duckdb {
 namespace ext_nanoarrow {
 
@@ -12,6 +14,7 @@ ArrowIpcMessageType IPCBufferStreamReader::ReadNextMessage() {
       finished = true;
       return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
     }
+    std::cout << cur_idx;
     cur_ptr = reinterpret_cast<data_ptr_t>(buffers[cur_idx].ptr);
     cur_size = static_cast<int64_t>(buffers[cur_idx].size);
     cur_idx++;

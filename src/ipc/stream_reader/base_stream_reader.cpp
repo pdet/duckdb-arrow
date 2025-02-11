@@ -1,6 +1,7 @@
-#include "ipc/stream_reader/stream_reader.hpp"
-#include "zstd.h"
+#include "ipc/stream_reader/base_stream_reader.hpp"
 #include <cinttypes>
+#include <iostream>
+#include "zstd.h"
 
 namespace duckdb {
 namespace ext_nanoarrow {
@@ -49,6 +50,7 @@ nanoarrow::ipc::UniqueDecoder IPCStreamReader::NewDuckDBArrowDecoder() {
 }
 
   const ArrowSchema* IPCStreamReader::GetBaseSchema() {
+  std::cout << " Get base schema baby";
     if (base_schema->release) {
       return base_schema.get();
     }
@@ -83,6 +85,8 @@ nanoarrow::ipc::UniqueDecoder IPCStreamReader::NewDuckDBArrowDecoder() {
   }
 
   bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
+        std::cout << "here ";
+
     // When nanoarrow supports dictionary batches, we'd accept either a
     // RecordBatch or DictionaryBatch message, recording the dictionary batch
     // (or possibly ignoring it if it is for a field that we don't care about),
@@ -102,7 +106,7 @@ nanoarrow::ipc::UniqueDecoder IPCStreamReader::NewDuckDBArrowDecoder() {
     // nanoarrow::UniqueBuffer body_shared = AllocatedDataToOwningBuffer(message_body);
     UniqueSharedBuffer shared;
     // NANOARROW_THROW_NOT_OK(ArrowIpcSharedBufferInit(&shared.data, body_shared.get()));
-
+  std::cout << "here ";
     nanoarrow::UniqueArray array;
     if (HasProjection()) {
       NANOARROW_THROW_NOT_OK(ArrowArrayInitFromType(array.get(), NANOARROW_TYPE_STRUCT));
@@ -210,6 +214,63 @@ nanoarrow::ipc::UniqueDecoder IPCStreamReader::NewDuckDBArrowDecoder() {
     projected_schema = std::move(schema);
   }
 
+
+  ArrowIpcMessageType IPCStreamReader::DecodeMessage() {
+     idx_t metadata_size;
+    if (!Radix::IsLittleEndian()) {
+      metadata_size = static_cast<int32_t>(BSWAP32(message_prefix.metadata_size));
+    } else {
+      metadata_size = message_prefix.metadata_size;
+    }
+
+    if (metadata_size < 0) {
+      throw IOException(std::string("Expected metadata size >= 0 but got " +
+                                    std::to_string(metadata_size)));
+    }
+
+    // Ensure we have enough space to read the header
+    idx_t message_header_size = metadata_size + sizeof(message_prefix);
+    if (message_header.GetSize() < message_header_size) {
+      message_header = allocator.Allocate(message_header_size);
+    }
+
+    // Read the message header. I believe the fact that this loops and calls
+    // the file handle's Read() method with relatively small chunks will ensure that
+    // an attempt to read a very large message_header_size can be cancelled. If this
+    // is not the case, we might want to implement our own buffering.
+    std::memcpy(message_header.get(), &message_prefix, sizeof(message_prefix));
+    ReadData(message_header.get() + sizeof(message_prefix),
+                         message_prefix.metadata_size);
+
+    ArrowErrorCode decode_header_status = ArrowIpcDecoderDecodeHeader(
+        decoder.get(), AllocatedDataView(message_header.get(), static_cast<int64_t>(message_header.GetSize())), &error);
+    if (decode_header_status == ENODATA) {
+      finished = true;
+      return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+    } else {
+      THROW_NOT_OK(IOException, &error, decode_header_status);
+    }
+    if (decoder->body_size_bytes > 0) {
+      EnsureInputStreamAligned();
+      message_body =
+          make_shared_ptr<AllocatedData>(allocator.Allocate(decoder->body_size_bytes));
+
+      // Again, this is possibly a long running Read() call for a large body.
+      // We could possibly be smarter about how we do this, particularly if we
+      // are reading a small portion of the input from a seekable file.
+      ReadData(message_body->get(), decoder->body_size_bytes);
+    }
+  if (message_body) {
+    cur_ptr = message_body->get();
+    cur_size = static_cast<int64_t>(message_body->GetSize());
+  } else {
+    cur_ptr = nullptr;
+    cur_size = 0;
+  }
+
+
+    return decoder->message_type;
+  }
   ArrowIpcMessageType IPCStreamReader::ReadNextMessage(vector<ArrowIpcMessageType> expected_types,
                                       bool end_of_stream_ok) {
     ArrowIpcMessageType actual_type = ReadNextMessage();

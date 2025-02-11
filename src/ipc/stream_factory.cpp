@@ -1,4 +1,7 @@
 #include "ipc/stream_factory.hpp"
+
+#include <iostream>
+
 #include "ipc/stream_reader/ipc_buffer_stream_reader.hpp"
 #include "ipc/stream_reader/ipc_file_stream_reader.hpp"
 
@@ -34,12 +37,17 @@ unique_ptr<ArrowArrayStreamWrapper> ArrowIPCStreamFactory::Produce(
   }
 
   void ArrowIPCStreamFactory::GetFileSchema(ArrowSchemaWrapper& schema) const {
+  std::cout << " Get GetFileSchema schema baby";
     if (!reader) {
+        std::cout << " Get GetFileSchema schema baby2";
+
       throw InternalException("IpcStreamReader is no longer valid");
     }
 
     NANOARROW_THROW_NOT_OK(
         ArrowSchemaDeepCopy(reader->GetBaseSchema(), &schema.arrow_schema));
+    std::cout << " Get GetFileSchema schema baby3";
+
   }
 
 

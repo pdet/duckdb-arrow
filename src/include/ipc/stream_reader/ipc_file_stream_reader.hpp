@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "ipc/stream_reader/stream_reader.hpp"
+#include "ipc/stream_reader/base_stream_reader.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
@@ -25,12 +25,9 @@ class IPCFileStreamReader final : public IPCStreamReader {
 
   BufferedFileReader file_reader;
 
-  ArrowIpcMessagePrefix message_prefix{};
-  AllocatedData message_header;
-  shared_ptr<AllocatedData> message_body;
+  void EnsureInputStreamAligned() override;
 
-  void EnsureInputStreamAligned();
-
+  void ReadData(data_ptr_t ptr, idx_t size) override;
   static void DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, ArrowArray* out,  ArrowBufferView& body_view, ArrowError *error);
 
   void PopulateNames(vector<string>& names);

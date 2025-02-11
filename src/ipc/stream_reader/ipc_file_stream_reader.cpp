@@ -32,9 +32,10 @@ void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
     ArrowArrayMove(array.get(), out);
   }
 
-
-
-    ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
+ void IPCFileStreamReader::ReadData(data_ptr_t ptr, idx_t size)  {
+  file_reader.ReadData(ptr, size);
+  }
+ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
     if (finished || file_reader.Finished()) {
       finished = true;
       return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
@@ -68,61 +69,8 @@ void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, Ar
       throw IOException(std::string("Expected continuation token (0xFFFFFFFF) but got " +
                                     std::to_string(message_prefix.continuation_token)));
     }
+    return DecodeMessage();
 
-    idx_t metadata_size;
-    if (!Radix::IsLittleEndian()) {
-      metadata_size = static_cast<int32_t>(BSWAP32(message_prefix.metadata_size));
-    } else {
-      metadata_size = message_prefix.metadata_size;
-    }
-
-    if (metadata_size < 0) {
-      throw IOException(std::string("Expected metadata size >= 0 but got " +
-                                    std::to_string(metadata_size)));
-    }
-
-    // Ensure we have enough space to read the header
-    idx_t message_header_size = metadata_size + sizeof(message_prefix);
-    if (message_header.GetSize() < message_header_size) {
-      message_header = allocator.Allocate(message_header_size);
-    }
-
-    // Read the message header. I believe the fact that this loops and calls
-    // the file handle's Read() method with relatively small chunks will ensure that
-    // an attempt to read a very large message_header_size can be cancelled. If this
-    // is not the case, we might want to implement our own buffering.
-    std::memcpy(message_header.get(), &message_prefix, sizeof(message_prefix));
-    file_reader.ReadData(message_header.get() + sizeof(message_prefix),
-                         message_prefix.metadata_size);
-
-    ArrowErrorCode decode_header_status = ArrowIpcDecoderDecodeHeader(
-        decoder.get(), AllocatedDataView(message_header.get(), static_cast<int64_t>(message_header.GetSize())), &error);
-    if (decode_header_status == ENODATA) {
-      finished = true;
-      return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
-    } else {
-      THROW_NOT_OK(IOException, &error, decode_header_status);
-    }
-    if (decoder->body_size_bytes > 0) {
-      EnsureInputStreamAligned();
-      message_body =
-          make_shared_ptr<AllocatedData>(allocator.Allocate(decoder->body_size_bytes));
-
-      // Again, this is possibly a long running Read() call for a large body.
-      // We could possibly be smarter about how we do this, particularly if we
-      // are reading a small portion of the input from a seekable file.
-      file_reader.ReadData(message_body->get(), decoder->body_size_bytes);
-    }
-  if (message_body) {
-    cur_ptr = message_body->get();
-    cur_size = static_cast<int64_t>(message_body->GetSize());
-  } else {
-    cur_ptr = nullptr;
-    cur_size = 0;
-  }
-
-
-    return decoder->message_type;
   }
 
   void IPCFileStreamReader::EnsureInputStreamAligned() {

@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "ipc/stream_reader/stream_reader.hpp"
+#include "ipc/stream_reader/base_stream_reader.hpp"
 
 namespace duckdb{
 namespace ext_nanoarrow {

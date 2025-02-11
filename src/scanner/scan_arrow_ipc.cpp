@@ -6,7 +6,7 @@
 
 #include "duckdb/function/table/arrow.hpp"
 
-#include "ipc/stream_reader/stream_reader.hpp"
+#include "ipc/stream_reader/base_stream_reader.hpp"
 
 #include "duckdb/function/function.hpp"
 #include "duckdb/function/table/arrow/arrow_duck_schema.hpp"
@@ -36,9 +36,15 @@ struct ScanArrowIPCFunction : ArrowTableFunction {
     DBConfig& config = DatabaseInstance::GetDatabase(context).config;
     PopulateArrowTableType(config, res->arrow_table, res->schema_root,
                                                names, return_types);
+          std::cout << "here ";
+
     QueryResult::DeduplicateColumns(names);
     res->all_types = return_types;
+      std::cout << "here im happt ";
+
     if (return_types.empty()) {
+            std::cout << "here im sad ";
+
       throw InvalidInputException(
           "Provided table/dataframe must have at least one column");
     }
@@ -47,6 +53,9 @@ struct ScanArrowIPCFunction : ArrowTableFunction {
 }
 static void ScanArrowIPCScan(ClientContext &context, TableFunctionInput &data_p,
                                               DataChunk &output) {
+    output.Print();
+          std::cout << "here ";
+
   if (!data_p.local_state) {
 
     return;
@@ -79,6 +88,7 @@ static void ScanArrowIPCScan(ClientContext &context, TableFunctionInput &data_p,
   }
 
   output.Verify();
+    output.Print();
   state.chunk_offset += output.size();
 }
 
