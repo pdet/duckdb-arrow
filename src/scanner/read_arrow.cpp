@@ -46,8 +46,7 @@ struct ReadArrowStream : ArrowTableFunction {
   // DependencyItem mechanism).
   static TableFunction Function() {
     TableFunction fn("read_arrow", {LogicalType::VARCHAR}, Scan, Bind,
-                     ArrowScanInitGlobal,
-                     ArrowScanInitLocal);
+                     ArrowScanInitGlobal, ArrowScanInitLocal);
     fn.cardinality = ArrowScanCardinality;
     fn.projection_pushdown = true;
     fn.filter_pushdown = false;
@@ -102,8 +101,8 @@ struct ReadArrowStream : ArrowTableFunction {
     res->factory->GetFileSchema(res->schema_root);
 
     DBConfig& config = DatabaseInstance::GetDatabase(context).config;
-    PopulateArrowTableType(config, res->arrow_table, res->schema_root,
-                                               names, return_types);
+    PopulateArrowTableType(config, res->arrow_table, res->schema_root, names,
+                           return_types);
     QueryResult::DeduplicateColumns(names);
     res->all_types = return_types;
     if (return_types.empty()) {
@@ -118,9 +117,7 @@ struct ReadArrowStream : ArrowTableFunction {
                    DataChunk& output) {
     ArrowScanFunction(context, data_p, output);
   }
-
 };
-
 
 unique_ptr<FunctionData> ReadArrowStreamBindCopy(ClientContext& context, CopyInfo& info,
                                                  vector<string>& expected_names,

@@ -16,7 +16,8 @@ namespace ext_nanoarrow {
 //! IPC File
 class IPCFileStreamReader final : public IPCStreamReader {
  public:
-  IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator);
+  IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle,
+                      Allocator& allocator);
 
   ArrowIpcMessageType ReadNextMessage() override;
 
@@ -28,10 +29,11 @@ class IPCFileStreamReader final : public IPCStreamReader {
   void EnsureInputStreamAligned() override;
 
   void ReadData(data_ptr_t ptr, idx_t size) override;
-  static void DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, ArrowArray* out,  ArrowBufferView& body_view, ArrowError *error);
+  static void DecodeArray(nanoarrow::ipc::UniqueDecoder& decoder, ArrowArray* out,
+                          ArrowBufferView& body_view, ArrowError* error);
 
   void PopulateNames(vector<string>& names);
 };
 
-} // namespace ext_nanoarrow
-} // namespace duckdb
+}  // namespace ext_nanoarrow
+}  // namespace duckdb

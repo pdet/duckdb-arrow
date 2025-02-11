@@ -10,7 +10,7 @@
 
 #include "ipc/stream_reader/base_stream_reader.hpp"
 
-namespace duckdb{
+namespace duckdb {
 namespace ext_nanoarrow {
 class IpcArrayStream {
  public:
@@ -26,7 +26,7 @@ class IpcArrayStream {
 
   const char* GetLastError() const;
 
-   template <typename Func>
+  template <typename Func>
   int Wrap(Func&& func) {
     try {
       func();
@@ -46,9 +46,10 @@ class IpcArrayStream {
       return EINVAL;
     }
   }
+
  private:
   unique_ptr<IPCStreamReader> reader;
   string last_msg;
 };
-} // namespace ext_nanoarrow
-} // namespace duckdb
+}  // namespace ext_nanoarrow
+}  // namespace duckdb

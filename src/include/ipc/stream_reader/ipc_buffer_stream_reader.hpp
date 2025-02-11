@@ -15,16 +15,17 @@ namespace ext_nanoarrow {
 
 //! Buffer Stream
 class IPCBufferStreamReader final : public IPCStreamReader {
-public:
+ public:
   IPCBufferStreamReader(vector<ArrowIPCBuffer> buffers, Allocator& allocator);
 
   ArrowIpcMessageType ReadNextMessage() override;
-private:
+
+ private:
   void ReadData(data_ptr_t ptr, idx_t size) override;
   vector<ArrowIPCBuffer> buffers;
   idx_t cur_idx = 0;
   idx_t cur_buffer_pos = 0;
 };
 
-} // namespace ext_nanoarrow
-} // namespace duckdb
+}  // namespace ext_nanoarrow
+}  // namespace duckdb

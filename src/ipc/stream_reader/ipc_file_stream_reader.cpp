@@ -4,86 +4,85 @@
 
 namespace duckdb {
 namespace ext_nanoarrow {
-  IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator)
-      : IPCStreamReader(allocator), file_reader(fs, std::move(handle)){}
+IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle,
+                                         Allocator& allocator)
+    : IPCStreamReader(allocator), file_reader(fs, std::move(handle)) {}
 
-
-
-  void IPCFileStreamReader::PopulateNames(vector<string>& names) {
-    GetBaseSchema();
-    for (int64_t i = 0; i < base_schema->n_children; i++) {
-      const ArrowSchema* column = base_schema->children[i];
-      if (!column->name) {
-        names.push_back("");
-      } else {
-        names.push_back(column->name);
-      }
+void IPCFileStreamReader::PopulateNames(vector<string>& names) {
+  GetBaseSchema();
+  for (int64_t i = 0; i < base_schema->n_children; i++) {
+    const ArrowSchema* column = base_schema->children[i];
+    if (!column->name) {
+      names.push_back("");
+    } else {
+      names.push_back(column->name);
     }
   }
+}
 
-void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder &decoder, ArrowArray* out,  ArrowBufferView& body_view, ArrowError *error) {
-    // Use the ArrowIpcSharedBuffer if we have thread safety (i.e., if this was
-    // compiled with a compiler that supports C11 atomics, i.e., not gcc 4.8 or
-    // MSVC)
-    nanoarrow::UniqueArray array;
-    THROW_NOT_OK(InternalException, error,
-    ArrowIpcDecoderDecodeArray(decoder.get(), body_view, -1, array.get(),
-    NANOARROW_VALIDATION_LEVEL_FULL, error));
-    ArrowArrayMove(array.get(), out);
-  }
+void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder& decoder,
+                                      ArrowArray* out, ArrowBufferView& body_view,
+                                      ArrowError* error) {
+  // Use the ArrowIpcSharedBuffer if we have thread safety (i.e., if this was
+  // compiled with a compiler that supports C11 atomics, i.e., not gcc 4.8 or
+  // MSVC)
+  nanoarrow::UniqueArray array;
+  THROW_NOT_OK(InternalException, error,
+               ArrowIpcDecoderDecodeArray(decoder.get(), body_view, -1, array.get(),
+                                          NANOARROW_VALIDATION_LEVEL_FULL, error));
+  ArrowArrayMove(array.get(), out);
+}
 
- void IPCFileStreamReader::ReadData(data_ptr_t ptr, idx_t size)  {
+void IPCFileStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
   file_reader.ReadData(ptr, size);
-  }
+}
 
 ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
-    if (finished || file_reader.Finished()) {
-      finished = true;
-      return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
-    }
-
-    // If there is no more data to be read, we're done!
-    try {
-      EnsureInputStreamAligned();
-      file_reader.ReadData(reinterpret_cast<data_ptr_t>(&message_prefix),
-                           sizeof(message_prefix));
-    } catch (SerializationException& e) {
-      finished = true;
-      return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
-    }
-
-    // If we're at the beginning of the read, and we see the Arrow file format
-    // header bytes, skip them and try to read the stream anyway. This works because
-    // there's a full stream within an Arrow file (including the EOS indicator, which
-    // is key to success. This EOS indicator is unfortunately missing in Rust releases
-    // prior to ~September 2024).
-    //
-    // When we support dictionary encoding we will possibly need to seek to the footer
-    // here, parse that, and maybe lazily seek and read dictionaries for if/when they are
-    // required.
-    if (file_reader.CurrentOffset() == 8 &&
-        std::memcmp("ARROW1\0\0", &message_prefix, 8) == 0) {
-      return ReadNextMessage();
-    }
-
-    if (message_prefix.continuation_token != kContinuationToken) {
-      throw IOException(std::string("Expected continuation token (0xFFFFFFFF) but got " +
-                                    std::to_string(message_prefix.continuation_token)));
-    }
-    return DecodeMessage();
+  if (finished || file_reader.Finished()) {
+    finished = true;
+    return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
   }
 
-  void IPCFileStreamReader::EnsureInputStreamAligned() {
-    uint8_t padding[8];
-    int padding_bytes = 8 - (file_reader.CurrentOffset() % 8);
-    if (padding_bytes != 8) {
-      file_reader.ReadData(padding, padding_bytes);
-    }
-
-    D_ASSERT((file_reader.CurrentOffset() % 8) == 0);
+  // If there is no more data to be read, we're done!
+  try {
+    EnsureInputStreamAligned();
+    file_reader.ReadData(reinterpret_cast<data_ptr_t>(&message_prefix),
+                         sizeof(message_prefix));
+  } catch (SerializationException& e) {
+    finished = true;
+    return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
   }
 
+  // If we're at the beginning of the read, and we see the Arrow file format
+  // header bytes, skip them and try to read the stream anyway. This works because
+  // there's a full stream within an Arrow file (including the EOS indicator, which
+  // is key to success. This EOS indicator is unfortunately missing in Rust releases
+  // prior to ~September 2024).
+  //
+  // When we support dictionary encoding we will possibly need to seek to the footer
+  // here, parse that, and maybe lazily seek and read dictionaries for if/when they are
+  // required.
+  if (file_reader.CurrentOffset() == 8 &&
+      std::memcmp("ARROW1\0\0", &message_prefix, 8) == 0) {
+    return ReadNextMessage();
+  }
 
+  if (message_prefix.continuation_token != kContinuationToken) {
+    throw IOException(std::string("Expected continuation token (0xFFFFFFFF) but got " +
+                                  std::to_string(message_prefix.continuation_token)));
+  }
+  return DecodeMessage();
+}
 
-} // namespace ext_nanoarrow
-} // namespace duckdb
+void IPCFileStreamReader::EnsureInputStreamAligned() {
+  uint8_t padding[8];
+  int padding_bytes = 8 - (file_reader.CurrentOffset() % 8);
+  if (padding_bytes != 8) {
+    file_reader.ReadData(padding, padding_bytes);
+  }
+
+  D_ASSERT((file_reader.CurrentOffset() % 8) == 0);
+}
+
+}  // namespace ext_nanoarrow
+}  // namespace duckdb

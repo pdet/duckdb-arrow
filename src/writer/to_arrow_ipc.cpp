@@ -34,26 +34,25 @@ struct ToArrowIpcLocalState : public LocalTableFunctionState {
   bool checked_schema = false;
 };
 
-unique_ptr<LocalTableFunctionState>
-ToArrowIPCFunction::InitLocal(ExecutionContext &context,
-                              TableFunctionInitInput &input,
-                              GlobalTableFunctionState *global_state) {
+unique_ptr<LocalTableFunctionState> ToArrowIPCFunction::InitLocal(
+    ExecutionContext& context, TableFunctionInitInput& input,
+    GlobalTableFunctionState* global_state) {
   auto local_state = make_uniq<ToArrowIpcLocalState>();
   auto properties = context.client.GetClientProperties();
-  local_state->serializer = make_uniq<ColumnDataCollectionSerializer>(properties, BufferAllocator::Get(context.client));
+  local_state->serializer = make_uniq<ColumnDataCollectionSerializer>(
+      properties, BufferAllocator::Get(context.client));
   return local_state;
 }
 
-unique_ptr<GlobalTableFunctionState>
-ToArrowIPCFunction::InitGlobal(ClientContext &context,
-                               TableFunctionInitInput &input) {
+unique_ptr<GlobalTableFunctionState> ToArrowIPCFunction::InitGlobal(
+    ClientContext& context, TableFunctionInitInput& input) {
   return make_uniq<ToArrowIpcGlobalState>();
 }
 
-unique_ptr<FunctionData>
-ToArrowIPCFunction::Bind(ClientContext &context, TableFunctionBindInput &input,
-                         vector<LogicalType> &return_types,
-                         vector<string> &names) {
+unique_ptr<FunctionData> ToArrowIPCFunction::Bind(ClientContext& context,
+                                                  TableFunctionBindInput& input,
+                                                  vector<LogicalType>& return_types,
+                                                  vector<string>& names) {
   auto result = make_uniq<ToArrowIpcFunctionData>();
 
   result->chunk_size = DEFAULT_CHUNK_SIZE * STANDARD_VECTOR_SIZE;
@@ -72,14 +71,13 @@ ToArrowIPCFunction::Bind(ClientContext &context, TableFunctionBindInput &input,
   return std::move(result);
 }
 
-OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
-                                                TableFunctionInput &data_p,
-                                                DataChunk &input,
-                                                DataChunk &output) {
+OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
+                                                TableFunctionInput& data_p,
+                                                DataChunk& input, DataChunk& output) {
   nanoarrow::UniqueBuffer arrow_serialized_ipc_buffer;
-  auto &data = (ToArrowIpcFunctionData &)*data_p.bind_data;
-  auto &local_state = (ToArrowIpcLocalState &)*data_p.local_state;
-  auto &global_state = (ToArrowIpcGlobalState &)*data_p.global_state;
+  auto& data = (ToArrowIpcFunctionData&)*data_p.bind_data;
+  auto& local_state = (ToArrowIpcLocalState&)*data_p.local_state;
+  auto& global_state = (ToArrowIpcGlobalState&)*data_p.global_state;
 
   bool sending_schema = false;
 
@@ -87,7 +85,6 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
   local_state.serializer->Init(&data.schema, data.logical_types);
 
   if (!local_state.checked_schema) {
-
     if (!global_state.sent_schema) {
       lock_guard<mutex> init_lock(global_state.lock);
       if (!global_state.sent_schema) {
@@ -106,7 +103,8 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
     output.data[1].SetValue(0, Value::BOOLEAN(true));
   } else {
     // if (!local_state.appender) {
-    //   local_state.appender = make_uniq<ArrowAppender>(input.GetTypes(), data.chunk_size,
+    //   local_state.appender = make_uniq<ArrowAppender>(input.GetTypes(),
+    //   data.chunk_size,
     //                                context.client.GetClientProperties(),
     //                                ArrowTypeExtensionData::GetExtensionTypes(
     //                                    context.client, input.GetTypes()));
@@ -124,10 +122,14 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
       arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
       auto body = local_state.serializer->GetBody();
       idx_t ipc_buffer_size = arrow_serialized_ipc_buffer->size_bytes;
-      arrow_serialized_ipc_buffer->data = arrow_serialized_ipc_buffer->allocator.reallocate(&arrow_serialized_ipc_buffer->allocator,arrow_serialized_ipc_buffer->data,ipc_buffer_size,ipc_buffer_size + body->size_bytes);
-      arrow_serialized_ipc_buffer->size_bytes+=body->size_bytes;
-      arrow_serialized_ipc_buffer->capacity_bytes +=body->size_bytes;
-      memcpy(arrow_serialized_ipc_buffer->data + ipc_buffer_size,body->data,body->size_bytes);
+      arrow_serialized_ipc_buffer->data =
+          arrow_serialized_ipc_buffer->allocator.reallocate(
+              &arrow_serialized_ipc_buffer->allocator, arrow_serialized_ipc_buffer->data,
+              ipc_buffer_size, ipc_buffer_size + body->size_bytes);
+      arrow_serialized_ipc_buffer->size_bytes += body->size_bytes;
+      arrow_serialized_ipc_buffer->capacity_bytes += body->size_bytes;
+      memcpy(arrow_serialized_ipc_buffer->data + ipc_buffer_size, body->data,
+             body->size_bytes);
 
       // Reset appender
       // local_state.appender.reset();
@@ -140,14 +142,14 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
   }
 
   // TODO clean up
-  auto ptr = reinterpret_cast<const char *>(arrow_serialized_ipc_buffer->data);
+  auto ptr = reinterpret_cast<const char*>(arrow_serialized_ipc_buffer->data);
   auto len = arrow_serialized_ipc_buffer->size_bytes;
   auto wrapped_buffer =
       make_buffer<ArrowStringVectorBuffer>(std::move(arrow_serialized_ipc_buffer));
-  auto &vector = output.data[0];
+  auto& vector = output.data[0];
   StringVector::AddBuffer(vector, wrapped_buffer);
-  auto data_ptr = (string_t *)vector.GetData();
-  *data_ptr = string_t(ptr,len);
+  auto data_ptr = (string_t*)vector.GetData();
+  *data_ptr = string_t(ptr, len);
   output.SetCardinality(1);
   output.Verify();
   if (sending_schema) {
@@ -157,8 +159,9 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext &context,
   }
 }
 
-OperatorFinalizeResultType ToArrowIPCFunction::FunctionFinal(
-    ExecutionContext &context, TableFunctionInput &data_p, DataChunk &output) {
+OperatorFinalizeResultType ToArrowIPCFunction::FunctionFinal(ExecutionContext& context,
+                                                             TableFunctionInput& data_p,
+                                                             DataChunk& output) {
   // auto &data = (ToArrowIpcFunctionData &)*data_p.bind_data;
   // auto &local_state = (ToArrowIpcLocalState &)*data_p.local_state;
   // std::shared_ptr<arrow::Buffer> arrow_serialized_ipc_buffer;
@@ -190,8 +193,7 @@ OperatorFinalizeResultType ToArrowIPCFunction::FunctionFinal(
 }
 
 TableFunction ToArrowIPCFunction::GetFunction() {
-  TableFunction fun("to_arrow_ipc", {LogicalType::TABLE}, nullptr,
-                    Bind, InitGlobal,
+  TableFunction fun("to_arrow_ipc", {LogicalType::TABLE}, nullptr, Bind, InitGlobal,
                     InitLocal);
   fun.in_out_function = Function;
   fun.in_out_function_final = FunctionFinal;

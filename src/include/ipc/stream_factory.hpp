@@ -24,14 +24,14 @@ class ArrowStreamFactory {
 //! function pointer is passed to the constructor of the ArrowScanFunctionData
 //! constructor (which we wrap).
 class ArrowIPCStreamFactory {
-public:
-  explicit ArrowIPCStreamFactory(ClientContext& context,
-                                           std::string  src_string);
+ public:
+  explicit ArrowIPCStreamFactory(ClientContext& context, std::string src_string);
 
   explicit ArrowIPCStreamFactory(ClientContext& context, vector<ArrowIPCBuffer> buffers);
 
   //! Called once when initializing Scan States
-  static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr,  ArrowStreamParameters& parameters);
+  static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr,
+                                                     ArrowStreamParameters& parameters);
 
   //! Get the schema of the arrow object
   void GetFileSchema(ArrowSchemaWrapper& schema) const;
@@ -47,5 +47,5 @@ public:
   unique_ptr<IPCStreamReader> reader;
   ArrowError error{};
 };
-} // namespace ext_nanoarrow
-} // namespace duckdb
+}  // namespace ext_nanoarrow
+}  // namespace duckdb

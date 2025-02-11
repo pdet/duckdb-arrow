@@ -68,8 +68,7 @@ class ColumnDataCollectionSerializer {
         ArrowTypeExtensionData::GetExtensionTypes(*options.client_context, logical_types);
   }
 
-
-   void SerializeSchema() {
+  void SerializeSchema() {
     header->size_bytes = 0;
     body->size_bytes = 0;
     THROW_NOT_OK(InternalException, &error,
@@ -79,9 +78,9 @@ class ColumnDataCollectionSerializer {
   }
 
   idx_t Serialize(DataChunk& chunk) {
-     header->size_bytes = 0;
-     body->size_bytes = 0;
-     chunk_arrow.reset();
+    header->size_bytes = 0;
+    body->size_bytes = 0;
+    chunk_arrow.reset();
 
     ArrowConverter::ToArrowArray(chunk, chunk_arrow.get(), options, extension_types);
     THROW_NOT_OK(duckdb::InternalException, &error,
@@ -113,7 +112,6 @@ class ColumnDataCollectionSerializer {
       chunk.Append(item, true);
     }
     return Serialize(chunk);
-
   }
 
   void Flush(BufferedFileWriter& writer) {

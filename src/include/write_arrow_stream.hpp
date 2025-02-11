@@ -14,5 +14,5 @@ namespace ext_nanoarrow {
 
 void RegisterArrowStreamCopyFunction(DatabaseInstance& db);
 
-} // namespace ext_nanoarrow
-} // namespace duckdb
+}  // namespace ext_nanoarrow
+}  // namespace duckdb

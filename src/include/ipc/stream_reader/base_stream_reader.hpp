@@ -24,7 +24,7 @@ namespace ext_nanoarrow {
 
 // Missing in nanoarrow_ipc.hpp
 struct UniqueSharedBuffer {
-  struct ArrowIpcSharedBuffer data{};
+  struct ArrowIpcSharedBuffer data {};
 
   ~UniqueSharedBuffer() {
     if (data.private_src.allocator.free != nullptr) {
@@ -40,27 +40,30 @@ struct ArrowIpcMessagePrefix {
 
 //! Base IPC Reader
 class IPCStreamReader {
-public:
+ public:
   virtual ~IPCStreamReader() = default;
-  explicit IPCStreamReader(Allocator& allocator): decoder(NewDuckDBArrowDecoder()), allocator(allocator){};
-  //! Gets the output schema, which is the file schema with projection pushdown being considered
+  explicit IPCStreamReader(Allocator& allocator)
+      : decoder(NewDuckDBArrowDecoder()), allocator(allocator){};
+  //! Gets the output schema, which is the file schema with projection pushdown being
+  //! considered
   const ArrowSchema* GetOutputSchema();
   //! Gets the next batch
- bool GetNextBatch(ArrowArray* out);
+  bool GetNextBatch(ArrowArray* out);
 
-   //! Sets the projection pushdown for this reader
+  //! Sets the projection pushdown for this reader
   void SetColumnProjection(const vector<string>& column_names);
   //! Gets the base schema with no projection pushdown
   const ArrowSchema* GetBaseSchema();
 
   ArrowIpcMessageType ReadNextMessage(vector<ArrowIpcMessageType> expected_types,
                                       bool end_of_stream_ok = true);
-  virtual ArrowIpcMessageType  ReadNextMessage() {
+  virtual ArrowIpcMessageType ReadNextMessage() {
     throw InternalException("IPCStreamReader::ReadNextMessage not implemented");
   }
-protected:
+
+ protected:
   virtual void EnsureInputStreamAligned() {
-    //nop
+    // nop
   }
   virtual void ReadData(data_ptr_t ptr, idx_t size) {
     throw InternalException("IPCStreamReader::ReadData not implemented");
@@ -70,7 +73,8 @@ protected:
   static nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder();
 
   static ArrowBufferView AllocatedDataView(const_data_ptr_t data, int64_t size);
-  static nanoarrow::UniqueBuffer AllocatedDataToOwningBuffer(shared_ptr<AllocatedData> data);
+  static nanoarrow::UniqueBuffer AllocatedDataToOwningBuffer(
+      shared_ptr<AllocatedData> data);
 
   static const char* MessageTypeString(ArrowIpcMessageType message_type);
 
@@ -97,5 +101,5 @@ protected:
   shared_ptr<AllocatedData> message_body;
 };
 
-} // namespace ext_nanoarrow
-} // namespace duckdb
+}  // namespace ext_nanoarrow
+}  // namespace duckdb
