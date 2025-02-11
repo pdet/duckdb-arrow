@@ -48,15 +48,14 @@ struct ScanArrowIPCFunction : ArrowTableFunction {
 static void ScanArrowIPCScan(ClientContext &context, TableFunctionInput &data_p,
                                               DataChunk &output) {
   if (!data_p.local_state) {
-
     return;
   }
+
   auto &data = data_p.bind_data->CastNoConst<ArrowScanFunctionData>();
   auto &state = data_p.local_state->Cast<ArrowScanLocalState>();
   auto &global_state = data_p.global_state->Cast<ArrowScanGlobalState>();
-
   //! Out of tuples in this chunk
-  if (state.chunk_offset >= (idx_t)state.chunk->arrow_array.length) {
+  if (state.chunk_offset >= static_cast<idx_t>(state.chunk->arrow_array.length)) {
     if (!ArrowScanParallelStateNext(context, data_p.bind_data.get(), state,
                                     global_state)) {
       return;

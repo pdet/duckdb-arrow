@@ -27,7 +27,8 @@ unique_ptr<ArrowArrayStreamWrapper> ArrowIPCStreamFactory::Produce(
       throw InternalException("IpcStreamReader was not initialized or was already moved");
     }
 
-    if (!parameters.projected_columns.columns.empty()) {
+    //FIXME: this is not excellent, IPC buffers should have same pushdown as file
+    if (!parameters.projected_columns.columns.empty() && factory->buffers.empty()) {
       factory->reader->SetColumnProjection(parameters.projected_columns.columns);
     }
 

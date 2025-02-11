@@ -98,11 +98,11 @@ nanoarrow::ipc::UniqueDecoder IPCStreamReader::NewDuckDBArrowDecoder() {
     // Use the ArrowIpcSharedBuffer if we have thread safety (i.e., if this was
     // compiled with a compiler that supports C11 atomics, i.e., not gcc 4.8 or
     // MSVC)
-    bool thread_safe_shared = ArrowIpcSharedBufferIsThreadSafe() && false;
+    bool thread_safe_shared = ArrowIpcSharedBufferIsThreadSafe();
     struct ArrowBufferView body_view = AllocatedDataView(cur_ptr, cur_size);
-    // nanoarrow::UniqueBuffer body_shared = AllocatedDataToOwningBuffer(message_body);
+    nanoarrow::UniqueBuffer body_shared = AllocatedDataToOwningBuffer(message_body);
     UniqueSharedBuffer shared;
-    // NANOARROW_THROW_NOT_OK(ArrowIpcSharedBufferInit(&shared.data, body_shared.get()));
+    NANOARROW_THROW_NOT_OK(ArrowIpcSharedBufferInit(&shared.data, body_shared.get()));
     nanoarrow::UniqueArray array;
     if (HasProjection()) {
       NANOARROW_THROW_NOT_OK(ArrowArrayInitFromType(array.get(), NANOARROW_TYPE_STRUCT));

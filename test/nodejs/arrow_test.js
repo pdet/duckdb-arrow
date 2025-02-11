@@ -335,126 +335,126 @@ describe('Buffer registration',() => {
         });
     });
 
-    // it('Registering buffers should only be visible within current connection', async () => {
-    //     const arrow_buffer1 = await arrow_ipc_materialized(conn1, "SELECT 1337 as a");
-    //     const arrow_buffer2 = await arrow_ipc_materialized(conn2, "SELECT 42 as b");
-    //
-    //     conn1.register_buffer('arrow_buffer', arrow_buffer1, true, (err) => {
-    //         assert(!err);
-    //     })
-    //     conn2.register_buffer('arrow_buffer', arrow_buffer2, true, (err) => {
-    //         assert(!err);
-    //     })
-    //
-    //     conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
-    //         assert(!err);
-    //         assert.deepEqual(result, [{'a': 1337}]);
-    //     });
-    //
-    //     conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
-    //         assert(!err);
-    //         assert.deepEqual(result, [{'b': 42}]);
-    //     });
-    //
-    //     conn1 = 0;
-    //
-    //     conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
-    //         assert(!err);
-    //         assert.deepEqual(result, [{'b': 42}]);
-    //     });
-    //
-    //     conn2.unregister_buffer('arrow_buffer', (err) => {
-    //         assert(!err);
-    //     })
-    //
-    //     await new Promise((resolve, reject) => {
-    //         conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
-    //             if (!err) {
-    //                 reject("Expected error");
-    //             }
-    //             assert(err.message.includes('Catalog Error: Table with name arrow_buffer does not exist!'));
-    //             resolve();
-    //         });
-    //     });
-    // });
+    it('Registering buffers should only be visible within current connection', async () => {
+        const arrow_buffer1 = await arrow_ipc_materialized(conn1, "SELECT 1337 as a");
+        const arrow_buffer2 = await arrow_ipc_materialized(conn2, "SELECT 42 as b");
+
+        conn1.register_buffer('arrow_buffer', arrow_buffer1, true, (err) => {
+            assert(!err);
+        })
+        conn2.register_buffer('arrow_buffer', arrow_buffer2, true, (err) => {
+            assert(!err);
+        })
+
+        conn1.all('SELECT * FROM arrow_buffer;', (err, result) => {
+            assert(!err);
+            assert.deepEqual(result, [{'a': 1337}]);
+        });
+
+        conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
+            assert(!err);
+            assert.deepEqual(result, [{'b': 42}]);
+        });
+
+        conn1 = 0;
+
+        conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
+            assert(!err);
+            assert.deepEqual(result, [{'b': 42}]);
+        });
+
+        conn2.unregister_buffer('arrow_buffer', (err) => {
+            assert(!err);
+        })
+
+        await new Promise((resolve, reject) => {
+            conn2.all('SELECT * FROM arrow_buffer;', (err, result) => {
+                if (!err) {
+                    reject("Expected error");
+                }
+                assert(err.message.includes('Catalog Error: Table with name arrow_buffer does not exist!'));
+                resolve();
+            });
+        });
+    });
 });
 
-// describe('[Benchmark] Arrow IPC TPC-H lineitem.parquet', () => {
-//     const sql = "SELECT sum(l_extendedprice * l_discount) AS revenue FROM lineitem WHERE l_shipdate >= CAST('1994-01-01' AS date) AND l_shipdate < CAST('1995-01-01' AS date) AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24"
-//     const answer = [{revenue: 1193053.2253}];
-//
-//     let db;
-//     let conn;
-//
-//     before((done) => {
-//         db = getDatabase();
-//         conn = getConnection(db, () => done())
-//     });
-//
-//     it('Parquet -> DuckDB Streaming-> Arrow IPC -> DuckDB Query', async () => {
-//         const ipc_buffers = await arrow_ipc_stream(conn, 'SELECT * FROM "' + parquet_file_path + '"');
-//
-//         const query = sql.replace("lineitem", "my_arrow_ipc_stream");
-//         conn.register_buffer("my_arrow_ipc_stream", ipc_buffers, true, (err) => {
-//             assert(!err);
-//         });
-//
-//         await new Promise((resolve, reject) => {
-//             conn.all(query, function (err, result) {
-//                 if (err) {
-//                     reject(err)
-//                 }
-//
-//                 assert.deepEqual(result, answer);
-//                 resolve();
-//             })
-//         });
-//     });
-//
-//     it('Parquet -> DuckDB Materialized -> Arrow IPC -> DuckDB' , async () => {
-//         const ipc_buffers = await arrow_ipc_materialized(conn, 'SELECT * FROM "' + parquet_file_path + '"');
-//
-//         const query = sql.replace("lineitem", "my_arrow_ipc_stream_2");
-//         conn.register_buffer("my_arrow_ipc_stream_2", ipc_buffers, true, (err) => {
-//             assert(!err);
-//         });
-//
-//         await new Promise((resolve, reject) => {
-//             conn.all(query, function (err, result) {
-//                 if (err) {
-//                     reject(err)
-//                 } else {
-//                     assert.deepEqual(result, answer);
-//                     resolve();
-//                 }
-//             })
-//         });
-//     });
-//
-//     it('Parquet -> DuckDB', async () => {
-//         await new Promise((resolve, reject) => {
-//             conn.run('CREATE TABLE load_parquet_directly AS SELECT * FROM "' + parquet_file_path + '";', (err) => {
-//                 if (err) {
-//                     reject(err)
-//                 }
-//                 resolve()
-//             });
-//         });
-//
-//         const query = sql.replace("lineitem", "load_parquet_directly");
-//
-//         const result = await new Promise((resolve, reject) => {
-//             conn.all(query, function (err, result) {
-//                 if (err) {
-//                     reject(err);
-//                 }
-//                 resolve(result)
-//             });
-//         });
-//
-//         assert.deepEqual(result, answer);
-//     });
-// });
+describe('[Benchmark] Arrow IPC TPC-H lineitem.parquet', () => {
+    const sql = "SELECT sum(l_extendedprice * l_discount) AS revenue FROM lineitem WHERE l_shipdate >= CAST('1994-01-01' AS date) AND l_shipdate < CAST('1995-01-01' AS date) AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24"
+    const answer = [{revenue: 1193053.2253}];
+
+    let db;
+    let conn;
+
+    before((done) => {
+        db = getDatabase();
+        conn = getConnection(db, () => done())
+    });
+
+    it('Parquet -> DuckDB Streaming-> Arrow IPC -> DuckDB Query', async () => {
+        const ipc_buffers = await arrow_ipc_stream(conn, 'SELECT * FROM "' + parquet_file_path + '"');
+
+        const query = sql.replace("lineitem", "my_arrow_ipc_stream");
+        conn.register_buffer("my_arrow_ipc_stream", ipc_buffers, true, (err) => {
+            assert(!err);
+        });
+
+        await new Promise((resolve, reject) => {
+            conn.all(query, function (err, result) {
+                if (err) {
+                    reject(err)
+                }
+
+                assert.deepEqual(result, answer);
+                resolve();
+            })
+        });
+    });
+
+    it('Parquet -> DuckDB Materialized -> Arrow IPC -> DuckDB' , async () => {
+        const ipc_buffers = await arrow_ipc_materialized(conn, 'SELECT * FROM "' + parquet_file_path + '"');
+
+        const query = sql.replace("lineitem", "my_arrow_ipc_stream_2");
+        conn.register_buffer("my_arrow_ipc_stream_2", ipc_buffers, true, (err) => {
+            assert(!err);
+        });
+
+        await new Promise((resolve, reject) => {
+            conn.all(query, function (err, result) {
+                if (err) {
+                    reject(err)
+                } else {
+                    assert.deepEqual(result, answer);
+                    resolve();
+                }
+            })
+        });
+    });
+
+    it('Parquet -> DuckDB', async () => {
+        await new Promise((resolve, reject) => {
+            conn.run('CREATE TABLE load_parquet_directly AS SELECT * FROM "' + parquet_file_path + '";', (err) => {
+                if (err) {
+                    reject(err)
+                }
+                resolve()
+            });
+        });
+
+        const query = sql.replace("lineitem", "load_parquet_directly");
+
+        const result = await new Promise((resolve, reject) => {
+            conn.all(query, function (err, result) {
+                if (err) {
+                    reject(err);
+                }
+                resolve(result)
+            });
+        });
+
+        assert.deepEqual(result, answer);
+    });
+});
 
 for (const [name, fun] of Object.entries(to_ipc_functions)) {
     describe(`Arrow IPC TPC-H lineitem SF0.01 (${name})`, () => {
@@ -464,10 +464,10 @@ for (const [name, fun] of Object.entries(to_ipc_functions)) {
             "select sum(l_orderkey) as sum_orderkey FROM table_name",
             "select * from table_name",
             "select l_orderkey from table_name WHERE l_orderkey=2 LIMIT 2",
-            // "select l_extendedprice from table_name",
-            // "select l_extendedprice from table_name WHERE l_extendedprice > 53468 and l_extendedprice < 53469  LIMIT 2",
-            // "select count(l_orderkey) from table_name where l_commitdate > '1996-10-28'",
-            // "SELECT sum(l_extendedprice * l_discount) AS revenue FROM table_name WHERE l_shipdate >= CAST('1994-01-01' AS date) AND l_shipdate < CAST('1995-01-01' AS date) AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24"
+            "select l_extendedprice from table_name",
+            "select l_extendedprice from table_name WHERE l_extendedprice > 53468 and l_extendedprice < 53469  LIMIT 2",
+            "select count(l_orderkey) from table_name where l_commitdate > '1996-10-28'",
+            "SELECT sum(l_extendedprice * l_discount) AS revenue FROM table_name WHERE l_shipdate >= CAST('1994-01-01' AS date) AND l_shipdate < CAST('1995-01-01' AS date) AND l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 24"
         ];
 
         let db;

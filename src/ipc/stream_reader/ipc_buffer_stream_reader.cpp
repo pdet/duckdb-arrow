@@ -6,7 +6,6 @@ namespace duckdb {
 namespace ext_nanoarrow {
 
 IPCBufferStreamReader::IPCBufferStreamReader(vector<ArrowIPCBuffer> buffers, Allocator& allocator): IPCStreamReader(allocator), buffers(std::move(buffers)){
-
 }
 
 ArrowIpcMessageType IPCBufferStreamReader::ReadNextMessage() {
