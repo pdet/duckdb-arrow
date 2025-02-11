@@ -18,7 +18,7 @@ namespace duckdb {
 namespace ext_nanoarrow {
 
 class ArrowStreamFactory {
-  ArrowStreamFactory(){};
+  ArrowStreamFactory() {};
 };
 //! This Factory is a type invented by DuckDB. Notably, the Produce()
 //! function pointer is passed to the constructor of the ArrowScanFunctionData

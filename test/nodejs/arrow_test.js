@@ -512,5 +512,3 @@ for (const [name, fun] of Object.entries(to_ipc_functions)) {
         }
     })
 }
-
-

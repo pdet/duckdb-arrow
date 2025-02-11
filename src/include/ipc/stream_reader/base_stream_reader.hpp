@@ -24,7 +24,7 @@ namespace ext_nanoarrow {
 
 // Missing in nanoarrow_ipc.hpp
 struct UniqueSharedBuffer {
-  struct ArrowIpcSharedBuffer data {};
+  struct ArrowIpcSharedBuffer data{};
 
   ~UniqueSharedBuffer() {
     if (data.private_src.allocator.free != nullptr) {
@@ -43,7 +43,7 @@ class IPCStreamReader {
  public:
   virtual ~IPCStreamReader() = default;
   explicit IPCStreamReader(Allocator& allocator)
-      : decoder(NewDuckDBArrowDecoder()), allocator(allocator){};
+      : decoder(NewDuckDBArrowDecoder()), allocator(allocator) {};
   //! Gets the output schema, which is the file schema with projection pushdown being
   //! considered
   const ArrowSchema* GetOutputSchema();

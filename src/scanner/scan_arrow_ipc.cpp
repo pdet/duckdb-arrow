@@ -1,8 +1,8 @@
 
+#include "table_function/scan_arrow_ipc.hpp"
 #include "duckdb/main/extension_util.hpp"
 #include "ipc/stream_factory.hpp"
 #include "table_function/arrow_ipc_function_data.hpp"
-#include "table_function/scan_arrow_ipc.hpp"
 
 #include "duckdb/function/table/arrow.hpp"
 

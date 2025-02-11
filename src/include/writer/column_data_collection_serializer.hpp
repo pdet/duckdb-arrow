@@ -7,13 +7,13 @@
 //===----------------------------------------------------------------------===//
 #pragma once
 
-#include "duckdb/main/client_properties.hpp"
-#include "duckdb/common/types/column/column_data_collection.hpp"
-#include "duckdb/common/serializer/buffered_file_writer.hpp"
-#include "duckdb/function/table/arrow/arrow_duck_schema.hpp"
-#include "nanoarrow/nanoarrow_ipc.hpp"
 #include "duckdb/common/arrow/arrow_converter.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/serializer/buffered_file_writer.hpp"
+#include "duckdb/common/types/column/column_data_collection.hpp"
+#include "duckdb/function/table/arrow/arrow_duck_schema.hpp"
+#include "duckdb/main/client_properties.hpp"
+#include "nanoarrow/nanoarrow_ipc.hpp"
 #include "nanoarrow_errors.hpp"
 
 namespace duckdb {
