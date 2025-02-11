@@ -1,4 +1,4 @@
-# name: test/nanoarrow/to_arrow_ipc.test
+# name: test/sql/to_arrow_ipc.test
 # description: round trip arrow serialization
 # group: [nanoarrow]
 
