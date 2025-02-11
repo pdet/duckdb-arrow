@@ -463,7 +463,7 @@ for (const [name, fun] of Object.entries(to_ipc_functions)) {
             "select count(*) from table_name LIMIT 10",
             "select sum(l_orderkey) as sum_orderkey FROM table_name",
             "select * from table_name",
-            // "select l_orderkey from table_name WHERE l_orderkey=2 LIMIT 2",
+            "select l_orderkey from table_name WHERE l_orderkey=2 LIMIT 2",
             // "select l_extendedprice from table_name",
             // "select l_extendedprice from table_name WHERE l_extendedprice > 53468 and l_extendedprice < 53469  LIMIT 2",
             // "select count(l_orderkey) from table_name where l_commitdate > '1996-10-28'",
