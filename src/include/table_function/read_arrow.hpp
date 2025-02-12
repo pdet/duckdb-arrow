@@ -1,3 +1,12 @@
+//===----------------------------------------------------------------------===//
+//                         DuckDB - nanoarrow
+//
+// table_function/read_arrow.hpp
+//
+//
+//===----------------------------------------------------------------------===//
+
+#pragma once
 
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/parser/parsed_data/copy_info.hpp"

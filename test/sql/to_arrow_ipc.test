@@ -1,0 +1,27 @@
+# name: test/sql/to_arrow_ipc.test
+# description: round trip arrow serialization
+# group: [nanoarrow]
+
+# NOTE: for now there's not much we can test here, since we cannot really pass pointers from the
+#       serialized blobs to the scan_arrow_ipc function in SQL. Therefore tests of these features
+#       currently live in the NodeJS client tests.
+
+require nanoarrow
+
+statement ok
+SET disabled_optimizers='column_lifetime'
+
+statement ok
+SELECT * FROM to_arrow_ipc((SELECT 'Its working!'));
+
+# Test operator caching behaviour is sane
+statement ok
+create table data as select * from range(0,2000) tbl(col)
+
+statement ok
+WITH data_union AS (
+    SELECT * FROM data
+    UNION ALL
+    SELECT * FROM data
+)
+SELECT * FROM to_arrow_ipc((SELECT * FROM data_union ORDER BY col));
