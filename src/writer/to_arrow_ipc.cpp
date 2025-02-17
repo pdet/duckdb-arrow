@@ -110,7 +110,7 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
 
   bool sending_schema = false;
 
-  bool caching_disabled = PhysicalOperator::OperatorCachingAllowed(context);
+  bool caching_disabled = !PhysicalOperator::OperatorCachingAllowed(context);
   local_state.serializer->Init(&data.schema, data.logical_types);
 
   if (!local_state.checked_schema) {
