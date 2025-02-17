@@ -15,10 +15,10 @@ namespace duckdb {
 namespace ext_nanoarrow {
 
 struct ToArrowIpcFunctionData : public TableFunctionData {
-  ToArrowIpcFunctionData() {}
-  ArrowSchema schema;
+  ToArrowIpcFunctionData() = default;
+  ArrowSchema schema{};
   vector<LogicalType> logical_types;
-  idx_t chunk_size;
+  idx_t chunk_size{};
 };
 
 struct ToArrowIpcGlobalState : public GlobalTableFunctionState {
@@ -75,9 +75,9 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
                                                 TableFunctionInput& data_p,
                                                 DataChunk& input, DataChunk& output) {
   nanoarrow::UniqueBuffer arrow_serialized_ipc_buffer;
-  auto& data = (ToArrowIpcFunctionData&)*data_p.bind_data;
-  auto& local_state = (ToArrowIpcLocalState&)*data_p.local_state;
-  auto& global_state = (ToArrowIpcGlobalState&)*data_p.global_state;
+  auto& data = data_p.bind_data->Cast<ToArrowIpcFunctionData>();
+  auto& local_state = data_p.local_state->Cast<ToArrowIpcLocalState>();
+  auto& global_state = data_p.global_state->Cast<ToArrowIpcGlobalState>();
 
   bool sending_schema = false;
 
@@ -132,7 +132,7 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
       arrow_serialized_ipc_buffer->data =
           arrow_serialized_ipc_buffer->allocator.reallocate(
               &arrow_serialized_ipc_buffer->allocator, arrow_serialized_ipc_buffer->data,
-              ipc_buffer_size, ipc_buffer_size + body->size_bytes);
+              static_cast<int64_t>(ipc_buffer_size), static_cast<int64_t>(ipc_buffer_size + body->size_bytes));
       arrow_serialized_ipc_buffer->size_bytes += body->size_bytes;
       arrow_serialized_ipc_buffer->capacity_bytes += body->size_bytes;
       memcpy(arrow_serialized_ipc_buffer->data + ipc_buffer_size, body->data,
@@ -158,7 +158,7 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
       make_buffer<ArrowStringVectorBuffer>(std::move(arrow_serialized_ipc_buffer));
   auto& vector = output.data[0];
   StringVector::AddBuffer(vector, wrapped_buffer);
-  auto data_ptr = (string_t*)vector.GetData();
+  auto data_ptr = reinterpret_cast<string_t*>(vector.GetData());
   *data_ptr = string_t(ptr, len);
   output.SetCardinality(1);
   output.Verify();
@@ -172,9 +172,6 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
 OperatorFinalizeResultType ToArrowIPCFunction::FunctionFinal(ExecutionContext& context,
                                                              TableFunctionInput& data_p,
                                                              DataChunk& output) {
-  // TODO The following code is necessary in the future to avoid creating a message per
-  // chunk:
-  // TODO By using an appender that appends multiple chunks and serializes the whole thing
 
   // auto &data = (ToArrowIpcFunctionData &)*data_p.bind_data;
   // auto &local_state = (ToArrowIpcLocalState &)*data_p.local_state;

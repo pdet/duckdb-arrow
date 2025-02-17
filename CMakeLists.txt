@@ -27,6 +27,8 @@ set(EXTENSION_SOURCES
     src/scanner/read_arrow.cpp
     src/scanner/scan_arrow_ipc.cpp
     src/nanoarrow_extension.cpp
+    src/writer/arrow_stream_writer.cpp
+    src/writer/column_data_collection_serializer.cpp
     src/writer/write_arrow_stream.cpp
     src/writer/to_arrow_ipc.cpp)
 
