@@ -21,12 +21,13 @@ namespace ext_nanoarrow {
 
 class ColumnDataCollectionSerializer {
  public:
-  ColumnDataCollectionSerializer(ClientProperties  options, Allocator& allocator);
+  ColumnDataCollectionSerializer(ClientProperties options, Allocator& allocator);
 
   void Init(const ArrowSchema* schema_p, const vector<LogicalType>& logical_types);
 
   void SerializeSchema();
 
+  idx_t Serialize(ArrowArray& array);
   idx_t Serialize(DataChunk& chunk);
 
   idx_t Serialize(const ColumnDataCollection& buffer);

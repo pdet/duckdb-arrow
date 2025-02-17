@@ -7,8 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
-#include "writer/column_data_collection_serializer.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "writer/column_data_collection_serializer.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
