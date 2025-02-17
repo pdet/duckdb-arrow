@@ -144,21 +144,6 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
     // If chunk size is reached, we can flush to IPC blob
     if (caching_disabled || local_state.current_count >= data.chunk_size) {
       SerializeArray(local_state, arrow_serialized_ipc_buffer);
-      // ArrowArray arr = local_state.appender->Finalize();
-      // local_state.serializer->Serialize(arr);
-      // arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
-      // auto body = local_state.serializer->GetBody();
-      // idx_t ipc_buffer_size = arrow_serialized_ipc_buffer->size_bytes;
-      // arrow_serialized_ipc_buffer->data =
-      //     arrow_serialized_ipc_buffer->allocator.reallocate(
-      //         &arrow_serialized_ipc_buffer->allocator,
-      //         arrow_serialized_ipc_buffer->data, static_cast<int64_t>(ipc_buffer_size),
-      //         static_cast<int64_t>(ipc_buffer_size + body->size_bytes));
-      // arrow_serialized_ipc_buffer->size_bytes += body->size_bytes;
-      // arrow_serialized_ipc_buffer->capacity_bytes += body->size_bytes;
-      // memcpy(arrow_serialized_ipc_buffer->data + ipc_buffer_size, body->data,
-      //        body->size_bytes);
-
       // Reset appender
       local_state.appender.reset();
       local_state.current_count = 0;
