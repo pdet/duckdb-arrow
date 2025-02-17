@@ -22,7 +22,7 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 
-// Missing in nanoarrow_ipc.hpp
+//! Missing in nanoarrow_ipc.hpp
 struct UniqueSharedBuffer {
   struct ArrowIpcSharedBuffer data{};
 
@@ -63,8 +63,8 @@ class IPCStreamReader {
 
  protected:
   virtual void EnsureInputStreamAligned() {
-    // nop by default. This method is called in the DecodeMessage() and necessary only for
-    // the file reader, for the buffer reader it does nothing.
+    //! nop by default. This method is called in the DecodeMessage() and necessary only
+    //! for the file reader, for the buffer reader it does nothing.
   }
   virtual void ReadData(data_ptr_t ptr, idx_t size) {
     throw InternalException("IPCStreamReader::ReadData not implemented");

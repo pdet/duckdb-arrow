@@ -25,9 +25,8 @@ class ArrowStreamFactory {
 //! constructor (which we wrap).
 class ArrowIPCStreamFactory {
  public:
-  explicit ArrowIPCStreamFactory(ClientContext& context, std::string src_string);
-
-  explicit ArrowIPCStreamFactory(ClientContext& context, vector<ArrowIPCBuffer> buffers);
+  virtual ~ArrowIPCStreamFactory() = default;
+  explicit ArrowIPCStreamFactory(Allocator& allocator);
 
   //! Called once when initializing Scan States
   static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr,
@@ -38,14 +37,31 @@ class ArrowIPCStreamFactory {
 
   //! Opens the file, wraps it in the ArrowIpcInputStream, and wraps it in
   //! the ArrowArrayStream reader.
-  void InitReader();
+  virtual void InitReader() {
+    throw NotImplementedException("ArrowIPCStreamFactory::InitReader not implemented");
+  }
 
-  FileSystem& fs;
   Allocator& allocator;
-  std::string src_string;
-  vector<ArrowIPCBuffer> buffers;
   unique_ptr<IPCStreamReader> reader;
   ArrowError error{};
+};
+
+class BufferIPCStreamFactory final : public ArrowIPCStreamFactory {
+ public:
+  explicit BufferIPCStreamFactory(ClientContext& context,
+                                  const vector<ArrowIPCBuffer>& buffers);
+  void InitReader() override;
+
+  vector<ArrowIPCBuffer> buffers;
+};
+
+class FileIPCStreamFactory final : public ArrowIPCStreamFactory {
+ public:
+  explicit FileIPCStreamFactory(ClientContext& context, string src_string);
+  void InitReader() override;
+
+  FileSystem& fs;
+  string src_string;
 };
 }  // namespace ext_nanoarrow
 }  // namespace duckdb
