@@ -15,10 +15,10 @@ namespace duckdb {
 namespace ext_nanoarrow {
 
 struct ToArrowIpcFunctionData : public TableFunctionData {
-  ToArrowIpcFunctionData() {}
-  ArrowSchema schema;
+  ToArrowIpcFunctionData() = default;
+  ArrowSchema schema{};
   vector<LogicalType> logical_types;
-  idx_t chunk_size;
+  const idx_t chunk_size = ToArrowIPCFunction::DEFAULT_CHUNK_SIZE * STANDARD_VECTOR_SIZE;
 };
 
 struct ToArrowIpcGlobalState : public GlobalTableFunctionState {
@@ -28,7 +28,7 @@ struct ToArrowIpcGlobalState : public GlobalTableFunctionState {
 };
 
 struct ToArrowIpcLocalState : public LocalTableFunctionState {
-  // unique_ptr<ArrowAppender> appender;
+  unique_ptr<ArrowAppender> appender;
   unique_ptr<ColumnDataCollectionSerializer> serializer;
   idx_t current_count = 0;
   bool checked_schema = false;
@@ -55,8 +55,6 @@ unique_ptr<FunctionData> ToArrowIPCFunction::Bind(ClientContext& context,
                                                   vector<string>& names) {
   auto result = make_uniq<ToArrowIpcFunctionData>();
 
-  result->chunk_size = DEFAULT_CHUNK_SIZE * STANDARD_VECTOR_SIZE;
-
   // Set return schema
   return_types.emplace_back(LogicalType::BLOB);
   names.emplace_back("ipc");
@@ -71,13 +69,44 @@ unique_ptr<FunctionData> ToArrowIPCFunction::Bind(ClientContext& context,
   return std::move(result);
 }
 
+void SerializeArray(const ToArrowIpcLocalState& local_state,
+                    nanoarrow::UniqueBuffer& arrow_serialized_ipc_buffer) {
+  ArrowArray arr = local_state.appender->Finalize();
+  local_state.serializer->Serialize(arr);
+  arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
+  auto body = local_state.serializer->GetBody();
+  idx_t ipc_buffer_size = arrow_serialized_ipc_buffer->size_bytes;
+  arrow_serialized_ipc_buffer->data = arrow_serialized_ipc_buffer->allocator.reallocate(
+      &arrow_serialized_ipc_buffer->allocator, arrow_serialized_ipc_buffer->data,
+      static_cast<int64_t>(ipc_buffer_size),
+      static_cast<int64_t>(ipc_buffer_size + body->size_bytes));
+  arrow_serialized_ipc_buffer->size_bytes += body->size_bytes;
+  arrow_serialized_ipc_buffer->capacity_bytes += body->size_bytes;
+  memcpy(arrow_serialized_ipc_buffer->data + ipc_buffer_size, body->data,
+         body->size_bytes);
+}
+
+void InsertMessageToChunk(nanoarrow::UniqueBuffer& arrow_serialized_ipc_buffer,
+                          DataChunk& output) {
+  const auto ptr = reinterpret_cast<const char*>(arrow_serialized_ipc_buffer->data);
+  const auto len = arrow_serialized_ipc_buffer->size_bytes;
+  const auto wrapped_buffer =
+      make_buffer<ArrowStringVectorBuffer>(std::move(arrow_serialized_ipc_buffer));
+  auto& vector = output.data[0];
+  StringVector::AddBuffer(vector, wrapped_buffer);
+  const auto data_ptr = reinterpret_cast<string_t*>(vector.GetData());
+  *data_ptr = string_t(ptr, len);
+  output.SetCardinality(1);
+  output.Verify();
+}
+
 OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
                                                 TableFunctionInput& data_p,
                                                 DataChunk& input, DataChunk& output) {
   nanoarrow::UniqueBuffer arrow_serialized_ipc_buffer;
-  auto& data = (ToArrowIpcFunctionData&)*data_p.bind_data;
-  auto& local_state = (ToArrowIpcLocalState&)*data_p.local_state;
-  auto& global_state = (ToArrowIpcGlobalState&)*data_p.global_state;
+  auto& data = data_p.bind_data->Cast<ToArrowIpcFunctionData>();
+  auto& local_state = data_p.local_state->Cast<ToArrowIpcLocalState>();
+  auto& global_state = data_p.global_state->Cast<ToArrowIpcGlobalState>();
 
   bool sending_schema = false;
 
@@ -102,66 +131,30 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
     arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
     output.data[1].SetValue(0, Value::BOOLEAN(true));
   } else {
-    // TODO The following code is necessary in the future to avoid creating a message per
-    // chunk: By using an appender that appends multiple chunks and serializes the whole
-    // thing if (!local_state.appender) {
-    //   local_state.appender = make_uniq<ArrowAppender>(input.GetTypes(),
-    //   data.chunk_size,
-    //                                context.client.GetClientProperties(),
-    //                                ArrowTypeExtensionData::GetExtensionTypes(
-    //                                    context.client, input.GetTypes()));
-    // }
+    if (!local_state.appender) {
+      local_state.appender = make_uniq<ArrowAppender>(
+          input.GetTypes(), data.chunk_size, context.client.GetClientProperties(),
+          ArrowTypeExtensionData::GetExtensionTypes(context.client, input.GetTypes()));
+    }
 
     // Append input chunk
-    // local_state.appender->Append(input, 0, input.size(), input.size());
+    local_state.appender->Append(input, 0, input.size(), input.size());
     local_state.current_count += input.size();
 
     // If chunk size is reached, we can flush to IPC blob
     if (caching_disabled || local_state.current_count >= data.chunk_size) {
-      // Construct record batch from DataChunk
-      // TODO The following code is necessary in the future to avoid creating a message
-      // per chunk:
-      // TODO  By using an appender that appends multiple chunks and serializes the whole
-      // thing
-
-      // ArrowArray arr = local_state.appender->Finalize();
-      local_state.serializer->Serialize(input);
-      arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
-      auto body = local_state.serializer->GetBody();
-      idx_t ipc_buffer_size = arrow_serialized_ipc_buffer->size_bytes;
-      arrow_serialized_ipc_buffer->data =
-          arrow_serialized_ipc_buffer->allocator.reallocate(
-              &arrow_serialized_ipc_buffer->allocator, arrow_serialized_ipc_buffer->data,
-              ipc_buffer_size, ipc_buffer_size + body->size_bytes);
-      arrow_serialized_ipc_buffer->size_bytes += body->size_bytes;
-      arrow_serialized_ipc_buffer->capacity_bytes += body->size_bytes;
-      memcpy(arrow_serialized_ipc_buffer->data + ipc_buffer_size, body->data,
-             body->size_bytes);
-      // TODO The following code is necessary in the future to avoid creating a message
-      // per chunk:
-      // TODO By using an appender that appends multiple chunks and serializes the whole
-      // thing
-
+      SerializeArray(local_state, arrow_serialized_ipc_buffer);
       // Reset appender
-      // local_state.appender.reset();
+      local_state.appender.reset();
       local_state.current_count = 0;
 
+      // This is a data message, hence we set the second column to false
       output.data[1].SetValue(0, Value::BOOLEAN(false));
     } else {
       return OperatorResultType::NEED_MORE_INPUT;
     }
   }
-
-  auto ptr = reinterpret_cast<const char*>(arrow_serialized_ipc_buffer->data);
-  auto len = arrow_serialized_ipc_buffer->size_bytes;
-  auto wrapped_buffer =
-      make_buffer<ArrowStringVectorBuffer>(std::move(arrow_serialized_ipc_buffer));
-  auto& vector = output.data[0];
-  StringVector::AddBuffer(vector, wrapped_buffer);
-  auto data_ptr = (string_t*)vector.GetData();
-  *data_ptr = string_t(ptr, len);
-  output.SetCardinality(1);
-  output.Verify();
+  InsertMessageToChunk(arrow_serialized_ipc_buffer, output);
   if (sending_schema) {
     return OperatorResultType::HAVE_MORE_OUTPUT;
   } else {
@@ -172,35 +165,18 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
 OperatorFinalizeResultType ToArrowIPCFunction::FunctionFinal(ExecutionContext& context,
                                                              TableFunctionInput& data_p,
                                                              DataChunk& output) {
-  // TODO The following code is necessary in the future to avoid creating a message per
-  // chunk:
-  // TODO By using an appender that appends multiple chunks and serializes the whole thing
+  auto& local_state = data_p.local_state->Cast<ToArrowIpcLocalState>();
 
-  // auto &data = (ToArrowIpcFunctionData &)*data_p.bind_data;
-  // auto &local_state = (ToArrowIpcLocalState &)*data_p.local_state;
-  // std::shared_ptr<arrow::Buffer> arrow_serialized_ipc_buffer;
+  if (local_state.appender) {
+    // If we have an appender, we serialize the array into a message and insert it to the
+    // chunk
+    nanoarrow::UniqueBuffer arrow_serialized_ipc_buffer;
+    SerializeArray(local_state, arrow_serialized_ipc_buffer);
+    InsertMessageToChunk(arrow_serialized_ipc_buffer, output);
 
-  // if (local_state.appender) {
-  //   ArrowArray arr = local_state.appender->Finalize();
-  //   auto record_batch =
-  //       arrow::ImportRecordBatch(&arr, data.schema).ValueOrDie();
-  //
-  //   // Serialize recordbatch
-  //   auto options = arrow::ipc::IpcWriteOptions::Defaults();
-  //   auto result = arrow::ipc::SerializeRecordBatch(*record_batch, options);
-  //   arrow_serialized_ipc_buffer = result.ValueOrDie();
-  //
-  //   auto wrapped_buffer =
-  //       make_buffer<ArrowStringVectorBuffer>(arrow_serialized_ipc_buffer);
-  //   auto &vector = output.data[0];
-  //   StringVector::AddBuffer(vector, wrapped_buffer);
-  //   auto data_ptr = (string_t *)vector.GetData();
-  //   *data_ptr = string_t((const char *)arrow_serialized_ipc_buffer->data(),
-  //                        arrow_serialized_ipc_buffer->size());
-  //   output.SetCardinality(1);
-  //   local_state.appender.reset();
-  //   output.data[1].SetValue(0, Value::BOOLEAN(0));
-  // }
+    // This is always a data message, so we set the second column to false.
+    output.data[1].SetValue(0, Value::BOOLEAN(false));
+  }
 
   return OperatorFinalizeResultType::FINISHED;
 }

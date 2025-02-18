@@ -30,7 +30,7 @@ struct ArrowWriteBindData : public TableFunctionData {
   idx_t row_group_size = 122880;
   optional_idx row_groups_per_file;
   static constexpr const idx_t BYTES_PER_ROW = 1024;
-  idx_t row_group_size_bytes;
+  idx_t row_group_size_bytes{};
 };
 
 struct ArrowWriteGlobalState : public GlobalFunctionData {
@@ -83,7 +83,7 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
       }
       auto values = StructValue::GetChildren(kv_struct);
       for (idx_t i = 0; i < values.size(); i++) {
-        auto value = values[i];
+        const auto& value = values[i];
         auto key = StructType::GetChildName(kv_struct_type, i);
         // If the value is a blob, write the raw blob bytes
         // otherwise, cast to string

@@ -45,7 +45,7 @@ struct ReadArrowStream : ArrowTableFunction {
   // data (instead of as a Python object whose ownership is kept alive via the
   // DependencyItem mechanism).
   static TableFunction Function() {
-    TableFunction fn("read_arrow", {LogicalType::VARCHAR}, Scan, Bind,
+    TableFunction fn("read_arrow", {LogicalType::VARCHAR}, ArrowScanFunction, Bind,
                      ArrowScanInitGlobal, ArrowScanInitLocal);
     fn.cardinality = ArrowScanCardinality;
     fn.projection_pushdown = true;
@@ -95,7 +95,7 @@ struct ReadArrowStream : ArrowTableFunction {
   static unique_ptr<FunctionData> BindInternal(ClientContext& context, std::string src,
                                                vector<LogicalType>& return_types,
                                                vector<string>& names) {
-    auto stream_factory = make_uniq<ArrowIPCStreamFactory>(context, src);
+    auto stream_factory = make_uniq<FileIPCStreamFactory>(context, src);
     auto res = make_uniq<ArrowIPCFunctionData>(std::move(stream_factory));
     res->factory->InitReader();
     res->factory->GetFileSchema(res->schema_root);
@@ -111,11 +111,6 @@ struct ReadArrowStream : ArrowTableFunction {
     }
 
     return std::move(res);
-  }
-
-  static void Scan(ClientContext& context, TableFunctionInput& data_p,
-                   DataChunk& output) {
-    ArrowScanFunction(context, data_p, output);
   }
 };
 
