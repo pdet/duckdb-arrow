@@ -25,6 +25,9 @@ class IPCBufferStreamReader final : public IPCStreamReader {
   vector<ArrowIPCBuffer> buffers;
   idx_t cur_idx = 0;
   idx_t cur_buffer_pos = 0;
+  data_ptr_t cur_buffer_ptr = nullptr;
+  int64_t cur_buffer_size = 0;
+  bool initialized = false;
 };
 
 }  // namespace ext_nanoarrow
