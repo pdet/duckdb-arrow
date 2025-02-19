@@ -15,3 +15,6 @@ test_debug_js:
 	ARROW_EXTENSION_BINARY_PATH=$(DEBUG_EXT_PATH) mocha -R spec --timeout 480000 -n expose-gc --exclude 'test/*.ts' -- "test/nodejs/**/*.js"
 test_release_js:
 	ARROW_EXTENSION_BINARY_PATH=$(RELEASE_EXT_PATH) mocha -R spec --timeout 480000 -n expose-gc --exclude 'test/*.ts' -- "test/nodejs/**/*.js"
+
+run_benchmark:
+	python3 benchmark/lineitem.py $(RELEASE_EXT_PATH)
