@@ -12,7 +12,7 @@ def measure_execution_time(con, query):
         con.execute(query)
         end = time.perf_counter()
         times.append(end - start)
-    
+
     return statistics.median(times)
 
 def get_queries(table_name):
@@ -90,13 +90,10 @@ def create_con(path,sf):
 if len(sys.argv) < 2:
     print("Usage: lineitem.py <extension_lib_path>")
     sys.exit(1)
-    
+
 path = sys.argv[1]
 
 con = create_con(path,1)
 run_duckdb_native(con)
 run_duckdb_arrow_array_stream(con)
 run_arrow_ipc(con)
-
-
-
