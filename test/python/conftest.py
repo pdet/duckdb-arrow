@@ -34,4 +34,3 @@ def require():
 @pytest.fixture(scope='function')
 def connection():
 	return add_extension('nanoarrow')
-

@@ -13,6 +13,8 @@ def get_record_batch():
 
    return pa.record_batch(data, names=['f0', 'f1', 'f2'])
 
+def tables_match(result):
+   assert result == [(1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True), (1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True), (1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True), (1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True), (1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True)]
 
 class TestArrowIPCBufferRead(object):
    def test_single_buffer(self, connection):
@@ -24,8 +26,8 @@ class TestArrowIPCBufferRead(object):
       buffer = sink.getvalue()
       struct =  f"{{'ptr': {buffer.address}::UBIGINT, 'size': {buffer.size}::UBIGINT}}"
       arrow_scan_function = f"FROM scan_arrow_ipc([{struct}])"
-
-      assert connection.execute(arrow_scan_function).fetchall() == [(1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True), (1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True), (1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True), (1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True), (1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True)]
+      connection.execute(arrow_scan_function).fetchall()
+      tables_match(connection.execute(arrow_scan_function).fetchall())
 
    def test_multi_buffers(self, connection):
       batch = get_record_batch()
@@ -50,4 +52,4 @@ class TestArrowIPCBufferRead(object):
       structs = structs[:-1]
       arrow_scan_function = f"FROM scan_arrow_ipc([{structs}])"
       assert (len(buffers) == 6)
-      assert connection.execute(arrow_scan_function).fetchall() == [(1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True), (1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True), (1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True), (1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True), (1, 'foo', True), (2, 'bar', None), (3, 'baz', False), (4, None, True)]
+      tables_match(connection.execute(arrow_scan_function).fetchall())
