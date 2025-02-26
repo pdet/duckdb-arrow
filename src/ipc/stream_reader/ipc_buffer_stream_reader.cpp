@@ -10,7 +10,7 @@ IPCBufferStreamReader::IPCBufferStreamReader(vector<ArrowIPCBuffer> buffers,
     : IPCStreamReader(allocator), buffers(std::move(buffers)) {}
 
 ArrowIpcMessageType IPCBufferStreamReader::ReadNextMessage() {
-  if (!initialized && cur_idx == buffers.size() || finished) {
+  if ((!initialized && cur_idx == buffers.size()) || finished) {
     finished = true;
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
   }
@@ -32,10 +32,12 @@ ArrowIpcMessageType IPCBufferStreamReader::ReadNextMessage() {
   return DecodeMessage();
 }
 
-void IPCBufferStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
+data_ptr_t IPCBufferStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
   D_ASSERT(size + cur_buffer_pos < cur_buffer_size);
-  memcpy(ptr, cur_buffer_ptr + cur_buffer_pos, size);
+  data_ptr_t cur_ptr = cur_buffer_ptr + cur_buffer_pos;
+  // memcpy(ptr, cur_buffer_ptr + cur_buffer_pos, size);
   cur_buffer_pos += size;
+  return cur_ptr;
 }
 
 }  // namespace ext_nanoarrow

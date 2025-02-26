@@ -21,7 +21,7 @@ class IPCBufferStreamReader final : public IPCStreamReader {
   ArrowIpcMessageType ReadNextMessage() override;
 
  private:
-  void ReadData(data_ptr_t ptr, idx_t size) override;
+  data_ptr_t ReadData(data_ptr_t ptr, idx_t size) override;
   vector<ArrowIPCBuffer> buffers;
   idx_t cur_idx = 0;
   idx_t cur_buffer_pos = 0;
