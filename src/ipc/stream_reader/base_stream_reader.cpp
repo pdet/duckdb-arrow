@@ -210,7 +210,7 @@ void IPCStreamReader::SetColumnProjection(const vector<string>& column_names) {
   projected_schema = std::move(schema);
 }
 
-idx_t IPCStreamReader::DecodeMetadata() {
+idx_t IPCStreamReader::DecodeMetadata() const {
   idx_t metadata_size;
   if (!Radix::IsLittleEndian()) {
     metadata_size = static_cast<int32_t>(BSWAP32(message_prefix.metadata_size));
@@ -222,7 +222,6 @@ idx_t IPCStreamReader::DecodeMetadata() {
     throw IOException(std::string("Expected metadata size >= 0 but got " +
                                   std::to_string(metadata_size)));
   }
-  // Ensure we have enough space to read the header
   return metadata_size + sizeof(message_prefix);
 }
 

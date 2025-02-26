@@ -28,7 +28,7 @@ class IPCFileStreamReader final : public IPCStreamReader {
   AllocatedData message_header;
   shared_ptr<AllocatedData> message_body;
 
-  void EnsureInputStreamAligned() override;
+  void EnsureInputStreamAligned();
 
   data_ptr_t ReadData(data_ptr_t ptr, idx_t size) override;
   static void DecodeArray(nanoarrow::ipc::UniqueDecoder& decoder, ArrowArray* out,
