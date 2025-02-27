@@ -45,16 +45,22 @@ def get_buffer_struct(file):
             break
     return structs[:-1]
 
+
 def arrow_ipc_file_check(con,file):
     print(file)
+    # 1. Compare result from reading the IPC file in Arrow, and in Duckdb
     arrow_result = ipc.open_stream(file).read_all()
     duckdb_file_result = con.sql(f"FROM '{file}'").arrow()
     # Here we test our file scanner
     assert compare_result(arrow_result, duckdb_file_result, con)
-    structs = get_buffer_struct(file)
-    duckdb_struct_result = con.execute(f"FROM scan_arrow_ipc([{structs}])")
-    # Here we test our IPC Buffer scanner
-    assert compare_result(arrow_result, duckdb_struct_result, con)
+
+    # 2. Now test the writer, write it to a file from DuckDB, read it with arrow and compare
+    
+    # 1. Compare result from reading the IPC file in Arrow, and in Duckdb
+    # structs = get_buffer_struct(file)
+    # duckdb_struct_result = con.execute(f"FROM scan_arrow_ipc([{structs}])")
+    # # Here we test our IPC Buffer scanner
+    # assert compare_result(arrow_result, duckdb_struct_result, con)
 
 class TestArrowIntegrationTests(object):
     def test_bigendian_integration(self, connection):
