@@ -10,7 +10,7 @@ IPCBufferStreamReader::IPCBufferStreamReader(vector<ArrowIPCBuffer> buffers,
     : IPCStreamReader(allocator), buffers(std::move(buffers)) {}
 
 ArrowIpcMessageType IPCBufferStreamReader::ReadNextMessage() {
-  if (!initialized && cur_idx == buffers.size() || finished) {
+  if ((!initialized && cur_idx == buffers.size()) || finished) {
     finished = true;
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
   }
