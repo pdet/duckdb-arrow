@@ -44,10 +44,26 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
   }
 
   // If there is no more data to be read, we're done!
+  int32_t continuation_token;
+  int32_t metadata_size;
   try {
     EnsureInputStreamAligned();
-    file_reader.ReadData(reinterpret_cast<data_ptr_t>(&message_prefix),
-                         sizeof(message_prefix));
+    file_reader.ReadData(reinterpret_cast<data_ptr_t>(&continuation_token),
+                         sizeof(continuation_token));
+    message_prefix.continuation_token = continuation_token;
+    if (continuation_token != kContinuationToken) {
+      if (message_prefix.continuation_token < 0) {
+        throw IOException(
+            std::string("Expected continuation token (0xFFFFFFFF) but got " +
+                        std::to_string(message_prefix.continuation_token)));
+      }
+      metadata_size = continuation_token;
+      message_prefix.continuation_token = kContinuationToken;
+    } else {
+      file_reader.ReadData(reinterpret_cast<data_ptr_t>(&metadata_size),
+                           sizeof(metadata_size));
+    }
+    message_prefix.metadata_size = metadata_size;
   } catch (SerializationException& e) {
     finished = true;
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
@@ -67,10 +83,6 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
     return ReadNextMessage();
   }
 
-  if (message_prefix.continuation_token != kContinuationToken) {
-    throw IOException(std::string("Expected continuation token (0xFFFFFFFF) but got " +
-                                  std::to_string(message_prefix.continuation_token)));
-  }
   return DecodeMessage();
 }
 

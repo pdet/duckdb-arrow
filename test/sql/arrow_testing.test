@@ -12,55 +12,57 @@ SET VARIABLE test_files = '__WORKING_DIRECTORY__/arrow-testing/data/arrow-ipc-st
 # versions of the files, etc.)
 statement ok
 CREATE MACRO check_arrow_testing_file(test_file) AS TABLE
-    SELECT * FROM read_arrow(getvariable('test_files') || test_file || '.stream');
+    FROM read_arrow(getvariable('test_files') || test_file || '.stream');
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_primitive')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_primitive')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_datetime')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_datetime')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_decimal')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_decimal')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_duplicate_fieldnames')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_duplicate_fieldnames')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_map_non_canonical')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_map_non_canonical')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_map')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_map')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_nested_large_offsets')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_nested_large_offsets')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_nested')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_nested')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_null_trivial')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_null_trivial')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_primitive_large_offsets')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_primitive_large_offsets')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_primitive_no_batches')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_primitive_no_batches')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_primitive_zerolength')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_primitive_zerolength')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_recursive_nested')
-
-
-statement ok
-SELECT * FROM check_arrow_testing_file('2.0.0-compression/generated_uncompressible_zstd')
+FROM check_arrow_testing_file('1.0.0-littleendian/generated_recursive_nested')
 
 statement ok
-SELECT * FROM check_arrow_testing_file('2.0.0-compression/generated_zstd')
+FROM check_arrow_testing_file('2.0.0-compression/generated_uncompressible_zstd')
 
+statement ok
+FROM check_arrow_testing_file('2.0.0-compression/generated_zstd')
 
+statement ok
+FROM check_arrow_testing_file('0.14.1/generated_datetime')
+
+# Following tests are failing but are unrelated to the extension:
 # Could not convert interval to microsecond?
 # statement ok
 # SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_interval')

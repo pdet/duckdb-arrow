@@ -15,17 +15,24 @@ import tempfile
 
 # Not implemented Error: Unsupported Internal Arrow Type: "d" Union
 # "generated_union.stream"
-# "0.17.1/generated_union.stream"
 
 little_big_integration_files = ["generated_null_trivial.stream", "generated_primitive_large_offsets.stream","generated_custom_metadata.stream","generated_datetime.stream","generated_decimal.stream","generated_map_non_canonical.stream","generated_map.stream","generated_nested_large_offsets.stream","generated_nested.stream","generated_null.stream","generated_primitive_no_batches.stream","generated_primitive_zerolength.stream","generated_primitive.stream","generated_recursive_nested.stream"]
 
 # IO Error: Expected continuation token (0xFFFFFFFF) but got XXX
-integration_files_0_14_1 = ["generated_datetime.stream","generated_decimal.stream","generated_interval.stream","generated_map.stream","generated_nested.stream","generated_primitive.stream","generated_primitive_no_batches.stream","generated_primitive_zerolength.stream"]
+integration_files_0_14_1 = ["generated_datetime.stream","generated_decimal.stream","generated_map.stream","generated_nested.stream","generated_primitive.stream","generated_primitive_no_batches.stream","generated_primitive_zerolength.stream"]
 
+
+compression_2_0_0 = ["generated_uncompressible_zstd.stream", "generated_zstd.stream"]
 
 script_path = os.path.dirname(os.path.abspath(__file__))
 
 test_folder = os.path.join(script_path,'..','..','arrow-testing','data','arrow-ipc-stream','integration')
+
+# All Test Folders:
+big_endian_folder = os.path.join(test_folder,'1.0.0-bigendian')
+little_endian_folder = os.path.join(test_folder,'1.0.0-littleendian')
+folder_0_14_1 = os.path.join(test_folder,'0.14.1')
+compression_folder = os.path.join(test_folder,'2.0.0-compression')
 
 def compare_result(arrow_result,duckdb_result, con):
     return con.execute("""
@@ -89,15 +96,13 @@ def compare_ipc_buffer_writer(con, file):
 class TestArrowIntegrationTests(object):
 
     def test_read_ipc_file(self, connection):
-        big_endian_folder = os.path.join(test_folder,'1.0.0-bigendian')
-        little_endian_folder = os.path.join(test_folder,'1.0.0-littleendian')
-        folder_0_14_1 = os.path.join(test_folder,'0.14.1')
         for file in little_big_integration_files:
             compare_ipc_file_reader(connection,os.path.join(big_endian_folder,file))
             compare_ipc_file_reader(connection,os.path.join(little_endian_folder,file))
-
-        # for file in integration_files_0_14_1:
-        #      compare_ipc_file_reader(connection,os.path.join(folder_0_14_1,file))
+        for file in compression_2_0_0:
+            compare_ipc_file_reader(connection,os.path.join(compression_folder,file))
+        for file in integration_files_0_14_1:
+             compare_ipc_file_reader(connection,os.path.join(folder_0_14_1,file))
 
     def test_write_ipc_file(self, connection):
         big_endian_folder = os.path.join(test_folder,'1.0.0-bigendian')
@@ -105,6 +110,10 @@ class TestArrowIntegrationTests(object):
         for file in little_big_integration_files:
             compare_ipc_file_writer(connection,os.path.join(big_endian_folder,file))
             compare_ipc_file_writer(connection,os.path.join(little_endian_folder,file))
+        for file in compression_2_0_0:
+            compare_ipc_file_reader(connection,os.path.join(compression_folder,file))
+        for file in integration_files_0_14_1:
+             compare_ipc_file_reader(connection,os.path.join(folder_0_14_1,file))
 
     # def test_read_ipc_buffer(self, connection):
     #     big_endian_folder = os.path.join(test_folder,'1.0.0-bigendian')
