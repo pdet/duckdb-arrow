@@ -248,11 +248,11 @@ ArrowIpcMessageType IPCStreamReader::DecodeMessage() {
   } else {
     THROW_NOT_OK(IOException, &error, decode_header_status);
   }
+
   if (decoder->body_size_bytes > 0) {
     EnsureInputStreamAligned();
     message_body =
         make_shared_ptr<AllocatedData>(allocator.Allocate(decoder->body_size_bytes));
-
     // Again, this is possibly a long running Read() call for a large body.
     // We could possibly be smarter about how we do this, particularly if we
     // are reading a small portion of the input from a seekable file.
@@ -310,17 +310,19 @@ int64_t IPCStreamReader::CountFields(const ArrowSchema* schema) {
 }
 
 ArrowBufferView IPCStreamReader::AllocatedDataView(const_data_ptr_t data, int64_t size) {
-  ArrowBufferView view;
+  ArrowBufferView view{};
   view.data.data = data;
   view.size_bytes = size;
   return view;
 }
 
 nanoarrow::UniqueBuffer IPCStreamReader::AllocatedDataToOwningBuffer(
-    shared_ptr<AllocatedData> data) {
+    const shared_ptr<AllocatedData>& data) {
   nanoarrow::UniqueBuffer out;
-  nanoarrow::BufferInitWrapped(out.get(), data, data->get(),
-                               UnsafeNumericCast<int64_t>(data->GetSize()));
+  if (data) {
+    nanoarrow::BufferInitWrapped(out.get(), data, data->get(),
+                                 UnsafeNumericCast<int64_t>(data->GetSize()));
+  }
   return out;
 }
 
