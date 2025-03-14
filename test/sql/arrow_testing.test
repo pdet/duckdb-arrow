@@ -17,27 +17,14 @@ CREATE MACRO check_arrow_testing_file(test_file) AS TABLE
 statement ok
 SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_primitive')
 
-# Fails because of missing extension registration
-# statement ok
-# SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_custom_metadata')
-
 statement ok
 SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_datetime')
 
 statement ok
 SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_decimal')
 
-# Decimal256 apparently not supported
-# statement ok
-# SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_decimal256')
-
-# Duplicate column names not supported
-# statement ok
-# SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_duplicate_fieldnames')
-
-# Could not convert interval to microsecond?
-# statement ok
-# SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_interval')
+statement ok
+SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_duplicate_fieldnames')
 
 statement ok
 SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_map_non_canonical')
@@ -51,9 +38,8 @@ SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_nested_larg
 statement ok
 SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_nested')
 
-# Attempted to dereference shared_ptr that is NULL!
-# statement ok
-# SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_null_trivial')
+statement ok
+SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_null_trivial')
 
 statement ok
 SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_primitive_large_offsets')
@@ -67,12 +53,26 @@ SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_primitive_z
 statement ok
 SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_recursive_nested')
 
-# Dense unions not supported?
-# statement ok
-# SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_union')
 
 statement ok
 SELECT * FROM check_arrow_testing_file('2.0.0-compression/generated_uncompressible_zstd')
 
 statement ok
 SELECT * FROM check_arrow_testing_file('2.0.0-compression/generated_zstd')
+
+
+# Could not convert interval to microsecond?
+# statement ok
+# SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_interval')
+
+# Dense unions not supported?
+# statement ok
+# SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_union')
+
+# Fails because of missing extension registration
+# statement ok
+# SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_custom_metadata')
+
+# Decimal256 apparently not supported
+# statement ok
+# SELECT * FROM check_arrow_testing_file('1.0.0-littleendian/generated_decimal256')
