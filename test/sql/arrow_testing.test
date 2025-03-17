@@ -59,8 +59,6 @@ FROM check_arrow_testing_file('2.0.0-compression/generated_uncompressible_zstd')
 statement ok
 FROM check_arrow_testing_file('2.0.0-compression/generated_zstd')
 
-statement ok
-FROM check_arrow_testing_file('0.14.1/generated_datetime')
 
 # Following tests are failing but are unrelated to the extension:
 # Could not convert interval to microsecond?
