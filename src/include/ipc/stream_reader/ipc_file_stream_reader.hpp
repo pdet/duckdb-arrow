@@ -22,8 +22,6 @@ class IPCFileStreamReader final : public IPCStreamReader {
   ArrowIpcMessageType ReadNextMessage() override;
 
  private:
-  static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
-
   BufferedFileReader file_reader;
 
   void EnsureInputStreamAligned() override;

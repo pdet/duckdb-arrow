@@ -100,6 +100,8 @@ class IPCStreamReader {
   ArrowIpcMessagePrefix message_prefix{};
   AllocatedData message_header;
   shared_ptr<AllocatedData> message_body;
+
+  static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
 };
 
 }  // namespace ext_nanoarrow

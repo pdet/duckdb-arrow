@@ -14,7 +14,6 @@ ArrowIpcMessageType IPCBufferStreamReader::ReadNextMessage() {
     finished = true;
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
   }
-
   if (!initialized || cur_buffer_pos >= buffers[cur_idx].size) {
     if (initialized) {
       cur_idx++;
@@ -28,7 +27,21 @@ ArrowIpcMessageType IPCBufferStreamReader::ReadNextMessage() {
     cur_buffer_pos = 0;
     initialized = true;
   }
-  ReadData(reinterpret_cast<data_ptr_t>(&message_prefix), sizeof(message_prefix));
+  int32_t continuation_token;
+  int32_t metadata_size;
+  ReadData(reinterpret_cast<data_ptr_t>(&continuation_token), sizeof(continuation_token));
+  message_prefix.continuation_token = continuation_token;
+  if (continuation_token != kContinuationToken) {
+    if (message_prefix.continuation_token < 0) {
+      throw IOException(std::string("Expected continuation token (0xFFFFFFFF) but got " +
+                                    std::to_string(message_prefix.continuation_token)));
+    }
+    metadata_size = continuation_token;
+    message_prefix.continuation_token = kContinuationToken;
+  } else {
+    ReadData(reinterpret_cast<data_ptr_t>(&metadata_size), sizeof(metadata_size));
+  }
+  message_prefix.metadata_size = metadata_size;
   return DecodeMessage();
 }
 

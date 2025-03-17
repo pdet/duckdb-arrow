@@ -36,7 +36,6 @@ jobs:
           npm -v
           node -v
 
-
       - name: Build duckdb
         run: |
           make

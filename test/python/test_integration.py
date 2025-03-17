@@ -18,9 +18,7 @@ import tempfile
 
 little_big_integration_files = ["generated_null_trivial.stream", "generated_primitive_large_offsets.stream","generated_custom_metadata.stream","generated_datetime.stream","generated_decimal.stream","generated_map_non_canonical.stream","generated_map.stream","generated_nested_large_offsets.stream","generated_nested.stream","generated_null.stream","generated_primitive_no_batches.stream","generated_primitive_zerolength.stream","generated_primitive.stream","generated_recursive_nested.stream"]
 
-# IO Error: Expected continuation token (0xFFFFFFFF) but got XXX
 integration_files_0_14_1 = ["generated_datetime.stream","generated_decimal.stream","generated_map.stream","generated_nested.stream","generated_primitive.stream","generated_primitive_no_batches.stream","generated_primitive_zerolength.stream"]
-
 
 compression_2_0_0 = ["generated_uncompressible_zstd.stream", "generated_zstd.stream"]
 
@@ -43,7 +41,7 @@ def compare_result(arrow_result,duckdb_result, con):
         (SELECT * FROM duckdb_result EXCEPT SELECT * FROM arrow_result)
     ) """).fetchone()[0]
 
-def get_buffer_struct(file):
+def get_buffer_struct(file, messages):
     reader = mr.open_stream(file)
     structs = ''
     while True:
@@ -52,6 +50,7 @@ def get_buffer_struct(file):
             if message is None:
                 break
             buffer = message.serialize()
+            messages.append(buffer)
             structs = structs + f"{{'ptr': {buffer.address}::UBIGINT, 'size': {buffer.size}::UBIGINT}},"
         except StopIteration:
             break
@@ -74,9 +73,11 @@ def compare_ipc_file_writer(con, file):
 
 # 3. Compare result from reading the IPC file in Arrow, and in Duckdb
 def compare_ipc_buffer_reader(con, file):
+    messages = []
     arrow_result = ipc.open_stream(file).read_all()
-    structs = get_buffer_struct(file)
-    duckdb_struct_result = con.execute(f"FROM scan_arrow_ipc([{structs}])")
+    structs = get_buffer_struct(file, messages)
+    print(structs)
+    duckdb_struct_result = con.execute(f"FROM scan_arrow_ipc([{structs}])").arrow()
     assert compare_result(arrow_result, duckdb_struct_result, con)
 
 # 4. Now test the DuckDB buffer writer, by reading it back with arrow and comparing
@@ -105,8 +106,6 @@ class TestArrowIntegrationTests(object):
              compare_ipc_file_reader(connection,os.path.join(folder_0_14_1,file))
 
     def test_write_ipc_file(self, connection):
-        big_endian_folder = os.path.join(test_folder,'1.0.0-bigendian')
-        little_endian_folder = os.path.join(test_folder,'1.0.0-littleendian')
         for file in little_big_integration_files:
             compare_ipc_file_writer(connection,os.path.join(big_endian_folder,file))
             compare_ipc_file_writer(connection,os.path.join(little_endian_folder,file))
@@ -115,12 +114,10 @@ class TestArrowIntegrationTests(object):
         for file in integration_files_0_14_1:
              compare_ipc_file_reader(connection,os.path.join(folder_0_14_1,file))
 
-    # def test_read_ipc_buffer(self, connection):
-    #     big_endian_folder = os.path.join(test_folder,'1.0.0-bigendian')
-    #     little_endian_folder = os.path.join(test_folder,'1.0.0-littleendian')
-    #     for file in little_big_integration_files:
-    #         compare_ipc_buffer_reader(connection,os.path.join(big_endian_folder,file))
-    #         compare_ipc_buffer_reader(connection,os.path.join(little_endian_folder,file))
+    def test_read_ipc_buffer(self, connection):
+        for file in little_big_integration_files:
+            compare_ipc_buffer_reader(connection,os.path.join(big_endian_folder,file))
+            compare_ipc_buffer_reader(connection,os.path.join(little_endian_folder,file))
 
     # def test_bigendian_integration_file_reader(self, connection):
     #     big_endian_folder = os.path.join(test_folder,'1.0.0-bigendian')
