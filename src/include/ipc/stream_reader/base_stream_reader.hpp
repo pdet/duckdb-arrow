@@ -87,7 +87,7 @@ class IPCStreamReader {
 
   static ArrowBufferView AllocatedDataView(const_data_ptr_t data, int64_t size);
   static nanoarrow::UniqueBuffer AllocatedDataToOwningBuffer(
-      shared_ptr<AllocatedData> data);
+      const shared_ptr<AllocatedData>& data);
 
   static const char* MessageTypeString(ArrowIpcMessageType message_type);
 
@@ -110,6 +110,7 @@ class IPCStreamReader {
   bool finished{false};
 
   ArrowIpcMessagePrefix message_prefix{};
+  static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
 };
 
 }  // namespace ext_nanoarrow

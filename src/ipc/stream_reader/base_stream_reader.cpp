@@ -164,24 +164,25 @@ void IPCStreamReader::SetColumnProjection(const vector<string>& column_names) {
   // so we need to make a list of them to check.
   unordered_set<string> duplicate_column_names;
 
+  vector<string> names;
+  // Let's check if we need to deduplicate projection column names
+  for (idx_t col_idx = 0; col_idx < static_cast<idx_t>(base_schema->n_children);
+       col_idx++) {
+    if (base_schema->children[col_idx]->name) {
+      names.push_back(base_schema->children[col_idx]->name);
+    } else {
+      names.push_back("");
+    }
+  }
+  QueryResult::DeduplicateColumns(names);
   // Loop over columns to build the field map
   int64_t field_count = 0;
   for (int64_t i = 0; i < base_schema->n_children; i++) {
-    const ArrowSchema* column = base_schema->children[i];
-    string name;
-    if (!column->name) {
-      name = "";
-    } else {
-      name = column->name;
+    if (name_to_flat_field_map.find(names[i]) != name_to_flat_field_map.end()) {
+      duplicate_column_names.insert(names[i]);
     }
-
-    if (name_to_flat_field_map.find(name) != name_to_flat_field_map.end()) {
-      duplicate_column_names.insert(name);
-    }
-
-    name_to_flat_field_map.insert({name, {field_count, column}});
-
-    field_count += CountFields(column);
+    name_to_flat_field_map.insert({names[i], {field_count, base_schema->children[i]}});
+    field_count += CountFields(base_schema->children[i]);
   }
 
   // Loop over projected column names to build the projection information
@@ -276,17 +277,19 @@ int64_t IPCStreamReader::CountFields(const ArrowSchema* schema) {
 }
 
 ArrowBufferView IPCStreamReader::AllocatedDataView(const_data_ptr_t data, int64_t size) {
-  ArrowBufferView view;
+  ArrowBufferView view{};
   view.data.data = data;
   view.size_bytes = size;
   return view;
 }
 
 nanoarrow::UniqueBuffer IPCStreamReader::AllocatedDataToOwningBuffer(
-    shared_ptr<AllocatedData> data) {
+    const shared_ptr<AllocatedData>& data) {
   nanoarrow::UniqueBuffer out;
-  nanoarrow::BufferInitWrapped(out.get(), data, data->get(),
-                               UnsafeNumericCast<int64_t>(data->GetSize()));
+  if (data) {
+    nanoarrow::BufferInitWrapped(out.get(), data, data->get(),
+                                 UnsafeNumericCast<int64_t>(data->GetSize()));
+  }
   return out;
 }
 
