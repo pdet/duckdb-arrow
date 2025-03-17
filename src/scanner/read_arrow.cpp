@@ -58,7 +58,7 @@ struct ReadArrowStream : ArrowTableFunction {
                                               ReplacementScanInput& input,
                                               optional_ptr<ReplacementScanData> data) {
     auto table_name = ReplacementScan::GetFullPath(input);
-    if (!ReplacementScan::CanReplace(table_name, {"arrows", "arrow", "stream"})) {
+    if (!ReplacementScan::CanReplace(table_name, {"arrows", "arrow"})) {
       return nullptr;
     }
 

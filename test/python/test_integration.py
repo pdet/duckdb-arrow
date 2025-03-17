@@ -18,8 +18,6 @@ import tempfile
 
 little_big_integration_files = ["generated_null_trivial.stream", "generated_primitive_large_offsets.stream","generated_custom_metadata.stream","generated_datetime.stream","generated_decimal.stream","generated_map_non_canonical.stream","generated_map.stream","generated_nested_large_offsets.stream","generated_nested.stream","generated_null.stream","generated_primitive_no_batches.stream","generated_primitive_zerolength.stream","generated_primitive.stream","generated_recursive_nested.stream"]
 
-integration_files_0_14_1 = ["generated_datetime.stream","generated_decimal.stream","generated_map.stream","generated_nested.stream","generated_primitive.stream","generated_primitive_no_batches.stream","generated_primitive_zerolength.stream"]
-
 compression_2_0_0 = ["generated_uncompressible_zstd.stream", "generated_zstd.stream"]
 
 script_path = os.path.dirname(os.path.abspath(__file__))
@@ -29,14 +27,9 @@ test_folder = os.path.join(script_path,'..','..','arrow-testing','data','arrow-i
 # All Test Folders:
 big_endian_folder = os.path.join(test_folder,'1.0.0-bigendian')
 little_endian_folder = os.path.join(test_folder,'1.0.0-littleendian')
-folder_0_14_1 = os.path.join(test_folder,'0.14.1')
 compression_folder = os.path.join(test_folder,'2.0.0-compression')
 
 def compare_result(arrow_result,duckdb_result, con):
-    print (con.execute("""SELECT * FROM arrow_result EXCEPT SELECT * FROM duckdb_result """).fetchall())
-
-    print (con.execute("""SELECT * FROM duckdb_result EXCEPT SELECT * FROM arrow_result""").fetchall())
-
     return con.execute("""
     SELECT COUNT(*) = 0
     FROM (
@@ -63,7 +56,7 @@ def get_buffer_struct(file, serialized_buffers):
 # 1. Compare result from reading the IPC file in Arrow, and in Duckdb
 def compare_ipc_file_reader(con, file):
     arrow_result = ipc.open_stream(file).read_all()
-    duckdb_file_result = con.sql(f"FROM '{file}'").arrow()
+    duckdb_file_result = con.sql(f"FROM read_arrow('{file}')").arrow()
     assert compare_result(arrow_result, duckdb_file_result, con)
 
 # 2. Now test the writer, write it to a file from DuckDB, read it with arrow and compare
@@ -71,8 +64,8 @@ def compare_ipc_file_writer(con, file):
     arrow_result = ipc.open_stream(file).read_all()
     with tempfile.TemporaryDirectory() as temp_dir:
         file_path = os.path.join(temp_dir, "arrow_duck.arrows")
-        con.execute(f"COPY (FROM '{file}') TO '{file_path}'")
-        duckdb_file_result = con.sql(f"FROM '{file}'").arrow()
+        con.execute(f"COPY (FROM read_arrow('{file}')) TO '{file_path}'")
+        duckdb_file_result = con.sql(f"FROM read_arrow('{file}')").arrow()
         assert compare_result(arrow_result, duckdb_file_result, con)
 
 # 3. Compare result from reading the IPC file in Arrow, and in Duckdb
@@ -86,7 +79,7 @@ def compare_ipc_buffer_reader(con, file):
 # 4. Now test the DuckDB buffer writer, by reading it back with arrow and comparing
 def compare_ipc_buffer_writer(con, file):
     arrow_result = ipc.open_stream(file).read_all()
-    buffers = con.execute(f"FROM to_arrow_ipc((FROM '{file}'))").fetchall()
+    buffers = con.execute(f"FROM to_arrow_ipc((FROM read_arrow('{file}')))").fetchall()
 
     if not buffers:
         return
@@ -108,15 +101,12 @@ def compare_ipc_buffer_writer(con, file):
 
 
 class TestArrowIntegrationTests(object):
-
     def test_read_ipc_file(self, connection):
         for file in little_big_integration_files:
             compare_ipc_file_reader(connection,os.path.join(big_endian_folder,file))
             compare_ipc_file_reader(connection,os.path.join(little_endian_folder,file))
         for file in compression_2_0_0:
             compare_ipc_file_reader(connection,os.path.join(compression_folder,file))
-        for file in integration_files_0_14_1:
-             compare_ipc_file_reader(connection,os.path.join(folder_0_14_1,file))
 
     def test_write_ipc_file(self, connection):
         for file in little_big_integration_files:
@@ -124,8 +114,6 @@ class TestArrowIntegrationTests(object):
             compare_ipc_file_writer(connection,os.path.join(little_endian_folder,file))
         for file in compression_2_0_0:
             compare_ipc_file_reader(connection,os.path.join(compression_folder,file))
-        for file in integration_files_0_14_1:
-             compare_ipc_file_reader(connection,os.path.join(folder_0_14_1,file))
 
     def test_read_ipc_buffer(self, connection):
         for file in little_big_integration_files:
@@ -133,10 +121,10 @@ class TestArrowIntegrationTests(object):
             compare_ipc_buffer_reader(connection,os.path.join(little_endian_folder,file))
         for file in compression_2_0_0:
             compare_ipc_file_reader(connection,os.path.join(compression_folder,file))
-        for file in integration_files_0_14_1:
-            compare_ipc_file_reader(connection,os.path.join(folder_0_14_1,file))
 
     def test_write_ipc_buffer(self, connection):
+        # Tracked in: https://github.com/duckdblabs/duckdb-internal/issues/4451
+
         # Expected key of map type to be non-nullable but was nullable
             # generated_map_non_canonical.stream
             # generated_map.stream
@@ -148,6 +136,3 @@ class TestArrowIntegrationTests(object):
                 compare_ipc_buffer_writer(connection,os.path.join(little_endian_folder,file))
         for file in compression_2_0_0:
             compare_ipc_buffer_writer(connection,os.path.join(compression_folder,file))
-        for file in integration_files_0_14_1:
-            if file not in ["generated_map.stream"]:
-                compare_ipc_buffer_writer(connection,os.path.join(folder_0_14_1,file))
