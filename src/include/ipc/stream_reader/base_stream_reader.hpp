@@ -110,7 +110,7 @@ class IPCStreamReader {
   bool finished{false};
 
   ArrowIpcMessagePrefix message_prefix{};
-    static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
+  static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
 };
 
 }  // namespace ext_nanoarrow
