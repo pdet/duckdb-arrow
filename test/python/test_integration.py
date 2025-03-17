@@ -16,13 +16,8 @@ import tempfile
 # Not implemented Error: Unsupported Internal Arrow Type: "d" Union
 # "generated_union.stream"
 
-
-# ,"generated_map_non_canonical.stream"
-# ,"generated_map.stream"
-# ,"generated_null.stream"
 little_big_integration_files = ["generated_null_trivial.stream", "generated_primitive_large_offsets.stream","generated_custom_metadata.stream","generated_datetime.stream","generated_decimal.stream","generated_nested_large_offsets.stream","generated_nested.stream","generated_primitive_no_batches.stream","generated_primitive_zerolength.stream","generated_primitive.stream","generated_recursive_nested.stream"]
 
-# ,"generated_map.stream"
 integration_files_0_14_1 = ["generated_datetime.stream","generated_decimal.stream","generated_nested.stream","generated_primitive.stream","generated_primitive_no_batches.stream","generated_primitive_zerolength.stream"]
 
 compression_2_0_0 = ["generated_uncompressible_zstd.stream", "generated_zstd.stream"]
