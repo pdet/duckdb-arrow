@@ -123,13 +123,6 @@ class TestArrowIntegrationTests(object):
             compare_ipc_file_reader(connection,os.path.join(compression_folder,file))
 
     def test_write_ipc_buffer(self, connection):
-        # Tracked in: https://github.com/duckdblabs/duckdb-internal/issues/4451
-
-        # Expected key of map type to be non-nullable but was nullable
-            # generated_map_non_canonical.stream
-            # generated_map.stream
-        # Unsupported type in DuckDB -> Arrow Conversion: "NULL"
-            # generated_null.stream
         for file in little_big_integration_files:
             if file not in ["generated_map_non_canonical.stream", "generated_map.stream", "generated_null.stream"]:
                 compare_ipc_buffer_writer(connection,os.path.join(big_endian_folder,file))
