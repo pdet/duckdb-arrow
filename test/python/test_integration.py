@@ -79,8 +79,9 @@ def compare_ipc_buffer_reader(con, file):
 # 4. Now test the DuckDB buffer writer, by reading it back with arrow and comparing
 def compare_ipc_buffer_writer(con, file):
     arrow_result = ipc.open_stream(file).read_all()
+    print (con.execute(f"DESCRIBE (FROM read_arrow('{file}'))").fetchall())
     buffers = con.execute(f"FROM to_arrow_ipc((FROM read_arrow('{file}')))").fetchall()
-
+    print ()
     if not buffers:
         return
 
@@ -123,16 +124,8 @@ class TestArrowIntegrationTests(object):
             compare_ipc_file_reader(connection,os.path.join(compression_folder,file))
 
     def test_write_ipc_buffer(self, connection):
-        # Tracked in: https://github.com/duckdblabs/duckdb-internal/issues/4451
-
-        # Expected key of map type to be non-nullable but was nullable
-            # generated_map_non_canonical.stream
-            # generated_map.stream
-        # Unsupported type in DuckDB -> Arrow Conversion: "NULL"
-            # generated_null.stream
         for file in little_big_integration_files:
-            if file not in ["generated_map_non_canonical.stream", "generated_map.stream", "generated_null.stream"]:
-                compare_ipc_buffer_writer(connection,os.path.join(big_endian_folder,file))
-                compare_ipc_buffer_writer(connection,os.path.join(little_endian_folder,file))
+            compare_ipc_buffer_writer(connection,os.path.join(big_endian_folder,file))
+            compare_ipc_buffer_writer(connection,os.path.join(little_endian_folder,file))
         for file in compression_2_0_0:
             compare_ipc_buffer_writer(connection,os.path.join(compression_folder,file))

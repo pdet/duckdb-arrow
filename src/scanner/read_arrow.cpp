@@ -125,6 +125,9 @@ TableFunction ReadArrowStreamFunction() { return ReadArrowStream::Function(); }
 void RegisterReadArrowStream(DatabaseInstance& db) {
   auto function = ReadArrowStream::Function();
   ExtensionUtil::RegisterFunction(db, function);
+  // So we can accept a list of paths as well e.g., ['file_1.arrow','file_2.arrow']
+  function.arguments = {LogicalType::LIST(LogicalType::VARCHAR)};
+  ExtensionUtil::RegisterFunction(db, function);
   auto& config = DBConfig::GetConfig(db);
   config.replacement_scans.emplace_back(ReadArrowStream::ScanReplacement);
 }

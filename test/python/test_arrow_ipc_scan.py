@@ -26,6 +26,8 @@ class TestArrowIPCBufferRead(object):
       buffer = sink.getvalue()
       struct =  f"{{'ptr': {buffer.address}::UBIGINT, 'size': {buffer.size}::UBIGINT}}"
       arrow_scan_function = f"FROM scan_arrow_ipc([{struct}])"
+      print (arrow_scan_function)
+      assert 0 == 1
       connection.execute(arrow_scan_function).fetchall()
       tables_match(connection.execute(arrow_scan_function).fetchall())
 
