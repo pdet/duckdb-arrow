@@ -26,8 +26,7 @@ struct ScanArrowIPCFunction : ArrowTableFunction {
     const auto buffer_ptr_list = ListValue::GetChildren(input.inputs[0]);
     for (auto& buffer_ptr_struct : buffer_ptr_list) {
       auto unpacked = StructValue::GetChildren(buffer_ptr_struct);
-      buffers.emplace_back(unpacked[0].GetPointer(),
-                           unpacked[1].GetValue<uint64_t>());
+      buffers.emplace_back(unpacked[0].GetPointer(), unpacked[1].GetValue<uint64_t>());
     }
 
     auto stream_factory = make_uniq<BufferIPCStreamFactory>(context, buffers);
