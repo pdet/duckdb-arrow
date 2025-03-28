@@ -48,4 +48,3 @@ query I
 SELECT count(*) from "data/test.arrows" WHERE dayname(time::TIMESTAMP) = 'Wednesday';
 ----
 2927
-

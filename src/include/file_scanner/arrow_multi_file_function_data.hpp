@@ -13,10 +13,7 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 
-struct ArrowMultiFileFunctionData : public TableFunctionData {
-
-};
-
+struct ArrowMultiFileFunctionData : public TableFunctionData {};
 
 }  // namespace ext_nanoarrow
 }  // namespace duckdb

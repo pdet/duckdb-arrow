@@ -1,304 +1,237 @@
-#include "duckdb/common/bind_helpers.hpp"
 #include "file_scanner/arrow_multi_file_info.hpp"
+#include "duckdb/common/bind_helpers.hpp"
+
+#include "ipc/stream_factory.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
 
-unique_ptr<BaseFileReaderOptions> ArrowMultiFileInfo::InitializeOptions(ClientContext &context,
-                                                                      optional_ptr<TableFunctionInfo> info) {
-	return make_uniq<ArrowFileReaderOptions>();
+unique_ptr<BaseFileReaderOptions> ArrowMultiFileInfo::InitializeOptions(
+    ClientContext& context, optional_ptr<TableFunctionInfo> info) {
+  return make_uniq<ArrowFileReaderOptions>();
 }
 
-bool ArrowMultiFileInfo::ParseCopyOption(ClientContext &context, const string &key, const vector<Value> &values,
-                                       BaseFileReaderOptions &options_p, vector<string> &expected_names,
-                                       vector<LogicalType> &expected_types) {
-	// auto &options = options_p.Cast<ArrowFileReaderOptions>();
- //          options.
-	// options.options.SetReadOption(StringUtil::Lower(key), ConvertVectorToValue(values), expected_names);
-	return true;
+bool ArrowMultiFileInfo::ParseCopyOption(ClientContext& context, const string& key,
+                                         const vector<Value>& values,
+                                         BaseFileReaderOptions& options_p,
+                                         vector<string>& expected_names,
+                                         vector<LogicalType>& expected_types) {
+  return true;
 }
 
-bool ArrowMultiFileInfo::ParseOption(ClientContext &context, const string &key, const Value &val,
-                                   MultiFileReaderOptions &file_options, BaseFileReaderOptions &options_p) {
-	// auto &options = options_p.Cast<ArrowFileReaderOptions>();
-	// options.options.ParseOption(context, key, val);
-	return true;
+bool ArrowMultiFileInfo::ParseOption(ClientContext& context, const string& key,
+                                     const Value& val, MultiFileOptions& file_options,
+                                     BaseFileReaderOptions& options) {
+  return true;
 }
 
-void ArrowMultiFileInfo::FinalizeCopyBind(ClientContext &context, BaseFileReaderOptions &options_p,
-                                        const vector<string> &expected_names,
-                                        const vector<LogicalType> &expected_types) {
-	// auto &options = options_p.Cast<ArrowFileReaderOptions>();
-	// auto &csv_options = options.options;
-	// csv_options.name_list = expected_names;
-	// csv_options.sql_type_list = expected_types;
-	// csv_options.columns_set = true;
-	// for (idx_t i = 0; i < expected_types.size(); i++) {
-	// 	csv_options.sql_types_per_column[expected_names[i]] = i;
-	// }
-}
+void ArrowMultiFileInfo::FinalizeCopyBind(ClientContext& context,
+                                          BaseFileReaderOptions& options_p,
+                                          const vector<string>& expected_names,
+                                          const vector<LogicalType>& expected_types) {}
 
-unique_ptr<TableFunctionData> ArrowMultiFileInfo::InitializeBindData(MultiFileBindData &multi_file_data,
-                                                                   unique_ptr<BaseFileReaderOptions> options_p) {
-	// auto &options = options_p->Cast<ArrowFileReaderOptions>();
-	// auto csv_data = make_uniq<ReadCSVData>();
-	// csv_data->options = std::move(options.options);
-	// if (multi_file_data.file_list->GetExpandResult() == FileExpandResult::MULTIPLE_FILES) {
-	// 	csv_data->options.multi_file_reader = true;
-	// }
-	// csv_data->options.Verify(multi_file_data.file_options);
-	// return std::move(csv_data);
+unique_ptr<TableFunctionData> ArrowMultiFileInfo::InitializeBindData(
+    MultiFileBindData& multi_file_data, unique_ptr<BaseFileReaderOptions> options_p) {
   return make_uniq<TableFunctionData>();
 }
 
-void ArrowMultiFileInfo::BindReader(ClientContext &context, vector<LogicalType> &return_types, vector<string> &names,
-                                  MultiFileBindData &bind_data) {
-	// auto &csv_data = bind_data.bind_data->Cast<ReadCSVData>();
-	auto &multi_file_list = *bind_data.file_list;
-	// auto &options = csv_data.options;
-	if (!bind_data.file_options.union_by_name) {
-		bind_data.multi_file_reader->BindOptions(bind_data.file_options, multi_file_list, return_types, names,
-		                                         bind_data.reader_bind);
-	} else {
-	  D_ASSERT(0);
-		// bind_data.reader_bind = bind_data.multi_file_reader->BindUnionReader<CSVMultiFileInfo>(
-		//     context, return_types, names, multi_file_list, bind_data, options, bind_data.file_options);
-		// if (bind_data.union_readers.size() > 1) {
-		// 	for (idx_t i = 0; i < bind_data.union_readers.size(); i++) {
-		// 		auto &csv_union_data = bind_data.union_readers[i]->Cast<CSVUnionData>();
-		// 		csv_data.column_info.emplace_back(csv_union_data.names, csv_union_data.types);
-		// 	}
-		// }
-		// if (!options.sql_types_per_column.empty()) {
-		// 	const auto exception = CSVError::ColumnTypesError(options.sql_types_per_column, names);
-		// 	if (!exception.error_message.empty()) {
-		// 		throw BinderException(exception.error_message);
-		// 	}
-		// 	for (idx_t i = 0; i < names.size(); i++) {
-		// 		auto it = options.sql_types_per_column.find(names[i]);
-		// 		if (it != options.sql_types_per_column.end()) {
-		// 			return_types[i] = options.sql_type_list[it->second];
-		// 		}
-		// 	}
-		// }
-		// bind_data.initial_reader.reset();
-	}
+void ArrowMultiFileInfo::BindReader(ClientContext& context,
+                                    vector<LogicalType>& return_types,
+                                    vector<string>& names, MultiFileBindData& bind_data) {
+  // auto &csv_data = bind_data.bind_data->Cast<ReadCSVData>();
+  auto& multi_file_list = *bind_data.file_list;
+  // auto &options = csv_data.options;
+  if (!bind_data.file_options.union_by_name) {
+    bind_data.multi_file_reader->BindOptions(bind_data.file_options, multi_file_list,
+                                             return_types, names, bind_data.reader_bind);
+  } else {
+    D_ASSERT(0);
+  }
 }
 
-void ArrowMultiFileInfo::FinalizeBindData(MultiFileBindData &multi_file_data) {
-	auto &csv_data = multi_file_data.bind_data->Cast<ReadCSVData>();
-	auto &names = multi_file_data.names;
-	auto &options = csv_data.options;
-	if (!options.force_not_null_names.empty()) {
-		// Let's first check all column names match
-		duckdb::unordered_set<string> column_names;
-		for (auto &name : names) {
-			column_names.insert(name);
-		}
-		for (auto &force_name : options.force_not_null_names) {
-			if (column_names.find(force_name) == column_names.end()) {
-				throw BinderException("\"force_not_null\" expected to find %s, but it was not found in the table",
-				                      force_name);
-			}
-		}
-		D_ASSERT(options.force_not_null.empty());
-		for (idx_t i = 0; i < names.size(); i++) {
-			if (options.force_not_null_names.find(names[i]) != options.force_not_null_names.end()) {
-				options.force_not_null.push_back(true);
-			} else {
-				options.force_not_null.push_back(false);
-			}
-		}
-	}
-	csv_data.Finalize();
+void ArrowMultiFileInfo::FinalizeBindData(MultiFileBindData& multi_file_data) {}
+
+void ArrowMultiFileInfo::GetBindInfo(const TableFunctionData& bind_data, BindInfo& info) {
 }
 
-void ArrowMultiFileInfo::GetBindInfo(const TableFunctionData &bind_data, BindInfo &info) {
+optional_idx ArrowMultiFileInfo::MaxThreads(const MultiFileBindData& bind_data,
+                                            const MultiFileGlobalState& global_state,
+                                            FileExpandResult expand_result) {
+  return optional_idx();
 }
 
-optional_idx ArrowMultiFileInfo::MaxThreads(const MultiFileBindData &bind_data, const MultiFileGlobalState &global_state,
-                                          FileExpandResult expand_result) {
-	auto &csv_data = bind_data.bind_data->Cast<ReadCSVData>();
-	if (!csv_data.buffer_manager) {
-		return optional_idx();
-	}
-	if (expand_result == FileExpandResult::MULTIPLE_FILES) {
-		// always launch max threads if we are reading multiple files
-		return optional_idx();
-	}
-	const idx_t bytes_per_thread = CSVIterator::BytesPerThread(csv_data.options);
-	const idx_t file_size = csv_data.buffer_manager->file_handle->FileSize();
-	return file_size / bytes_per_thread + 1;
-}
+struct ArrowFileGlobalState : public GlobalTableFunctionState {
+ public:
+  ArrowFileGlobalState(ClientContext& context_p, idx_t total_file_count,
+                       const MultiFileBindData& bind_data);
 
-unique_ptr<GlobalTableFunctionState> ArrowMultiFileInfo::InitializeGlobalState(ClientContext &context,
-                                                                             MultiFileBindData &bind_data,
-                                                                             MultiFileGlobalState &global_state) {
-	auto &csv_data = bind_data.bind_data->Cast<ReadCSVData>();
+  ~ArrowFileGlobalState() override {}
 
-	// Create the temporary rejects table
-	if (csv_data.options.store_rejects.GetValue()) {
-		CSVRejectsTable::GetOrCreate(context, csv_data.options.rejects_scan_name.GetValue(),
-		                             csv_data.options.rejects_table_name.GetValue())
-		    ->InitializeTable(context, csv_data);
-	}
-	return make_uniq<CSVGlobalState>(context, csv_data.options, bind_data.file_list->GetTotalFileCount(), bind_data);
-}
 
-struct CSVLocalState : public LocalTableFunctionState {
-public:
-	unique_ptr<StringValueScanner> csv_reader;
-	bool done = false;
+
+ private:
+  bool is_union;
+  //! Reference to the client context that created this scan
+  ClientContext& context;
+  const MultiFileBindData& bind_data;
+  //! For insertion order preservation?
+  atomic<idx_t> scanner_idx;
+  //! Current File Index?
+  atomic<idx_t> current_file;
 };
 
-unique_ptr<LocalTableFunctionState> ArrowMultiFileInfo::InitializeLocalState(ExecutionContext &,
-                                                                           GlobalTableFunctionState &) {
-	return make_uniq<CSVLocalState>();
+unique_ptr<GlobalTableFunctionState> ArrowMultiFileInfo::InitializeGlobalState(
+    ClientContext& context, MultiFileBindData& bind_data,
+    MultiFileGlobalState& global_state) {
+  return make_uniq<ArrowFileGlobalState>(
+      context, bind_data.file_list->GetTotalFileCount(), bind_data);
 }
 
-shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(ClientContext &context, GlobalTableFunctionState &gstate_p,
-                                                          BaseUnionData &union_data_p,
-                                                          const MultiFileBindData &bind_data) {
-	auto &union_data = union_data_p.Cast<CSVUnionData>();
-	auto &gstate = gstate_p.Cast<CSVGlobalState>();
-	auto &csv_data = bind_data.bind_data->Cast<ReadCSVData>();
-	// union readers - use cached options
-	auto &csv_names = union_data.names;
-	auto &csv_types = union_data.types;
-	auto options = union_data.options;
-	options.auto_detect = false;
-	D_ASSERT(csv_data.csv_schema.Empty());
-	return make_shared_ptr<CSVFileScan>(context, union_data.GetFileName(), std::move(options), bind_data.file_options,
-	                                    csv_names, csv_types, csv_data.csv_schema, gstate.SingleThreadedRead(), nullptr,
-	                                    false);
+struct ArrowFileLocalState : public LocalTableFunctionState {
+ public:
+  //! Factory Pointer
+  std::unique_ptr<ArrowIPCStreamFactory> factory;
+
+  //! Each local state refers to an Arrow Scan on a local file
+  ArrowScanFunctionData local_arrow_function_data;
+  ArrowScanGlobalState local_arrow_global_state;
+  ArrowScanLocalState local_arrow_local_state;
+
+  //! Projection and filter being pushed down in this file.
+  ArrowStreamParameters pushdown_parameters;
+};
+
+unique_ptr<LocalTableFunctionState> ArrowMultiFileInfo::InitializeLocalState(
+    ExecutionContext& context, GlobalTableFunctionState& function_state) {
+  auto& arrow_global_state = function_state.Cast<ArrowFileGlobalState>();
+  auto res = make_uniq<ArrowFileLocalState>();
+  res->factory = make_unique<ArrowIPCStreamFactory>(BufferAllocator::Get(context.client));
+  arrow_global_state.
+  // res->factory->Produce();
+  return res;
 }
 
-shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(ClientContext &context, GlobalTableFunctionState &gstate_p,
-                                                          const string &filename, idx_t file_idx,
-                                                          const MultiFileBindData &bind_data) {
-	auto &gstate = gstate_p.Cast<CSVGlobalState>();
-	auto &csv_data = bind_data.bind_data->Cast<ReadCSVData>();
+class ArrowFileScan : public BaseFileReader {
+  explicit ArrowFileScan(const string& file_name) : BaseFileReader(file_name) {}
+  string GetReaderType() const override { return "ARROW"; }
+  bool UseCastMap() const override {
+    //! Whether or not to push casts into the cast map
+    return true;
+  }
+};
 
-	auto options = csv_data.options;
-	if (bind_data.file_list->GetExpandResult() == FileExpandResult::SINGLE_FILE) {
-		options.auto_detect = false;
-	}
-	shared_ptr<CSVBufferManager> buffer_manager;
-	if (file_idx == 0) {
-		buffer_manager = csv_data.buffer_manager;
-		if (buffer_manager && buffer_manager->GetFilePath() != filename) {
-			buffer_manager.reset();
-		}
-	}
-	return make_shared_ptr<CSVFileScan>(context, filename, std::move(options), bind_data.file_options, bind_data.names,
-	                                    bind_data.types, csv_data.csv_schema, gstate.SingleThreadedRead(),
-	                                    std::move(buffer_manager), false);
+shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
+    ClientContext& context, GlobalTableFunctionState& gstate_p, BaseUnionData& union_data,
+    const MultiFileBindData& bind_data) {
+  return make_shared_ptr<ArrowFileScan>(union_data.GetFileName());
 }
 
-shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(ClientContext &context, const string &filename,
-                                                          CSVReaderOptions &options,
-                                                          const MultiFileReaderOptions &file_options) {
-	return make_shared_ptr<CSVFileScan>(context, filename, options, file_options);
+shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
+    ClientContext& context, GlobalTableFunctionState& gstate_p, const string& filename,
+    idx_t file_idx, const MultiFileBindData& bind_data) {
+  return make_shared_ptr<ArrowFileScan>(filename);
 }
 
-shared_ptr<BaseUnionData> ArrowMultiFileInfo::GetUnionData(shared_ptr<BaseFileReader> scan_p, idx_t file_idx) {
-	auto &scan = scan_p->Cast<CSVFileScan>();
-	auto data = make_shared_ptr<CSVUnionData>(scan_p->GetFileName());
-	if (file_idx == 0) {
-		data->options = scan.options;
-		data->names = scan.GetNames();
-		data->types = scan.GetTypes();
-		data->reader = std::move(scan_p);
-	} else {
-		data->options = std::move(scan.options);
-		data->names = scan.GetNames();
-		data->types = scan.GetTypes();
-	}
-	data->options.auto_detect = false;
-	return data;
+shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
+    ClientContext& context, const string& filename, CSVReaderOptions& options,
+    const MultiFileOptions& file_options) {
+  return make_shared_ptr<ArrowFileScan>(filename);
 }
 
-void ArrowMultiFileInfo::FinalizeReader(ClientContext &context, BaseFileReader &reader, GlobalTableFunctionState &) {
-	auto &csv_file_scan = reader.Cast<CSVFileScan>();
-	csv_file_scan.InitializeFileNamesTypes();
-	csv_file_scan.SetStart();
+shared_ptr<BaseUnionData> ArrowMultiFileInfo::GetUnionData(
+    shared_ptr<BaseFileReader> scan_p, idx_t file_idx) {
+  auto& scan = scan_p->Cast<ArrowFileScan>();
+  return make_shared_ptr<BaseUnionData>(scan_p->GetFileName());
+  ;
 }
 
-bool ArrowMultiFileInfo::TryInitializeScan(ClientContext &context, shared_ptr<BaseFileReader> &reader,
-                                         GlobalTableFunctionState &gstate_p, LocalTableFunctionState &lstate_p) {
-	auto &gstate = gstate_p.Cast<CSVGlobalState>();
-	auto &lstate = lstate_p.Cast<CSVLocalState>();
-	auto csv_reader_ptr = shared_ptr_cast<BaseFileReader, CSVFileScan>(reader);
-	gstate.FinishScan(std::move(lstate.csv_reader));
-	lstate.csv_reader = gstate.Next(csv_reader_ptr);
-	if (!lstate.csv_reader) {
-		// exhausted the scan
-		return false;
-	}
-	return true;
+void ArrowMultiFileInfo::FinalizeReader(ClientContext& context, BaseFileReader& reader,
+                                        GlobalTableFunctionState&) {}
+
+bool ArrowMultiFileInfo::TryInitializeScan(ClientContext& context,
+                                           shared_ptr<BaseFileReader>& reader,
+                                           GlobalTableFunctionState& gstate_p,
+                                           LocalTableFunctionState& lstate_p) {
+  auto& gstate = gstate_p.Cast<ArrowFileGlobalState>();
+  auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
+  auto csv_reader_ptr = shared_ptr_cast<BaseFileReader, CSVFileScan>(reader);
+  // gstate.FinishScan(std::move(lstate.csv_reader));
+  // lstate.csv_reader = gstate.Next(csv_reader_ptr);
+  if (!lstate.csv_reader) {
+    // exhausted the scan
+    return false;
+  }
+  return true;
 }
 
-void ArrowMultiFileInfo::Scan(ClientContext &context, BaseFileReader &reader, GlobalTableFunctionState &global_state,
-                            LocalTableFunctionState &local_state, DataChunk &chunk) {
-	auto &lstate = local_state.Cast<CSVLocalState>();
-	if (lstate.csv_reader->FinishedIterator()) {
-		return;
-	}
-	lstate.csv_reader->Flush(chunk);
+void ArrowMultiFileInfo::Scan(ClientContext& context, BaseFileReader& reader,
+                              GlobalTableFunctionState& global_state,
+                              LocalTableFunctionState& local_state, DataChunk& chunk) {
+  auto& lstate = local_state.Cast<ArrowFileLocalState>();
+  ArrowScanFunction() if (lstate.csv_reader->FinishedIterator()) { return; }
+  lstate.csv_reader->Flush(chunk);
 }
 
-void ArrowMultiFileInfo::FinishFile(ClientContext &context, GlobalTableFunctionState &global_state,
-                                  BaseFileReader &reader) {
-	auto &gstate = global_state.Cast<CSVGlobalState>();
-	gstate.FinishLaunchingTasks(reader.Cast<CSVFileScan>());
+void ArrowMultiFileInfo::FinishFile(ClientContext& context,
+                                    GlobalTableFunctionState& global_state,
+                                    BaseFileReader& reader) {
+  auto& gstate = global_state.Cast<CSVGlobalState>();
+  gstate.FinishLaunchingTasks(reader.Cast<CSVFileScan>());
 }
 
-void ArrowMultiFileInfo::FinishReading(ClientContext &context, GlobalTableFunctionState &global_state,
-                                     LocalTableFunctionState &local_state) {
-	auto &gstate = global_state.Cast<CSVGlobalState>();
-	auto &lstate = local_state.Cast<CSVLocalState>();
-	gstate.FinishScan(std::move(lstate.csv_reader));
+void ArrowMultiFileInfo::FinishReading(ClientContext& context,
+                                       GlobalTableFunctionState& global_state,
+                                       LocalTableFunctionState& local_state) {
+  auto& gstate = global_state.Cast<CSVGlobalState>();
+  auto& lstate = local_state.Cast<CSVLocalState>();
+  gstate.FinishScan(std::move(lstate.csv_reader));
 }
 
-unique_ptr<NodeStatistics> ArrowMultiFileInfo::GetCardinality(const MultiFileBindData &bind_data, idx_t file_count) {
-	auto &csv_data = bind_data.bind_data->Cast<ReadCSVData>();
-	// determined through the scientific method as the average amount of rows in a CSV file
-	idx_t per_file_cardinality = 42;
-	if (csv_data.buffer_manager && csv_data.buffer_manager->file_handle) {
-		auto estimated_row_width = (bind_data.types.size() * 5);
-		per_file_cardinality = csv_data.buffer_manager->file_handle->FileSize() / estimated_row_width;
-	}
-	return make_uniq<NodeStatistics>(file_count * per_file_cardinality);
+unique_ptr<NodeStatistics> ArrowMultiFileInfo::GetCardinality(
+    const MultiFileBindData& bind_data, idx_t file_count) {
+  auto& csv_data = bind_data.bind_data->Cast<ReadCSVData>();
+  // determined through the scientific method as the average amount of rows in a CSV file
+  idx_t per_file_cardinality = 42;
+  if (csv_data.buffer_manager && csv_data.buffer_manager->file_handle) {
+    auto estimated_row_width = (bind_data.types.size() * 5);
+    per_file_cardinality =
+        csv_data.buffer_manager->file_handle->FileSize() / estimated_row_width;
+  }
+  return make_uniq<NodeStatistics>(file_count * per_file_cardinality);
 }
 
-unique_ptr<BaseStatistics> ArrowMultiFileInfo::GetStatistics(ClientContext &context, BaseFileReader &reader,
-                                                           const string &name) {
-	throw InternalException("Unimplemented CSVMultiFileInfo method");
+unique_ptr<BaseStatistics> ArrowMultiFileInfo::GetStatistics(ClientContext& context,
+                                                             BaseFileReader& reader,
+                                                             const string& name) {
+  throw InternalException("Unimplemented CSVMultiFileInfo method");
 }
 
-double ArrowMultiFileInfo::GetProgressInFile(ClientContext &context, const BaseFileReader &reader) {
-	auto &csv_scan = reader.Cast<CSVFileScan>();
+double ArrowMultiFileInfo::GetProgressInFile(ClientContext& context,
+                                             const BaseFileReader& reader) {
+  auto& csv_scan = reader.Cast<CSVFileScan>();
 
-	auto buffer_manager = csv_scan.buffer_manager;
-	if (!buffer_manager) {
-		// We are done with this file, so it's 100%
-		return 100.0;
-	}
-	double bytes_read;
-	if (buffer_manager->file_handle->compression_type == FileCompressionType::GZIP ||
-	    buffer_manager->file_handle->compression_type == FileCompressionType::ZSTD) {
-		// compressed file: we care about the progress made in the *underlying* file handle
-		// the bytes read from the uncompressed file are skewed
-		bytes_read = buffer_manager->file_handle->GetProgress();
-	} else {
-		bytes_read = static_cast<double>(csv_scan.bytes_read);
-	}
-	double file_progress = bytes_read / static_cast<double>(csv_scan.file_size);
-	return file_progress * 100.0;
+  auto buffer_manager = csv_scan.buffer_manager;
+  if (!buffer_manager) {
+    // We are done with this file, so it's 100%
+    return 100.0;
+  }
+  double bytes_read;
+  if (buffer_manager->file_handle->compression_type == FileCompressionType::GZIP ||
+      buffer_manager->file_handle->compression_type == FileCompressionType::ZSTD) {
+    // compressed file: we care about the progress made in the *underlying* file handle
+    // the bytes read from the uncompressed file are skewed
+    bytes_read = buffer_manager->file_handle->GetProgress();
+  } else {
+    bytes_read = static_cast<double>(csv_scan.bytes_read);
+  }
+  double file_progress = bytes_read / static_cast<double>(csv_scan.file_size);
+  return file_progress * 100.0;
 }
 
-void ArrowMultiFileInfo::GetVirtualColumns(ClientContext &, MultiFileBindData &, virtual_column_map_t &result) {
-	result.insert(make_pair(COLUMN_IDENTIFIER_EMPTY, TableColumn("", LogicalType::BOOLEAN)));
+void ArrowMultiFileInfo::GetVirtualColumns(ClientContext&, MultiFileBindData&,
+                                           virtual_column_map_t& result) {
+  result.insert(
+      make_pair(COLUMN_IDENTIFIER_EMPTY, TableColumn("", LogicalType::BOOLEAN)));
 }
 
 }  // namespace ext_nanoarrow

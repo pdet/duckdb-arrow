@@ -46,20 +46,16 @@ struct ReadArrowStream : ArrowTableFunction {
   // data (instead of as a Python object whose ownership is kept alive via the
   // DependencyItem mechanism).
   static TableFunction Function() {
-
-    MultiFileReaderFunction<ArrowMultiFileInfo> read_csv("read_arrow");
-    ReadCSVAddNamedParameters(read_csv);
-    return static_cast<TableFunction>(read_csv);
-
     TableFunction fn("read_arrow", {LogicalType::VARCHAR}, ArrowScanFunction, Bind,
                      ArrowScanInitGlobal, ArrowScanInitLocal);
-    fn.cardinality = ArrowScanCardinality;
-    fn.projection_pushdown = true;
-    fn.filter_pushdown = false;
-    fn.filter_prune = false;
-    return fn;
-  }
 
+    MultiFileFunction<ArrowMultiFileInfo> read_arrow("read_arrow");
+    read_arrow.cardinality = ArrowScanCardinality;
+    read_arrow.projection_pushdown = true;
+    read_arrow.filter_pushdown = false;
+    read_arrow.filter_prune = false;
+    return static_cast<TableFunction>(read_arrow);
+  }
 
   static unique_ptr<TableRef> ScanReplacement(ClientContext& context,
                                               ReplacementScanInput& input,
