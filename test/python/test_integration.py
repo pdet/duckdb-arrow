@@ -38,21 +38,6 @@ def compare_result(arrow_result,duckdb_result, con):
         (SELECT * FROM duckdb_result EXCEPT SELECT * FROM arrow_result)
     ) """).fetchone()[0]
 
-def get_buffer_struct(file, serialized_buffers):
-    reader = mr.open_stream(file)
-    structs = ''
-    while True:
-        try:
-            message = reader.read_next_message()
-            if message is None:
-                break
-            buffer = message.serialize()
-            serialized_buffers.append(buffer)
-            structs = structs + f"{{'ptr': {buffer.address}::UBIGINT, 'size': {buffer.size}::UBIGINT}},"
-        except StopIteration:
-            break
-    return structs[:-1]
-
 # 1. Compare result from reading the IPC file in Arrow, and in Duckdb
 def compare_ipc_file_reader(con, file):
     arrow_result = ipc.open_stream(file).read_all()
@@ -70,10 +55,9 @@ def compare_ipc_file_writer(con, file):
 
 # 3. Compare result from reading the IPC file in Arrow, and in Duckdb
 def compare_ipc_buffer_reader(con, file):
-    serialized_buffers = []
     arrow_result = ipc.open_stream(file).read_all()
-    structs = get_buffer_struct(file, serialized_buffers)
-    duckdb_struct_result = con.execute(f"FROM scan_arrow_ipc([{structs}])").arrow()
+    reader = mr.open_stream(file)
+    duckdb_struct_result = con.from_arrow(reader).arrow()
     assert compare_result(arrow_result, duckdb_struct_result, con)
 
 # 4. Now test the DuckDB buffer writer, by reading it back with arrow and comparing
@@ -123,13 +107,6 @@ class TestArrowIntegrationTests(object):
             compare_ipc_file_reader(connection,os.path.join(compression_folder,file))
 
     def test_write_ipc_buffer(self, connection):
-        # Tracked in: https://github.com/duckdblabs/duckdb-internal/issues/4451
-
-        # Expected key of map type to be non-nullable but was nullable
-            # generated_map_non_canonical.stream
-            # generated_map.stream
-        # Unsupported type in DuckDB -> Arrow Conversion: "NULL"
-            # generated_null.stream
         for file in little_big_integration_files:
             if file not in ["generated_map_non_canonical.stream", "generated_map.stream", "generated_null.stream"]:
                 compare_ipc_buffer_writer(connection,os.path.join(big_endian_folder,file))

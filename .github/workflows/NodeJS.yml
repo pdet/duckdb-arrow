@@ -30,7 +30,7 @@ jobs:
 
       - name: Install required node packages
         run: |
-          sudo npm i duckdb@1.2.0
+          sudo npm i duckdb@1.2.1
           sudo npm install -g  apache-arrow mocha
           sudo npm install  apache-arrow mocha
           npm -v
@@ -38,6 +38,9 @@ jobs:
 
       - name: Build duckdb
         run: |
+          cd duckdb
+          git checkout 8e52ec43959ab363643d63cb78ee214577111da4
+          cd ..
           make
 
       - name: Run JS tests
