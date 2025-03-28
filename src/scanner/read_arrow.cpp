@@ -2,6 +2,7 @@
 
 #include <inttypes.h>
 
+#include "file_scanner/arrow_multi_file_info.hpp"
 #include "zstd.h"
 
 #include "duckdb/common/radix.hpp"
@@ -45,6 +46,11 @@ struct ReadArrowStream : ArrowTableFunction {
   // data (instead of as a Python object whose ownership is kept alive via the
   // DependencyItem mechanism).
   static TableFunction Function() {
+
+    MultiFileReaderFunction<ArrowMultiFileInfo> read_csv("read_arrow");
+    ReadCSVAddNamedParameters(read_csv);
+    return static_cast<TableFunction>(read_csv);
+
     TableFunction fn("read_arrow", {LogicalType::VARCHAR}, ArrowScanFunction, Bind,
                      ArrowScanInitGlobal, ArrowScanInitLocal);
     fn.cardinality = ArrowScanCardinality;
@@ -53,6 +59,7 @@ struct ReadArrowStream : ArrowTableFunction {
     fn.filter_prune = false;
     return fn;
   }
+
 
   static unique_ptr<TableRef> ScanReplacement(ClientContext& context,
                                               ReplacementScanInput& input,

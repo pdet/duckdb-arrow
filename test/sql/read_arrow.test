@@ -49,10 +49,3 @@ SELECT count(*) from "data/test.arrows" WHERE dayname(time::TIMESTAMP) = 'Wednes
 ----
 2927
 
-# Test File List Works
-statement ok
-CREATE TABLE T as FROM read_arrow(['data/test.arrows', 'data/test.arrows'])
-
-query I
-SELECT count(*) from T;
-----

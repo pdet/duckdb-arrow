@@ -1,0 +1,17 @@
+# name: test/sql/multifile_reading.test
+# description: Test read_arrow over multiple files.
+# group: [nanoarrow]
+
+require nanoarrow
+
+# Test File List Works
+statement ok
+CREATE TABLE T as FROM read_arrow(['data/test.arrows', 'data/test.arrows'])
+
+query I
+SELECT count(*) from T;
+----
+
+# Test GLOB
+
+# Test UNION BY NAME
