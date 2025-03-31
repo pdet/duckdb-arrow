@@ -30,6 +30,15 @@ void ArrowMultiFileInfo::FinalizeCopyBind(ClientContext& context,
                                           const vector<string>& expected_names,
                                           const vector<LogicalType>& expected_types) {}
 
+struct ArrowMultifileData : public TableFunctionData {
+  ArrowMultifileData() = default;
+
+  //! The arrow stream factory (if any): this is used when automatic detection is used
+  //! during binding. In this case, some CSV buffers have already been read and can be
+  //! reused.
+  unique_ptr<ArrowIPCStreamFactory> factory;
+};
+
 unique_ptr<TableFunctionData> ArrowMultiFileInfo::InitializeBindData(
     MultiFileBindData& multi_file_data, unique_ptr<BaseFileReaderOptions> options_p) {
   return make_uniq<TableFunctionData>();
@@ -38,10 +47,25 @@ unique_ptr<TableFunctionData> ArrowMultiFileInfo::InitializeBindData(
 void ArrowMultiFileInfo::BindReader(ClientContext& context,
                                     vector<LogicalType>& return_types,
                                     vector<string>& names, MultiFileBindData& bind_data) {
-  // auto &csv_data = bind_data.bind_data->Cast<ReadCSVData>();
+  auto& csv_data = bind_data.bind_data->Cast<ArrowMultifileData>();
   auto& multi_file_list = *bind_data.file_list;
   // auto &options = csv_data.options;
   if (!bind_data.file_options.union_by_name) {
+    ArrowSchemaWrapper schema_root;
+    const auto file_paths = multi_file_list.GetAllFiles();
+    auto stream_factory = make_uniq<FileIPCStreamFactory>(context, file_paths[0]);
+    stream_factory->InitReader();
+    stream_factory->GetFileSchema(schema_root);
+    ArrowTableType arrow_table_type;
+
+    DBConfig& config = DatabaseInstance::GetDatabase(context).config;
+    ArrowTableFunction::PopulateArrowTableType(config, arrow_table_type, schema_root,
+                                               names, return_types);
+    QueryResult::DeduplicateColumns(names);
+    if (return_types.empty()) {
+      throw InvalidInputException(
+          "Provided table/dataframe must have at least one column");
+    }
     bind_data.multi_file_reader->BindOptions(bind_data.file_options, multi_file_list,
                                              return_types, names, bind_data.reader_bind);
   } else {
@@ -63,17 +87,19 @@ optional_idx ArrowMultiFileInfo::MaxThreads(const MultiFileBindData& bind_data,
 struct ArrowFileGlobalState : public GlobalTableFunctionState {
  public:
   ArrowFileGlobalState(ClientContext& context_p, idx_t total_file_count,
-                       const MultiFileBindData& bind_data);
+                       const MultiFileBindData& bind_data,
+                       MultiFileGlobalState& global_state)
+      : global_state(global_state), context(context_p) {};
 
   ~ArrowFileGlobalState() override {}
 
-
+  const MultiFileGlobalState& global_state;
 
  private:
   bool is_union;
   //! Reference to the client context that created this scan
   ClientContext& context;
-  const MultiFileBindData& bind_data;
+  // const MultiFileBindData& bind_data;
   //! For insertion order preservation?
   atomic<idx_t> scanner_idx;
   //! Current File Index?
@@ -87,17 +113,18 @@ unique_ptr<GlobalTableFunctionState> ArrowMultiFileInfo::InitializeGlobalState(
       context, bind_data.file_list->GetTotalFileCount(), bind_data);
 }
 
-//! The Arrow Local File State, basically refeers to the Scan of one Arrow File
+//! The Arrow Local File State, basically refers to the Scan of one Arrow File
 //! This is done by calling the Arrow Scan directly on one file.
 struct ArrowFileLocalState : public LocalTableFunctionState {
  public:
   //! Factory Pointer
-  std::unique_ptr<ArrowIPCStreamFactory> factory;
+  unique_ptr<ArrowIPCStreamFactory> factory;
 
   //! Each local state refers to an Arrow Scan on a local file
-  ArrowScanFunctionData local_arrow_function_data;
-  ArrowScanGlobalState local_arrow_global_state;
-  ArrowScanLocalState local_arrow_local_state;
+  unique_ptr<ArrowScanFunctionData> local_arrow_function_data;
+  unique_ptr<TableFunctionInitInput> init_input;
+  unique_ptr<GlobalTableFunctionState> local_arrow_global_state;
+  unique_ptr<LocalTableFunctionState> local_arrow_local_state;
 
   //! Projection and filter being pushed down in this file.
   ArrowStreamParameters pushdown_parameters;
@@ -107,10 +134,20 @@ unique_ptr<LocalTableFunctionState> ArrowMultiFileInfo::InitializeLocalState(
     ExecutionContext& context, GlobalTableFunctionState& function_state) {
   auto& arrow_global_state = function_state.Cast<ArrowFileGlobalState>();
   auto res = make_uniq<ArrowFileLocalState>();
-  res->factory = make_unique<ArrowIPCStreamFactory>(BufferAllocator::Get(context.client));
-  res->local_arrow_function_data
-  arrow_global_state.
-  // res->factory->Produce();
+
+  // Initialize all variables necessary for the ArrowTableFunction Scan
+  res->factory = make_uniq<ArrowIPCStreamFactory>(BufferAllocator::Get(context.client));
+  res->local_arrow_function_data = make_uniq<ArrowScanFunctionData>(
+      &ArrowIPCStreamFactory::Produce, res->factory.get());
+  res->init_input = make_uniq<TableFunctionInitInput>(
+      *res->local_arrow_function_data, arrow_global_state.global_state.column_indexes,
+      arrow_global_state.global_state.projection_ids,
+      arrow_global_state.global_state.filters);
+  res->local_arrow_global_state =
+      ArrowTableFunction::ArrowScanInitGlobal(context.client, *res->init_input);
+  res->local_arrow_local_state =
+      ArrowTableFunction::ArrowScanInitLocal(context, *res->init_input, &function_state);
+
   return res;
 }
 

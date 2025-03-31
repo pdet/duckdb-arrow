@@ -41,10 +41,6 @@ namespace duckdb {
 namespace ext_nanoarrow {
 
 struct ReadArrowStream : ArrowTableFunction {
-  // Define the function. Unlike arrow_scan(), which takes integer pointers
-  // as arguments, we keep the factory alive by making it a member of the bind
-  // data (instead of as a Python object whose ownership is kept alive via the
-  // DependencyItem mechanism).
   static TableFunction Function() {
     TableFunction fn("read_arrow", {LogicalType::VARCHAR}, ArrowScanFunction, Bind,
                      ArrowScanInitGlobal, ArrowScanInitLocal);
