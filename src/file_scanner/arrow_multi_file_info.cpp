@@ -87,6 +87,8 @@ unique_ptr<GlobalTableFunctionState> ArrowMultiFileInfo::InitializeGlobalState(
       context, bind_data.file_list->GetTotalFileCount(), bind_data);
 }
 
+//! The Arrow Local File State, basically refeers to the Scan of one Arrow File
+//! This is done by calling the Arrow Scan directly on one file.
 struct ArrowFileLocalState : public LocalTableFunctionState {
  public:
   //! Factory Pointer
@@ -106,6 +108,7 @@ unique_ptr<LocalTableFunctionState> ArrowMultiFileInfo::InitializeLocalState(
   auto& arrow_global_state = function_state.Cast<ArrowFileGlobalState>();
   auto res = make_uniq<ArrowFileLocalState>();
   res->factory = make_unique<ArrowIPCStreamFactory>(BufferAllocator::Get(context.client));
+  res->local_arrow_function_data
   arrow_global_state.
   // res->factory->Produce();
   return res;
@@ -114,10 +117,6 @@ unique_ptr<LocalTableFunctionState> ArrowMultiFileInfo::InitializeLocalState(
 class ArrowFileScan : public BaseFileReader {
   explicit ArrowFileScan(const string& file_name) : BaseFileReader(file_name) {}
   string GetReaderType() const override { return "ARROW"; }
-  bool UseCastMap() const override {
-    //! Whether or not to push casts into the cast map
-    return true;
-  }
 };
 
 shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
