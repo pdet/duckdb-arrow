@@ -1,6 +1,8 @@
 var arrow = require('apache-arrow')
 var duckdb = require('duckdb');
 var assert = require('assert');
+// import { RecordBatchReader } from "apache-arrow";
+
 
 const parquet_file_path = "data/parquet-testing/lineitem_sf0_01.parquet";
 
@@ -31,6 +33,24 @@ const to_ipc_functions = {
 function getDatabase() {
     return new duckdb.Database(':memory:', {"allow_unsigned_extensions":"true"});
 }
+
+
+// Stream results by getting an arrowIPCStream, then iterating with an arrow RecordBatchReader
+const streamResults = async (con, sql) => {
+  const results = [];
+  for await (const batch of await arrow.RecordBatchReader.from(
+    await con.arrowIPCStream(sql)
+  )) {
+    for (const row of batch) {
+      const result = {};
+      for (const [field, val] of row) {
+        result[field] = val;
+      }
+      results.push(result);
+    }
+  }
+  return results;
+};
 
 function getConnection(db, done) {
     let conn = new duckdb.Connection(db);
@@ -380,6 +400,22 @@ describe('Buffer registration',() => {
                 resolve();
             });
         });
+    });
+});
+
+describe(`Single Value IPC`, () => {
+    let db;
+    let conn;
+    before((done) => {
+        db = getDatabase();
+        conn = getConnection(db, () => done())
+    });
+
+    it('Try to read from query returtning one value',  async () => {
+        const sql = "select now() as t";
+        const result = await streamResults(conn, sql)
+        assert.strictEqual(result.length, 1, "Expected exactly one row");
+        assert.strictEqual(Object.keys(result[0]).length, 1, "Expected exactly one field");
     });
 });
 
