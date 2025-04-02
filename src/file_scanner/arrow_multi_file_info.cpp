@@ -45,7 +45,7 @@ struct ArrowMultifileData : public TableFunctionData {
 
 unique_ptr<TableFunctionData> ArrowMultiFileInfo::InitializeBindData(
     MultiFileBindData& multi_file_data, unique_ptr<BaseFileReaderOptions> options_p) {
-  return make_uniq<TableFunctionData>();
+  return make_uniq<ArrowMultifileData>();
 }
 
 void ArrowMultiFileInfo::BindReader(ClientContext& context,
@@ -56,6 +56,8 @@ void ArrowMultiFileInfo::BindReader(ClientContext& context,
   if (!bind_data.file_options.union_by_name) {
     arrow_multifile_data.file_scan =
         make_uniq<ArrowFileScan>(context, multi_file_list.GetFirstFile());
+    return_types = arrow_multifile_data.file_scan->GetTypes();
+    names = arrow_multifile_data.file_scan->GetNames();
     bind_data.multi_file_reader->BindOptions(bind_data.file_options, multi_file_list,
                                              return_types, names, bind_data.reader_bind);
   } else {
@@ -86,15 +88,11 @@ struct ArrowFileGlobalState : public GlobalTableFunctionState {
 
   const MultiFileGlobalState& global_state;
 
- private:
   bool is_union;
-  //! Reference to the client context that created this scan
   ClientContext& context;
   // const MultiFileBindData& bind_data;
-  //! For insertion order preservation?
-  atomic<idx_t> scanner_idx;
-  //! Current File Index?
-  atomic<idx_t> current_file;
+  // TODO: do I need to lock this or is the lock in the multi-file-reader?
+  set<idx_t> files;
 };
 
 unique_ptr<GlobalTableFunctionState> ArrowMultiFileInfo::InitializeGlobalState(
@@ -111,7 +109,8 @@ struct ArrowFileLocalState : public LocalTableFunctionState {
   ArrowFileLocalState(ExecutionContext& execution_context)
       : execution_context(execution_context) {};
   //! Factory Pointer
-  ArrowFileScan* factory;
+  shared_ptr<ArrowFileScan> file_scan;
+
   ExecutionContext& execution_context;
 
   //! Each local state refers to an Arrow Scan on a local file
@@ -162,19 +161,30 @@ bool ArrowMultiFileInfo::TryInitializeScan(ClientContext& context,
                                            LocalTableFunctionState& lstate_p) {
   auto& gstate = gstate_p.Cast<ArrowFileGlobalState>();
   auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
-  auto arrow_file_ptr = shared_ptr_cast<BaseFileReader, ArrowFileScan>(reader);
-  lstate.factory = arrow_file_ptr.get();
+  if (gstate.files.find(reader->file_list_idx.GetIndex()) != gstate.files.end()) {
+    return false;
+  }
+  gstate.files.insert(reader->file_list_idx.GetIndex());
+
+  lstate.file_scan = shared_ptr_cast<BaseFileReader, ArrowFileScan>(reader);
   lstate.local_arrow_function_data = make_uniq<ArrowScanFunctionData>(
-      &ArrowIPCStreamFactory::Produce, reinterpret_cast<uintptr_t>(lstate.factory));
+      &FileIPCStreamFactory::Produce,
+      reinterpret_cast<uintptr_t>(lstate.file_scan->factory.get()));
+  lstate.local_arrow_function_data->schema_root = lstate.file_scan->schema_root;
+  lstate.local_arrow_function_data->arrow_table = lstate.file_scan->arrow_table_type;
+
   lstate.init_input = make_uniq<TableFunctionInitInput>(
       *lstate.local_arrow_function_data, gstate.global_state.column_indexes,
       gstate.global_state.projection_ids, gstate.global_state.filters);
+
   lstate.local_arrow_global_state =
       ArrowTableFunction::ArrowScanInitGlobal(context, *lstate.init_input);
-  lstate.local_arrow_local_state = ArrowTableFunction::ArrowScanInitLocal(
-      lstate.execution_context, *lstate.init_input, &gstate_p);
+  lstate.local_arrow_local_state =
+      ArrowTableFunction::ArrowScanInitLocal(lstate.execution_context, *lstate.init_input,
+                                             lstate.local_arrow_global_state.get());
   lstate.table_function_input = make_uniq<TableFunctionInput>(
-      lstate.local_arrow_function_data.get(), &lstate_p, &gstate);
+      lstate.local_arrow_function_data.get(), lstate.local_arrow_local_state.get(),
+      lstate.local_arrow_global_state.get());
   return true;
 }
 

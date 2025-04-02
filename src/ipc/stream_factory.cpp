@@ -53,6 +53,7 @@ FileIPCStreamFactory::FileIPCStreamFactory(ClientContext& context, string src_st
     : ArrowIPCStreamFactory(BufferAllocator::Get(context)),
       fs(FileSystem::GetFileSystem(context)),
       src_string(std::move(src_string)) {}
+
 void FileIPCStreamFactory::InitReader() {
   if (reader) {
     throw InternalException("ArrowArrayStream or IpcStreamReader already initialized");

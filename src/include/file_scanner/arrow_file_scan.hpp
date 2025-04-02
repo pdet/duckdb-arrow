@@ -19,9 +19,13 @@ namespace ext_nanoarrow {
 class ArrowFileScan : public BaseFileReader {
  public:
   explicit ArrowFileScan(ClientContext& context, const string& file_name);
+  ~ArrowFileScan() {
+    // FIXME: THIS IS VERY DR. EVIL
+    schema_root.arrow_schema.release = nullptr;
+  };
 
   //! Factory of this stream
-  unique_ptr<ArrowIPCStreamFactory> factory;
+  unique_ptr<FileIPCStreamFactory> factory;
   //! Variables to handle projection pushdown
   set<idx_t> projected_columns;
 
@@ -30,6 +34,8 @@ class ArrowFileScan : public BaseFileReader {
 
   const vector<string>& GetNames();
   const vector<LogicalType>& GetTypes();
+  ArrowSchemaWrapper schema_root;
+  ArrowTableType arrow_table_type;
 
  private:
   ClientContext& context;
