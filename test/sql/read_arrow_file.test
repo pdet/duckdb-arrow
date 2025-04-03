@@ -1,0 +1,17 @@
+# name: test/sql/read_arrow_file.test
+# description: test nanoarrow extension when reading arrow file (with footer)
+# group: [nanoarrow]
+
+# The files here should be generated with "with pa.ipc.new_file(file_path, table.schema) as writer:"
+# Require statement will ensure this test is run with this extension loaded
+require nanoarrow
+
+query III
+FROM 'data/fruit.arrow'
+----
+apple	gala	134.2
+apple	honeycrisp	158.6
+apple	fuji	NULL
+orange	navel	142.1
+orange	valencia	96.7
+orange	cara cara	NULL

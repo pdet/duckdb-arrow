@@ -97,11 +97,6 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
     file_reader.ReadData(reinterpret_cast<data_ptr_t>(&message_prefix),
                          sizeof(message_prefix));
 
-    if (message_prefix.continuation_token != kContinuationToken) {
-      throw IOException(std::string("Expected continuation token (0xFFFFFFFF) but got " +
-                                    std::to_string(message_prefix.continuation_token)));
-    }
-
   } catch (SerializationException& e) {
     finished = true;
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
