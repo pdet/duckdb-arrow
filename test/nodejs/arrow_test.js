@@ -34,6 +34,10 @@ function getDatabase() {
 
 function getConnection(db, done) {
     let conn = new duckdb.Connection(db);
+    // Makes CI life a bit easier
+     conn.exec(`SET allow_extensions_metadata_mismatch=true;`, function (err) {
+        if (err) throw err;
+    });
     conn.exec(`LOAD '${process.env.ARROW_EXTENSION_BINARY_PATH}';`, function (err) {
         if (err) throw err;
         done();
@@ -224,7 +228,7 @@ describe('[Benchmark] Arrow IPC Single Int Column (50M tuples)',() => {
     before((done) => {
         db = getDatabase();
         conn = getConnection(db, () => {
-            conn.run("CREATE TABLE test AS select * FROM range(0,?) tbl(i);", column_size, (err) => {
+            conn.run("CREATE OR REPLACE TABLE test AS select * FROM range(0,?) tbl(i);", column_size, (err) => {
                 if (err) throw err;
                 done()
             });
@@ -232,7 +236,7 @@ describe('[Benchmark] Arrow IPC Single Int Column (50M tuples)',() => {
     });
 
     it('DuckDB table -> DuckDB table', (done) => {
-        conn.run('CREATE TABLE copy_table AS SELECT * FROM test', (err) => {
+        conn.run('CREATE OR REPLACE  TABLE copy_table AS SELECT * FROM test', (err) => {
             assert(!err);
             done();
         });
@@ -296,7 +300,7 @@ describe('Buffer registration',() => {
             assert(!err);
         });
 
-        conn1.run('CREATE TABLE arrow_buffer AS SELECT 7 as a;', (err) => {
+        conn1.run('CREATE OR REPLACE  TABLE arrow_buffer AS SELECT 7 as a;', (err) => {
             assert(!err);
         });
 
@@ -433,7 +437,7 @@ describe('[Benchmark] Arrow IPC TPC-H lineitem.parquet', () => {
 
     it('Parquet -> DuckDB', async () => {
         await new Promise((resolve, reject) => {
-            conn.run('CREATE TABLE load_parquet_directly AS SELECT * FROM "' + parquet_file_path + '";', (err) => {
+            conn.run('CREATE OR REPLACE  TABLE load_parquet_directly AS SELECT * FROM "' + parquet_file_path + '";', (err) => {
                 if (err) {
                     reject(err)
                 }

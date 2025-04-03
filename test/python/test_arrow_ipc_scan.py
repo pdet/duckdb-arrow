@@ -24,12 +24,9 @@ class TestArrowIPCBufferRead(object):
          for i in range(5):
             writer.write_batch(batch)
       buffer = sink.getvalue()
-      struct =  f"{{'ptr': {buffer.address}::UBIGINT, 'size': {buffer.size}::UBIGINT}}"
-      arrow_scan_function = f"FROM scan_arrow_ipc([{struct}])"
-      print (arrow_scan_function)
-      assert 0 == 1
-      connection.execute(arrow_scan_function).fetchall()
-      tables_match(connection.execute(arrow_scan_function).fetchall())
+      with pa.BufferReader(buffer) as buf_reader:
+         msg_reader = ipc.MessageReader.open_stream(buf_reader)
+         tables_match(connection.from_arrow(msg_reader).fetchall())
 
    def test_multi_buffers(self, connection):
       batch = get_record_batch()
@@ -41,17 +38,22 @@ class TestArrowIPCBufferRead(object):
 
       buffer = sink.getvalue()
 
-      buffers = []
-      with pa.BufferReader(buffer) as buf_reader:  # Use pyarrow.BufferReader
-          msg_reader = ipc.MessageReader.open_stream(buf_reader)
-          for message in msg_reader:
-              buffers.append(message.serialize())  # Serialize each message
+      with pa.BufferReader(buffer) as buf_reader:
+         msg_reader = ipc.MessageReader.open_stream(buf_reader)
+         tables_match(connection.from_arrow(msg_reader).fetchall())
 
-      structs = ''
-      for buffer in buffers:
-          structs = structs + f"{{'ptr': {buffer.address}::UBIGINT, 'size': {buffer.size}::UBIGINT}},"
+   def test_replacement_scan(self, connection):
 
-      structs = structs[:-1]
-      arrow_scan_function = f"FROM scan_arrow_ipc([{structs}])"
-      assert (len(buffers) == 6)
-      tables_match(connection.execute(arrow_scan_function).fetchall())
+      batch = get_record_batch()
+      sink = pa.BufferOutputStream()
+
+      with pa.ipc.new_stream(sink, batch.schema) as writer:
+         writer.write_batch(batch)
+
+      buffer = sink.getvalue()
+
+      with pa.BufferReader(buffer) as buf_reader:
+         msg_reader = ipc.MessageReader.open_stream(buf_reader)
+         with pytest.raises(duckdb.InvalidInputException,
+                 match="not suitable for replacement scans",):
+            connection.execute("FROM msg_reader")

@@ -15,18 +15,10 @@ class TestArrowIPCBufferWriter(object):
 	def test_round_trip(self, connection):
 		create_table(connection)
 		buffers = connection.execute("FROM to_arrow_ipc((FROM T))").fetchall()
-		arrow_buffers = []
-		for buffer in buffers:
-			arrow_buffers.append(pa.py_buffer(buffer[0]))
-		structs = ''
-		for buffer in arrow_buffers:
-			structs = structs + f"{{'ptr': {buffer.address}::UBIGINT, 'size': {buffer.size}::UBIGINT}},"
-
-		structs = structs[:-1]
-		arrow_scan_function = f"FROM scan_arrow_ipc([{structs}])"
-		assert (len(arrow_buffers) == 2)
-		print(arrow_buffers)
-		tables_match(connection.execute(arrow_scan_function).fetchall())
+		buffer = pa.py_buffer(buffers[0][0] + buffers[1][0])
+		with pa.BufferReader(buffer) as buf_reader:
+			msg_reader = ipc.MessageReader.open_stream(buf_reader)
+			tables_match(connection.from_arrow(msg_reader).fetchall())
 
 	def test_arrow_read_duck_buffers(self, connection):
 		create_table(connection)
