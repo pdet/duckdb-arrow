@@ -14,5 +14,37 @@ SELECT count(*) from T;
 30974
 
 # Test GLOB
+query III
+FROM read_arrow('data/multifile/*.arrow')
+----
+apple	gala	134.2
+orange	navel	142.1
+apple	honeycrisp	158.6
+orange	valencia	96.7
+apple	fuji	NULL
+orange	cara cara	NULL
+
+# Test projections
+query II
+SELECT weight, variety FROM read_arrow('data/multifile/*.arrow')
+----
+134.2	gala
+142.1	navel
+158.6	honeycrisp
+96.7	valencia
+NULL	fuji
+NULL	cara cara
+
+query II
+SELECT count(*), fruit FROM read_arrow('data/multifile/*.arrow') group by fruit order by all
+----
+3	apple
+3	orange
+
+# Test mismatching schemas
+statement error
+FROM read_arrow(['data/test.arrows', 'data/multifile/f1.arrow'])
+----
+If you are trying to read files with different schemas, try setting union_by_name=True
 
 # Test UNION BY NAME
