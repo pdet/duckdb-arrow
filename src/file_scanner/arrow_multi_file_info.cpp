@@ -1,6 +1,5 @@
 #include "file_scanner/arrow_multi_file_info.hpp"
 
-#include "duckdb/execution/operator/csv_scanner/csv_file_scanner.hpp"
 #include "ipc/stream_reader/ipc_file_stream_reader.hpp"
 
 #include "duckdb/common/bind_helpers.hpp"
@@ -37,9 +36,6 @@ void ArrowMultiFileInfo::FinalizeCopyBind(ClientContext& context,
 struct ArrowMultifileData : public TableFunctionData {
   ArrowMultifileData() = default;
 
-  //! The arrow stream factory (if any): this is used when automatic detection is used
-  //! during binding. In this case, some CSV buffers have already been read and can be
-  //! reused.
   unique_ptr<ArrowFileScan> file_scan;
 };
 
@@ -229,12 +225,19 @@ unique_ptr<NodeStatistics> ArrowMultiFileInfo::GetCardinality(
 unique_ptr<BaseStatistics> ArrowMultiFileInfo::GetStatistics(ClientContext& context,
                                                              BaseFileReader& reader,
                                                              const string& name) {
-  throw InternalException("Unimplemented CSVMultiFileInfo method");
+  throw InternalException("Unimplemented ArrowMultiFileInfo GetStatistics method");
 }
 
 double ArrowMultiFileInfo::GetProgressInFile(ClientContext& context,
                                              const BaseFileReader& reader) {
-  return 100;
+  auto& file_scan = reader.Cast<ArrowFileScan>();
+  if (!file_scan.factory->reader) {
+    // We are done with this file
+    return 100;
+  }
+  auto file_reader =
+      reinterpret_cast<IPCFileStreamReader*>(file_scan.factory->reader.get());
+  return file_reader->GetProgress();
 }
 
 void ArrowMultiFileInfo::GetVirtualColumns(ClientContext&, MultiFileBindData&,

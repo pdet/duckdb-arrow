@@ -20,6 +20,15 @@ void IPCFileStreamReader::PopulateNames(vector<string>& names) {
   }
 }
 
+double IPCFileStreamReader::GetProgress() {
+  idx_t file_size = file_reader.FileSize();
+  if (file_size == 0) {
+    return 100;
+  }
+  auto current_offset = static_cast<double>(file_reader.CurrentOffset());
+  return (current_offset / static_cast<double>(file_size)) * 100;
+}
+
 void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder& decoder,
                                       ArrowArray* out, ArrowBufferView& body_view,
                                       ArrowError* error) {

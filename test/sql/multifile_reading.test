@@ -93,6 +93,21 @@ select typeof(#3) FROM read_arrow(['data/multifile/different_type.arrows', 'data
 ----
 VARCHAR
 
+query I
+select typeof(#3) FROM read_arrow(['data/multifile/glob/f1.arrow', 'data/multifile/different_type.arrows']) limit 1
+----
+DOUBLE
+
+query I
+select typeof(weight) FROM read_arrow(['data/multifile/different_type_int.arrows','data/multifile/glob/f1.arrow', 'data/multifile/different_type.arrows'], union_by_name = true) limit 1;
+----
+VARCHAR
+
+query I
+select typeof(weight) FROM read_arrow(['data/multifile/different_type_int.arrows','data/multifile/glob/f1.arrow', 'data/multifile/different_type.arrows']) limit 1;
+----
+BIGINT
+
 query III
 FROM read_arrow(['data/multifile/glob/f1.arrow', 'data/multifile/different_type_order.arrows']) order by all
 ----
@@ -124,3 +139,23 @@ apple	gala	134.2	data/multifile/hive/part=b/f1.arrow	b
 orange	navel	142.1	data/multifile/hive/part=b/f1.arrow	b
 apple	fuji	NULL	data/multifile/hive/part=b/f3.arrow	b
 orange	cara cara	NULL	data/multifile/hive/part=b/f3.arrow	b
+
+# Multifile reader works with replacement scans
+query III
+FROM 'data/multifile/glob/*.arrow' ORDER BY ALL
+----
+apple	fuji	NULL
+apple	gala	134.2
+apple	honeycrisp	158.6
+orange	cara cara	NULL
+orange	navel	142.1
+orange	valencia	96.7
+
+statement ok
+CREATE TABLE T_2 (fruit varchar, variety varchar, weight double);
+
+# Copy from glob not yet supported
+statement error
+COPY T_2 FROM 'data/multifile/glob/*.arrow' (FORMAT arrows)
+----
+Cannot open file "data/multifile/glob/*.arrow":

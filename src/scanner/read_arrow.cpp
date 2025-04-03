@@ -42,11 +42,7 @@ namespace ext_nanoarrow {
 
 struct ReadArrowStream : ArrowTableFunction {
   static TableFunction Function() {
-    TableFunction fn("read_arrow", {LogicalType::VARCHAR}, ArrowScanFunction, Bind,
-                     ArrowScanInitGlobal, ArrowScanInitLocal);
-
     MultiFileFunction<ArrowMultiFileInfo> read_arrow("read_arrow");
-    read_arrow.cardinality = ArrowScanCardinality;
     read_arrow.projection_pushdown = true;
     read_arrow.filter_pushdown = false;
     read_arrow.filter_prune = false;

@@ -21,6 +21,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
 
   ArrowIpcMessageType ReadNextMessage() override;
 
+  double GetProgress();
+
  private:
   BufferedFileReader file_reader;
   AllocatedData message_header;
