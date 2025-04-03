@@ -119,9 +119,6 @@ struct ArrowFileLocalState : public LocalTableFunctionState {
   unique_ptr<GlobalTableFunctionState> local_arrow_global_state;
   unique_ptr<LocalTableFunctionState> local_arrow_local_state;
   unique_ptr<TableFunctionInput> table_function_input;
-
-  //! Projection and filter being pushed down in this file.
-  ArrowStreamParameters pushdown_parameters;
 };
 
 unique_ptr<LocalTableFunctionState> ArrowMultiFileInfo::InitializeLocalState(
