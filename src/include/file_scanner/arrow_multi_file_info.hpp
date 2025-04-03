@@ -66,6 +66,11 @@ struct ArrowMultiFileInfo {
                                                  const string& filename, idx_t file_idx,
                                                  const MultiFileBindData& bind_data);
 
+  static shared_ptr<BaseFileReader> CreateReader(ClientContext& context,
+                                                 const string& filename,
+                                                 ArrowFileReaderOptions& options,
+                                                 const MultiFileOptions& file_options);
+
   static shared_ptr<BaseUnionData> GetUnionData(shared_ptr<BaseFileReader> scan_p,
                                                 idx_t file_idx);
 

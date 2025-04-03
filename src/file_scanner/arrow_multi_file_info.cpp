@@ -61,7 +61,17 @@ void ArrowMultiFileInfo::BindReader(ClientContext& context,
     bind_data.multi_file_reader->BindOptions(bind_data.file_options, multi_file_list,
                                              return_types, names, bind_data.reader_bind);
   } else {
-    D_ASSERT(0);
+    ArrowFileReaderOptions options;
+    bind_data.reader_bind =
+        bind_data.multi_file_reader->BindUnionReader<ArrowMultiFileInfo>(
+            context, return_types, names, multi_file_list, bind_data, options,
+            bind_data.file_options);
+    // if (bind_data.union_readers.size() > 1) {
+    //   for (idx_t i = 0; i < bind_data.union_readers.size(); i++) {
+    //     auto &csv_union_data = bind_data.union_readers[i]->Cast<CSVUnionData>();
+    // csv_data.column_info.emplace_back(csv_union_data.names, csv_union_data.types);
+    //   }
+    // }
   }
   D_ASSERT(names.size() == return_types.size());
 }
@@ -146,10 +156,25 @@ shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
   return make_shared_ptr<ArrowFileScan>(context, filename);
 }
 
+shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
+    ClientContext& context, const string& filename, ArrowFileReaderOptions& options,
+    const MultiFileOptions& file_options) {
+  return make_shared_ptr<ArrowFileScan>(context, filename);
+}
+
 shared_ptr<BaseUnionData> ArrowMultiFileInfo::GetUnionData(
     shared_ptr<BaseFileReader> scan_p, idx_t file_idx) {
-  // auto& scan = scan_p->Cast<ArrowFileScan>();
-  return make_shared_ptr<BaseUnionData>(scan_p->GetFileName());
+  auto& scan = scan_p->Cast<ArrowFileScan>();
+  auto data = make_shared_ptr<BaseUnionData>(scan_p->GetFileName());
+  if (file_idx == 0) {
+    data->names = scan.GetNames();
+    data->types = scan.GetTypes();
+    data->reader = std::move(scan_p);
+  } else {
+    data->names = scan.GetNames();
+    data->types = scan.GetTypes();
+  }
+  return data;
 }
 
 void ArrowMultiFileInfo::FinalizeReader(ClientContext& context, BaseFileReader& reader,
@@ -172,11 +197,15 @@ bool ArrowMultiFileInfo::TryInitializeScan(ClientContext& context,
       reinterpret_cast<uintptr_t>(lstate.file_scan->factory.get()));
   lstate.local_arrow_function_data->schema_root = lstate.file_scan->schema_root;
   lstate.local_arrow_function_data->arrow_table = lstate.file_scan->arrow_table_type;
-
-  lstate.init_input = make_uniq<TableFunctionInitInput>(
-      *lstate.local_arrow_function_data, gstate.global_state.column_indexes,
-      gstate.global_state.projection_ids, gstate.global_state.filters);
-
+  if (!reader->column_indexes.empty()) {
+    lstate.init_input = make_uniq<TableFunctionInitInput>(
+        *lstate.local_arrow_function_data, reader->column_indexes,
+        gstate.global_state.projection_ids, reader->filters);
+  } else {
+    lstate.init_input = make_uniq<TableFunctionInitInput>(
+        *lstate.local_arrow_function_data, gstate.global_state.column_indexes,
+        gstate.global_state.projection_ids, reader->filters);
+  }
   lstate.local_arrow_global_state =
       ArrowTableFunction::ArrowScanInitGlobal(context, *lstate.init_input);
   lstate.local_arrow_local_state =

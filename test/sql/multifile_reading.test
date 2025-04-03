@@ -15,7 +15,7 @@ SELECT count(*) from T;
 
 # Test GLOB
 query III
-FROM read_arrow('data/multifile/*.arrow')
+FROM read_arrow('data/multifile/glob/*.arrow')
 ----
 apple	gala	134.2
 orange	navel	142.1
@@ -26,7 +26,7 @@ orange	cara cara	NULL
 
 # Test projections
 query II
-SELECT weight, variety FROM read_arrow('data/multifile/*.arrow')
+SELECT weight, variety FROM read_arrow('data/multifile/glob/*.arrow')
 ----
 134.2	gala
 142.1	navel
@@ -36,15 +36,67 @@ NULL	fuji
 NULL	cara cara
 
 query II
-SELECT count(*), fruit FROM read_arrow('data/multifile/*.arrow') group by fruit order by all
+SELECT count(*), fruit FROM read_arrow('data/multifile/glob/*.arrow') group by fruit order by all
 ----
 3	apple
 3	orange
 
 # Test mismatching schemas
 statement error
-FROM read_arrow(['data/test.arrows', 'data/multifile/f1.arrow'])
+FROM read_arrow(['data/test.arrows', 'data/multifile/glob/f1.arrow'])
 ----
 If you are trying to read files with different schemas, try setting union_by_name=True
 
+statement error
+FROM read_arrow(['data/multifile/fruit_extra.arrows', 'data/multifile/glob/f1.arrow'])
+----
+If you are trying to read files with different schemas, try setting union_by_name=True
+
+
 # Test UNION BY NAME
+query IIII
+FROM read_arrow(['data/multifile/fruit_extra.arrows', 'data/multifile/glob/f1.arrow'], union_by_name=True)
+----
+apple	pink lady	2.2	10.0
+orange	jiha	NULL	NULL
+apple	gala	134.2	NULL
+orange	navel	142.1	NULL
+
+# Test different column order
+query III
+FROM read_arrow(['data/multifile/different_order.arrows', 'data/multifile/glob/f1.arrow']) order by all
+----
+apple	2.2	pink lady
+apple	134.2	gala
+orange	142.1	navel
+orange	NULL	jiha
+
+# Test different types
+query III
+FROM read_arrow(['data/multifile/different_type.arrows', 'data/multifile/glob/f1.arrow']) order by all
+----
+apple	gala	134.2
+apple	pink lady	2.2
+orange	jiha	NULL
+orange	navel	142.1
+
+query III
+FROM read_arrow(['data/multifile/glob/f1.arrow', 'data/multifile/different_type.arrows']) order by all
+----
+apple	gala	134.2
+apple	pink lady	2.2
+orange	jiha	NULL
+orange	navel	142.1
+
+query I
+select typeof(#3) FROM read_arrow(['data/multifile/different_type.arrows', 'data/multifile/glob/f1.arrow']) limit 1
+----
+VARCHAR
+
+query III
+FROM read_arrow(['data/multifile/glob/f1.arrow', 'data/multifile/different_type_order.arrows']) order by all
+----
+apple	gala	134.2
+apple	pink lady	2.2
+orange	jiha	NULL
+orange	navel	142.1
