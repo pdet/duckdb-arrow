@@ -66,12 +66,6 @@ void ArrowMultiFileInfo::BindReader(ClientContext& context,
         bind_data.multi_file_reader->BindUnionReader<ArrowMultiFileInfo>(
             context, return_types, names, multi_file_list, bind_data, options,
             bind_data.file_options);
-    // if (bind_data.union_readers.size() > 1) {
-    //   for (idx_t i = 0; i < bind_data.union_readers.size(); i++) {
-    //     auto &csv_union_data = bind_data.union_readers[i]->Cast<CSVUnionData>();
-    // csv_data.column_info.emplace_back(csv_union_data.names, csv_union_data.types);
-    //   }
-    // }
   }
   D_ASSERT(names.size() == return_types.size());
 }
@@ -136,11 +130,6 @@ struct ArrowFileLocalState : public LocalTableFunctionState {
 
 unique_ptr<LocalTableFunctionState> ArrowMultiFileInfo::InitializeLocalState(
     ExecutionContext& context, GlobalTableFunctionState& function_state) {
-  // auto& arrow_global_state = function_state.Cast<ArrowFileGlobalState>();
-  // auto res = make_uniq<ArrowFileLocalState>();
-
-  // // Initialize all variables necessary for the ArrowTableFunction Scan
-
   return make_uniq<ArrowFileLocalState>(context);
 }
 
@@ -246,22 +235,6 @@ unique_ptr<BaseStatistics> ArrowMultiFileInfo::GetStatistics(ClientContext& cont
 double ArrowMultiFileInfo::GetProgressInFile(ClientContext& context,
                                              const BaseFileReader& reader) {
   return 100;
-  // auto buffer_manager = csv_scan.buffer_manager;
-  // if (!buffer_manager) {
-  //   // We are done with this file, so it's 100%
-  //   return 100.0;
-  // }
-  // double bytes_read;
-  // if (buffer_manager->file_handle->compression_type == FileCompressionType::GZIP ||
-  //     buffer_manager->file_handle->compression_type == FileCompressionType::ZSTD) {
-  //   // compressed file: we care about the progress made in the *underlying* file handle
-  //   // the bytes read from the uncompressed file are skewed
-  //   bytes_read = buffer_manager->file_handle->GetProgress();
-  // } else {
-  //   bytes_read = static_cast<double>(csv_scan.bytes_read);
-  // }
-  // double file_progress = bytes_read / static_cast<double>(csv_scan.file_size);
-  // return file_progress * 100.0;
 }
 
 void ArrowMultiFileInfo::GetVirtualColumns(ClientContext&, MultiFileBindData&,

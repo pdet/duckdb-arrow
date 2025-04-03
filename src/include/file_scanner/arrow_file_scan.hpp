@@ -19,17 +19,14 @@ namespace ext_nanoarrow {
 class ArrowFileScan : public BaseFileReader {
  public:
   explicit ArrowFileScan(ClientContext& context, const string& file_name);
-  ~ArrowFileScan() {
-    // FIXME: THIS IS VERY DR. EVIL
+  ~ArrowFileScan() override {
+    // Release is done by the arrow scanner
     schema_root.arrow_schema.release = nullptr;
   };
 
   //! Factory of this stream
   unique_ptr<FileIPCStreamFactory> factory;
-  //! Variables to handle projection pushdown
-  set<idx_t> projected_columns;
 
-  std::vector<std::pair<idx_t, idx_t>> projection_ids;
   string GetReaderType() const override;
 
   const vector<string>& GetNames();
@@ -38,7 +35,6 @@ class ArrowFileScan : public BaseFileReader {
   ArrowTableType arrow_table_type;
 
  private:
-  ClientContext& context;
   vector<string> names;
   vector<LogicalType> types;
 };

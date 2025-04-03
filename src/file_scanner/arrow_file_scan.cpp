@@ -4,7 +4,7 @@ namespace duckdb {
 namespace ext_nanoarrow {
 
 ArrowFileScan::ArrowFileScan(ClientContext& context, const string& file_name)
-    : BaseFileReader(file_name), context(context) {
+    : BaseFileReader(file_name) {
   factory = make_uniq<FileIPCStreamFactory>(context, file_name);
 
   factory->InitReader();
