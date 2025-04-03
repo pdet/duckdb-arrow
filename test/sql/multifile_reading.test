@@ -11,6 +11,7 @@ CREATE TABLE T as FROM read_arrow(['data/test.arrows', 'data/test.arrows'])
 query I
 SELECT count(*) from T;
 ----
+30974
 
 # Test GLOB
 
