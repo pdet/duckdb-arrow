@@ -154,8 +154,15 @@ orange	valencia	96.7
 statement ok
 CREATE TABLE T_2 (fruit varchar, variety varchar, weight double);
 
-# Copy from glob not yet supported
-statement error
+statement ok
 COPY T_2 FROM 'data/multifile/glob/*.arrow' (FORMAT arrows)
+
+query III
+FROM T_2
 ----
-Cannot open file "data/multifile/glob/*.arrow":
+apple	gala	134.2
+orange	navel	142.1
+apple	honeycrisp	158.6
+orange	valencia	96.7
+apple	fuji	NULL
+orange	cara cara	NULL

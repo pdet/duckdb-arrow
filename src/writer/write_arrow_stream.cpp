@@ -1,6 +1,9 @@
 
 #include "write_arrow_stream.hpp"
 
+#include "duckdb/common/multi_file/multi_file_function.hpp"
+#include "file_scanner/arrow_multi_file_info.hpp"
+
 #include "duckdb/common/arrow/arrow_converter.hpp"
 #include "duckdb/common/serializer/buffered_file_writer.hpp"
 #include "duckdb/function/copy_function.hpp"
@@ -246,7 +249,7 @@ void RegisterArrowStreamCopyFunction(DatabaseInstance& db) {
   function.copy_to_combine = ArrowWriteCombine;
   function.copy_to_finalize = ArrowWriteFinalize;
   function.execution_mode = ArrowWriteExecutionMode;
-  function.copy_from_bind = ReadArrowStreamBindCopy;
+  function.copy_from_bind = MultiFileFunction<ArrowMultiFileInfo>::MultiFileBindCopy;
   function.copy_from_function = ReadArrowStreamFunction();
   function.prepare_batch = ArrowWritePrepareBatch;
   function.flush_batch = ArrowWriteFlushBatch;
@@ -255,6 +258,10 @@ void RegisterArrowStreamCopyFunction(DatabaseInstance& db) {
   function.rotate_next_file = ArrowWriteRotateNextFile;
 
   function.extension = "arrows";
+  ExtensionUtil::RegisterFunction(db, function);
+
+  function.name = "arrow";
+  function.extension = "arrow";
   ExtensionUtil::RegisterFunction(db, function);
 }
 

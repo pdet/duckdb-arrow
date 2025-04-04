@@ -71,49 +71,7 @@ struct ReadArrowStream : ArrowTableFunction {
 
     return std::move(table_function);
   }
-
-  // Our Bind() function is different from the arrow_scan because our input
-  // is a filename (and their input is three pointer addresses).
-  static unique_ptr<FunctionData> Bind(ClientContext& context,
-                                       TableFunctionBindInput& input,
-                                       vector<LogicalType>& return_types,
-                                       vector<string>& names) {
-    return BindInternal(context, input.inputs[0].GetValue<string>(), return_types, names);
-  }
-
-  static unique_ptr<FunctionData> BindCopy(ClientContext& context, CopyInfo& info,
-                                           vector<string>& expected_names,
-                                           vector<LogicalType>& expected_types) {
-    return BindInternal(context, info.file_path, expected_types, expected_names);
-  }
-
-  static unique_ptr<FunctionData> BindInternal(ClientContext& context, std::string src,
-                                               vector<LogicalType>& return_types,
-                                               vector<string>& names) {
-    auto stream_factory = make_uniq<FileIPCStreamFactory>(context, src);
-    auto res = make_uniq<ArrowIPCFunctionData>(std::move(stream_factory));
-    res->factory->InitReader();
-    res->factory->GetFileSchema(res->schema_root);
-
-    DBConfig& config = DatabaseInstance::GetDatabase(context).config;
-    PopulateArrowTableType(config, res->arrow_table, res->schema_root, names,
-                           return_types);
-    QueryResult::DeduplicateColumns(names);
-    res->all_types = return_types;
-    if (return_types.empty()) {
-      throw InvalidInputException(
-          "Provided table/dataframe must have at least one column");
-    }
-
-    return std::move(res);
-  }
 };
-
-unique_ptr<FunctionData> ReadArrowStreamBindCopy(ClientContext& context, CopyInfo& info,
-                                                 vector<string>& expected_names,
-                                                 vector<LogicalType>& expected_types) {
-  return ReadArrowStream::BindCopy(context, info, expected_names, expected_types);
-}
 
 TableFunction ReadArrowStreamFunction() { return ReadArrowStream::Function(); }
 
