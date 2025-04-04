@@ -118,7 +118,7 @@ orange	navel	142.1
 
 # Test filename option
 query IIII
-FROM read_arrow('data/multifile/glob/*.arrow', filename = true)
+SELECT fruit, variety, weight, replace(filename, '\', '/') FROM read_arrow('data/multifile/glob/*.arrow', filename = true)
 ----
 apple	gala	134.2	data/multifile/glob/f1.arrow
 orange	navel	142.1	data/multifile/glob/f1.arrow
@@ -128,17 +128,17 @@ apple	fuji	NULL	data/multifile/glob/f3.arrow
 orange	cara cara	NULL	data/multifile/glob/f3.arrow
 
 # test hive_partitioning option
-query IIIII
-FROM read_arrow('data/multifile/hive/*/*.arrow', filename = true, hive_partitioning = true)
+query IIII
+FROM read_arrow('data/multifile/hive/*/*.arrow', hive_partitioning = true)
 ----
-apple	gala	134.2	data/multifile/hive/part=a/f1.arrow	a
-orange	navel	142.1	data/multifile/hive/part=a/f1.arrow	a
-apple	honeycrisp	158.6	data/multifile/hive/part=a/f2.arrow	a
-orange	valencia	96.7	data/multifile/hive/part=a/f2.arrow	a
-apple	gala	134.2	data/multifile/hive/part=b/f1.arrow	b
-orange	navel	142.1	data/multifile/hive/part=b/f1.arrow	b
-apple	fuji	NULL	data/multifile/hive/part=b/f3.arrow	b
-orange	cara cara	NULL	data/multifile/hive/part=b/f3.arrow	b
+apple	gala	134.2	a
+orange	navel	142.1	a
+apple	honeycrisp	158.6	a
+orange	valencia	96.7	a
+apple	gala	134.2	b
+orange	navel	142.1	b
+apple	fuji	NULL	b
+orange	cara cara	NULL	b
 
 # Multifile reader works with replacement scans
 query III

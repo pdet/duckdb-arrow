@@ -1,4 +1,4 @@
-# name: test/sql/arrow_testing.test
+# name:
 # description: test nanoarrow extension
 # group: [nanoarrow]
 
@@ -23,8 +23,12 @@ FROM check_arrow_testing_file('1.0.0-littleendian/generated_datetime')
 statement ok
 FROM check_arrow_testing_file('1.0.0-littleendian/generated_decimal')
 
-statement ok
+# This test will fail,because the struct created in this arrow file does not have names on their children
+# This is not supported by DuckDB.
+statement error
 FROM check_arrow_testing_file('1.0.0-littleendian/generated_duplicate_fieldnames')
+----
+Struct remap can only remap named structs
 
 statement ok
 FROM check_arrow_testing_file('1.0.0-littleendian/generated_map_non_canonical')
