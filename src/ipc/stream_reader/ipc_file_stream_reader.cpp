@@ -97,22 +97,28 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
     file_reader.ReadData(reinterpret_cast<data_ptr_t>(&message_prefix),
                          sizeof(message_prefix));
 
+    // If we're at the beginning of the read, and we see the Arrow file format
+    // header bytes, skip them and try to read the stream anyway. This works because
+    // there's a full stream within an Arrow file (including the EOS indicator, which
+    // is key to success. This EOS indicator is unfortunately missing in Rust releases
+    // prior to ~September 2024).
+    //
+    // When we support dictionary encoding we will possibly need to seek to the footer
+    // here, parse that, and maybe lazily seek and read dictionaries for if/when they are
+    // required.
+    if (file_reader.CurrentOffset() == 8 &&
+        std::memcmp("ARROW1\0\0", &message_prefix, 8) == 0) {
+      return ReadNextMessage();
+    }
+
+    if (message_prefix.continuation_token != kContinuationToken) {
+      throw IOException(std::string("Expected continuation token (0xFFFFFFFF) but got " +
+                                    std::to_string(message_prefix.continuation_token)));
+    }
+
   } catch (SerializationException& e) {
     finished = true;
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
-  }
-  // If we're at the beginning of the read, and we see the Arrow file format
-  // header bytes, skip them and try to read the stream anyway. This works because
-  // there's a full stream within an Arrow file (including the EOS indicator, which
-  // is key to success. This EOS indicator is unfortunately missing in Rust releases
-  // prior to ~September 2024).
-  //
-  // When we support dictionary encoding we will possibly need to seek to the footer
-  // here, parse that, and maybe lazily seek and read dictionaries for if/when they are
-  // required.
-  if (file_reader.CurrentOffset() == 8 &&
-      std::memcmp("ARROW1\0\0", &message_prefix, 8) == 0) {
-    return ReadNextMessage();
   }
 
   return DecodeMessage();
