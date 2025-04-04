@@ -78,7 +78,7 @@ struct ArrowMultiFileInfo {
                              GlobalTableFunctionState&);
 
   static bool TryInitializeScan(ClientContext& context,
-                                shared_ptr<BaseFileReader>& reader,
+                                const shared_ptr<BaseFileReader>& reader,
                                 GlobalTableFunctionState& gstate,
                                 LocalTableFunctionState& lstate);
 

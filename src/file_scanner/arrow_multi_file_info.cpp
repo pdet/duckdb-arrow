@@ -19,13 +19,15 @@ bool ArrowMultiFileInfo::ParseCopyOption(ClientContext& context, const string& k
                                          BaseFileReaderOptions& options_p,
                                          vector<string>& expected_names,
                                          vector<LogicalType>& expected_types) {
-  return true;
+  // We currently do not have any options for the scanner, so we always return false
+  return false;
 }
 
 bool ArrowMultiFileInfo::ParseOption(ClientContext& context, const string& key,
                                      const Value& val, MultiFileOptions& file_options,
                                      BaseFileReaderOptions& options) {
-  return true;
+  // We currently do not have any options for the scanner, so we always return false
+  return false;
 }
 
 void ArrowMultiFileInfo::FinalizeCopyBind(ClientContext& context,
@@ -33,31 +35,27 @@ void ArrowMultiFileInfo::FinalizeCopyBind(ClientContext& context,
                                           const vector<string>& expected_names,
                                           const vector<LogicalType>& expected_types) {}
 
-struct ArrowMultifileData : public TableFunctionData {
-  ArrowMultifileData() = default;
+struct ArrowMultiFileData final : public TableFunctionData {
+  ArrowMultiFileData() = default;
 
   unique_ptr<ArrowFileScan> file_scan;
 };
 
 unique_ptr<TableFunctionData> ArrowMultiFileInfo::InitializeBindData(
     MultiFileBindData& multi_file_data, unique_ptr<BaseFileReaderOptions> options_p) {
-  return make_uniq<ArrowMultifileData>();
+  return make_uniq<ArrowMultiFileData>();
 }
 
 void ArrowMultiFileInfo::BindReader(ClientContext& context,
                                     vector<LogicalType>& return_types,
                                     vector<string>& names, MultiFileBindData& bind_data) {
-  auto& arrow_multifile_data = bind_data.bind_data->Cast<ArrowMultifileData>();
+  ArrowFileReaderOptions options;
   auto& multi_file_list = *bind_data.file_list;
   if (!bind_data.file_options.union_by_name) {
-    arrow_multifile_data.file_scan =
-        make_uniq<ArrowFileScan>(context, multi_file_list.GetFirstFile());
-    return_types = arrow_multifile_data.file_scan->GetTypes();
-    names = arrow_multifile_data.file_scan->GetNames();
-    bind_data.multi_file_reader->BindOptions(bind_data.file_options, multi_file_list,
-                                             return_types, names, bind_data.reader_bind);
+    bind_data.reader_bind = bind_data.multi_file_reader->BindReader<ArrowMultiFileInfo>(
+        context, return_types, names, *bind_data.file_list, bind_data, options,
+        bind_data.file_options);
   } else {
-    ArrowFileReaderOptions options;
     bind_data.reader_bind =
         bind_data.multi_file_reader->BindUnionReader<ArrowMultiFileInfo>(
             context, return_types, names, multi_file_list, bind_data, options,
@@ -71,10 +69,15 @@ void ArrowMultiFileInfo::FinalizeBindData(MultiFileBindData& multi_file_data) {}
 void ArrowMultiFileInfo::GetBindInfo(const TableFunctionData& bind_data, BindInfo& info) {
 }
 
-optional_idx ArrowMultiFileInfo::MaxThreads(const MultiFileBindData& bind_data,
+optional_idx ArrowMultiFileInfo::MaxThreads(const MultiFileBindData& bind_data_p,
                                             const MultiFileGlobalState& global_state,
                                             FileExpandResult expand_result) {
-  return {};
+  if (expand_result == FileExpandResult::MULTIPLE_FILES) {
+    // always launch max threads if we are reading multiple files
+    return {};
+  }
+  // Otherwise, only one thread
+  return 1;
 }
 
 struct ArrowFileGlobalState : public GlobalTableFunctionState {
@@ -84,14 +87,10 @@ struct ArrowFileGlobalState : public GlobalTableFunctionState {
                        MultiFileGlobalState& global_state)
       : global_state(global_state), context(context_p) {};
 
-  ~ArrowFileGlobalState() override {}
+  ~ArrowFileGlobalState() override = default;
 
   const MultiFileGlobalState& global_state;
-
-  bool is_union;
   ClientContext& context;
-  // const MultiFileBindData& bind_data;
-  // TODO: do I need to lock this or is the lock in the multi-file-reader?
   set<idx_t> files;
 };
 
@@ -106,7 +105,7 @@ unique_ptr<GlobalTableFunctionState> ArrowMultiFileInfo::InitializeGlobalState(
 //! This is done by calling the Arrow Scan directly on one file.
 struct ArrowFileLocalState : public LocalTableFunctionState {
  public:
-  ArrowFileLocalState(ExecutionContext& execution_context)
+  explicit ArrowFileLocalState(ExecutionContext& execution_context)
       : execution_context(execution_context) {};
   //! Factory Pointer
   shared_ptr<ArrowFileScan> file_scan;
@@ -163,12 +162,13 @@ void ArrowMultiFileInfo::FinalizeReader(ClientContext& context, BaseFileReader& 
                                         GlobalTableFunctionState&) {}
 
 bool ArrowMultiFileInfo::TryInitializeScan(ClientContext& context,
-                                           shared_ptr<BaseFileReader>& reader,
+                                           const shared_ptr<BaseFileReader>& reader,
                                            GlobalTableFunctionState& gstate_p,
                                            LocalTableFunctionState& lstate_p) {
   auto& gstate = gstate_p.Cast<ArrowFileGlobalState>();
   auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
   if (gstate.files.find(reader->file_list_idx.GetIndex()) != gstate.files.end()) {
+    // TODO: We might need to reevaluate file parallelism here in the future
     return false;
   }
   gstate.files.insert(reader->file_list_idx.GetIndex());
@@ -216,13 +216,15 @@ void ArrowMultiFileInfo::FinishReading(ClientContext& context,
 
 unique_ptr<NodeStatistics> ArrowMultiFileInfo::GetCardinality(
     const MultiFileBindData& bind_data, idx_t file_count) {
+  // TODO: Here is where we might set statistics, for optimizations if we have them
+  // e.g., cardinality from the file footer
   return make_uniq<NodeStatistics>();
 }
 
 unique_ptr<BaseStatistics> ArrowMultiFileInfo::GetStatistics(ClientContext& context,
                                                              BaseFileReader& reader,
                                                              const string& name) {
-  throw InternalException("Unimplemented ArrowMultiFileInfo GetStatistics method");
+  return nullptr;
 }
 
 double ArrowMultiFileInfo::GetProgressInFile(ClientContext& context,

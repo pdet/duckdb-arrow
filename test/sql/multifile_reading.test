@@ -154,6 +154,11 @@ orange	valencia	96.7
 statement ok
 CREATE TABLE T_2 (fruit varchar, variety varchar, weight double);
 
+statement error
+COPY T_2 FROM 'data/multifile/glob/*.arrow' (FORMAT arrows, Made_up_option FALSE)
+----
+Unsupported option for COPY
+
 statement ok
 COPY T_2 FROM 'data/multifile/glob/*.arrow' (FORMAT arrows)
 
