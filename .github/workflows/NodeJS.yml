@@ -6,7 +6,7 @@ defaults:
 
 jobs:
   nodejs:
-    if: false  # This prevents the job from running, we need to re-tag this before release.
+    if: false  # This prevents the job from running, we need to re-tag this before release (sudo npm i duckdb@1.3). This is due to an incompatibility of the extension with v1.2, since it depends on functionality of v1.3
     name: NodeJS
     runs-on: macos-latest
     env:

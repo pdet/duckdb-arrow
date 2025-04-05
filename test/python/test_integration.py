@@ -63,12 +63,9 @@ def compare_ipc_buffer_reader(con, file):
 # 4. Now test the DuckDB buffer writer, by reading it back with arrow and comparing
 def compare_ipc_buffer_writer(con, file):
     arrow_result = ipc.open_stream(file).read_all()
-    print (con.execute(f"DESCRIBE (FROM read_arrow('{file}'))").fetchall())
     buffers = con.execute(f"FROM to_arrow_ipc((FROM read_arrow('{file}')))").fetchall()
-    print ()
     if not buffers:
         return
-
     arrow_buffers = []
     for i in range (1, len(buffers)):
         # We have to concatenate the schema to the data
