@@ -6,6 +6,7 @@ defaults:
 
 jobs:
   nodejs:
+    if: github.ref == 'refs/heads/stable'
     name: NodeJS
     runs-on: macos-latest
     env:
@@ -39,7 +40,7 @@ jobs:
       - name: Build duckdb
         run: |
           cd duckdb
-          git checkout 8e52ec43959ab363643d63cb78ee214577111da4
+          git checkout 8e52ec43959ab363643d63cb78ee214577111da4 #v1.2.1
           cd ..
           make
 
