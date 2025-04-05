@@ -27,6 +27,7 @@ def add_extension(extension_name, conn: Union[str, DuckDBPyConnection] = '') -> 
 def require():
     def _require(extension_name, db_name=''):
         conn = add_extension(extension_name, db_name)
+        conn.execute("SET allow_extensions_metadata_mismatch=true;")
         return conn
 
     return _require

@@ -19,6 +19,8 @@ project(${TARGET_NAME})
 include_directories(src/include)
 
 set(EXTENSION_SOURCES
+    src/file_scanner/arrow_file_scan.cpp
+    src/file_scanner/arrow_multi_file_info.cpp
     src/ipc/array_stream.cpp
     src/ipc/stream_factory.cpp
     src/ipc/stream_reader/base_stream_reader.cpp

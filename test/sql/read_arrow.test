@@ -37,6 +37,11 @@ SELECT count(*) FROM read_arrow('__WORKING_DIRECTORY__/data/test.arrows');
 ----
 15487
 
+statement error
+SELECT count(*) FROM read_arrow('__WORKING_DIRECTORY__/data/test.arrows', made_up_option = false);
+----
+Invalid named parameter "made_up_option" for function read_arrow
+
 # Check with a filter and projection
 query I
 SELECT message FROM read_arrow('__WORKING_DIRECTORY__/data/test.arrows') WHERE "commit" = 'fa5f0299f046c46e1b2f671e5e3b4f1956522711';

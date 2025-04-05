@@ -24,4 +24,4 @@ WITH data_union AS (
     UNION ALL
     SELECT * FROM data
 )
-SELECT * FROM to_arrow_ipc((SELECT * FROM data_union ORDER BY col));
+FROM to_arrow_ipc((SELECT * FROM data_union ORDER BY col))

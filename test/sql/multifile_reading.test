@@ -1,0 +1,173 @@
+# name: test/sql/multifile_reading.test
+# description: Test read_arrow over multiple files.
+# group: [nanoarrow]
+
+require nanoarrow
+
+# Test File List Works
+statement ok
+CREATE TABLE T as FROM read_arrow(['data/test.arrows', 'data/test.arrows'])
+
+query I
+SELECT count(*) from T;
+----
+30974
+
+# Test GLOB
+query III
+FROM read_arrow('data/multifile/glob/*.arrow')
+----
+apple	gala	134.2
+orange	navel	142.1
+apple	honeycrisp	158.6
+orange	valencia	96.7
+apple	fuji	NULL
+orange	cara cara	NULL
+
+# Test projections
+query II
+SELECT weight, variety FROM read_arrow('data/multifile/glob/*.arrow')
+----
+134.2	gala
+142.1	navel
+158.6	honeycrisp
+96.7	valencia
+NULL	fuji
+NULL	cara cara
+
+query II
+SELECT count(*), fruit FROM read_arrow('data/multifile/glob/*.arrow') group by fruit order by all
+----
+3	apple
+3	orange
+
+# Test mismatching schemas
+statement error
+FROM read_arrow(['data/test.arrows', 'data/multifile/glob/f1.arrow'])
+----
+If you are trying to read files with different schemas, try setting union_by_name=True
+
+statement error
+FROM read_arrow(['data/multifile/fruit_extra.arrows', 'data/multifile/glob/f1.arrow'])
+----
+If you are trying to read files with different schemas, try setting union_by_name=True
+
+
+# Test UNION BY NAME
+query IIII
+FROM read_arrow(['data/multifile/fruit_extra.arrows', 'data/multifile/glob/f1.arrow'], union_by_name=True)
+----
+apple	pink lady	2.2	10.0
+orange	jiha	NULL	NULL
+apple	gala	134.2	NULL
+orange	navel	142.1	NULL
+
+# Test different column order
+query III
+FROM read_arrow(['data/multifile/different_order.arrows', 'data/multifile/glob/f1.arrow']) order by all
+----
+apple	2.2	pink lady
+apple	134.2	gala
+orange	142.1	navel
+orange	NULL	jiha
+
+# Test different types
+query III
+FROM read_arrow(['data/multifile/different_type.arrows', 'data/multifile/glob/f1.arrow']) order by all
+----
+apple	gala	134.2
+apple	pink lady	2.2
+orange	jiha	NULL
+orange	navel	142.1
+
+query III
+FROM read_arrow(['data/multifile/glob/f1.arrow', 'data/multifile/different_type.arrows']) order by all
+----
+apple	gala	134.2
+apple	pink lady	2.2
+orange	jiha	NULL
+orange	navel	142.1
+
+query I
+select typeof(#3) FROM read_arrow(['data/multifile/different_type.arrows', 'data/multifile/glob/f1.arrow']) limit 1
+----
+VARCHAR
+
+query I
+select typeof(#3) FROM read_arrow(['data/multifile/glob/f1.arrow', 'data/multifile/different_type.arrows']) limit 1
+----
+DOUBLE
+
+query I
+select typeof(weight) FROM read_arrow(['data/multifile/different_type_int.arrows','data/multifile/glob/f1.arrow', 'data/multifile/different_type.arrows'], union_by_name = true) limit 1;
+----
+VARCHAR
+
+query I
+select typeof(weight) FROM read_arrow(['data/multifile/different_type_int.arrows','data/multifile/glob/f1.arrow', 'data/multifile/different_type.arrows']) limit 1;
+----
+BIGINT
+
+query III
+FROM read_arrow(['data/multifile/glob/f1.arrow', 'data/multifile/different_type_order.arrows']) order by all
+----
+apple	gala	134.2
+apple	pink lady	2.2
+orange	jiha	NULL
+orange	navel	142.1
+
+# Test filename option
+query IIII
+SELECT fruit, variety, weight, replace(filename, '\', '/') FROM read_arrow('data/multifile/glob/*.arrow', filename = true)
+----
+apple	gala	134.2	data/multifile/glob/f1.arrow
+orange	navel	142.1	data/multifile/glob/f1.arrow
+apple	honeycrisp	158.6	data/multifile/glob/f2.arrow
+orange	valencia	96.7	data/multifile/glob/f2.arrow
+apple	fuji	NULL	data/multifile/glob/f3.arrow
+orange	cara cara	NULL	data/multifile/glob/f3.arrow
+
+# test hive_partitioning option
+query IIII
+FROM read_arrow('data/multifile/hive/*/*.arrow', hive_partitioning = true)
+----
+apple	gala	134.2	a
+orange	navel	142.1	a
+apple	honeycrisp	158.6	a
+orange	valencia	96.7	a
+apple	gala	134.2	b
+orange	navel	142.1	b
+apple	fuji	NULL	b
+orange	cara cara	NULL	b
+
+# Multifile reader works with replacement scans
+query III
+FROM 'data/multifile/glob/*.arrow' ORDER BY ALL
+----
+apple	fuji	NULL
+apple	gala	134.2
+apple	honeycrisp	158.6
+orange	cara cara	NULL
+orange	navel	142.1
+orange	valencia	96.7
+
+statement ok
+CREATE TABLE T_2 (fruit varchar, variety varchar, weight double);
+
+statement error
+COPY T_2 FROM 'data/multifile/glob/*.arrow' (FORMAT arrows, Made_up_option FALSE)
+----
+Unsupported option for COPY
+
+statement ok
+COPY T_2 FROM 'data/multifile/glob/*.arrow' (FORMAT arrows)
+
+query III
+FROM T_2
+----
+apple	gala	134.2
+orange	navel	142.1
+apple	honeycrisp	158.6
+orange	valencia	96.7
+apple	fuji	NULL
+orange	cara cara	NULL

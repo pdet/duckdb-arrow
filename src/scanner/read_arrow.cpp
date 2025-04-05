@@ -2,6 +2,7 @@
 
 #include <inttypes.h>
 
+#include "file_scanner/arrow_multi_file_info.hpp"
 #include "zstd.h"
 
 #include "duckdb/common/radix.hpp"
@@ -40,18 +41,12 @@ namespace duckdb {
 namespace ext_nanoarrow {
 
 struct ReadArrowStream : ArrowTableFunction {
-  // Define the function. Unlike arrow_scan(), which takes integer pointers
-  // as arguments, we keep the factory alive by making it a member of the bind
-  // data (instead of as a Python object whose ownership is kept alive via the
-  // DependencyItem mechanism).
   static TableFunction Function() {
-    TableFunction fn("read_arrow", {LogicalType::VARCHAR}, ArrowScanFunction, Bind,
-                     ArrowScanInitGlobal, ArrowScanInitLocal);
-    fn.cardinality = ArrowScanCardinality;
-    fn.projection_pushdown = true;
-    fn.filter_pushdown = false;
-    fn.filter_prune = false;
-    return fn;
+    MultiFileFunction<ArrowMultiFileInfo> read_arrow("read_arrow");
+    read_arrow.projection_pushdown = true;
+    read_arrow.filter_pushdown = false;
+    read_arrow.filter_prune = false;
+    return static_cast<TableFunction>(read_arrow);
   }
 
   static unique_ptr<TableRef> ScanReplacement(ClientContext& context,
@@ -76,54 +71,15 @@ struct ReadArrowStream : ArrowTableFunction {
 
     return std::move(table_function);
   }
-
-  // Our Bind() function is different from the arrow_scan because our input
-  // is a filename (and their input is three pointer addresses).
-  static unique_ptr<FunctionData> Bind(ClientContext& context,
-                                       TableFunctionBindInput& input,
-                                       vector<LogicalType>& return_types,
-                                       vector<string>& names) {
-    return BindInternal(context, input.inputs[0].GetValue<string>(), return_types, names);
-  }
-
-  static unique_ptr<FunctionData> BindCopy(ClientContext& context, CopyInfo& info,
-                                           vector<string>& expected_names,
-                                           vector<LogicalType>& expected_types) {
-    return BindInternal(context, info.file_path, expected_types, expected_names);
-  }
-
-  static unique_ptr<FunctionData> BindInternal(ClientContext& context, std::string src,
-                                               vector<LogicalType>& return_types,
-                                               vector<string>& names) {
-    auto stream_factory = make_uniq<FileIPCStreamFactory>(context, src);
-    auto res = make_uniq<ArrowIPCFunctionData>(std::move(stream_factory));
-    res->factory->InitReader();
-    res->factory->GetFileSchema(res->schema_root);
-
-    DBConfig& config = DatabaseInstance::GetDatabase(context).config;
-    PopulateArrowTableType(config, res->arrow_table, res->schema_root, names,
-                           return_types);
-    QueryResult::DeduplicateColumns(names);
-    res->all_types = return_types;
-    if (return_types.empty()) {
-      throw InvalidInputException(
-          "Provided table/dataframe must have at least one column");
-    }
-
-    return std::move(res);
-  }
 };
-
-unique_ptr<FunctionData> ReadArrowStreamBindCopy(ClientContext& context, CopyInfo& info,
-                                                 vector<string>& expected_names,
-                                                 vector<LogicalType>& expected_types) {
-  return ReadArrowStream::BindCopy(context, info, expected_names, expected_types);
-}
 
 TableFunction ReadArrowStreamFunction() { return ReadArrowStream::Function(); }
 
 void RegisterReadArrowStream(DatabaseInstance& db) {
   auto function = ReadArrowStream::Function();
+  ExtensionUtil::RegisterFunction(db, function);
+  // So we can accept a list of paths as well e.g., ['file_1.arrow','file_2.arrow']
+  function.arguments = {LogicalType::LIST(LogicalType::VARCHAR)};
   ExtensionUtil::RegisterFunction(db, function);
   auto& config = DBConfig::GetConfig(db);
   config.replacement_scans.emplace_back(ReadArrowStream::ScanReplacement);
