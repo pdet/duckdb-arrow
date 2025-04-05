@@ -168,7 +168,10 @@ bool ArrowMultiFileInfo::TryInitializeScan(ClientContext& context,
   auto& gstate = gstate_p.Cast<ArrowFileGlobalState>();
   auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
   if (gstate.files.find(reader->file_list_idx.GetIndex()) != gstate.files.end()) {
-    // TODO: We might need to reevaluate file parallelism here in the future
+    // Return false because we don't currently support more than one thread
+    // scanning a file. In the future we may be able to support this by (e.g.)
+    // reading the Arrow file footer or sending a thread to read ahead to scan
+    // for RecordBatch messages.
     return false;
   }
   gstate.files.insert(reader->file_list_idx.GetIndex());
