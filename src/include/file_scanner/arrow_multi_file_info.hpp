@@ -63,11 +63,12 @@ struct ArrowMultiFileInfo {
 
   static shared_ptr<BaseFileReader> CreateReader(ClientContext& context,
                                                  GlobalTableFunctionState& gstate,
-                                                 const string& filename, idx_t file_idx,
+                                                 const OpenFileInfo& file_info,
+                                                 idx_t file_idx,
                                                  const MultiFileBindData& bind_data);
 
   static shared_ptr<BaseFileReader> CreateReader(ClientContext& context,
-                                                 const string& filename,
+                                                 const OpenFileInfo& file_info,
                                                  ArrowFileReaderOptions& options,
                                                  const MultiFileOptions& file_options);
 

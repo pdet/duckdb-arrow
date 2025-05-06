@@ -132,15 +132,15 @@ shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
 }
 
 shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
-    ClientContext& context, GlobalTableFunctionState& gstate_p, const string& filename,
-    idx_t file_idx, const MultiFileBindData& bind_data) {
-  return make_shared_ptr<ArrowFileScan>(context, filename);
+    ClientContext& context, GlobalTableFunctionState& gstate_p,
+    const OpenFileInfo& file_info, idx_t file_idx, const MultiFileBindData& bind_data) {
+  return make_shared_ptr<ArrowFileScan>(context, file_info.path);
 }
 
 shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
-    ClientContext& context, const string& filename, ArrowFileReaderOptions& options,
-    const MultiFileOptions& file_options) {
-  return make_shared_ptr<ArrowFileScan>(context, filename);
+    ClientContext& context, const OpenFileInfo& file_info,
+    ArrowFileReaderOptions& options, const MultiFileOptions& file_options) {
+  return make_shared_ptr<ArrowFileScan>(context, file_info.path);
 }
 
 shared_ptr<BaseUnionData> ArrowMultiFileInfo::GetUnionData(
