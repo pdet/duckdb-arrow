@@ -243,7 +243,11 @@ double ArrowMultiFileInfo::GetProgressInFile(ClientContext& context,
 }
 
 void ArrowMultiFileInfo::GetVirtualColumns(ClientContext&, MultiFileBindData&,
-                                           virtual_column_map_t& result) {}
+                                           virtual_column_map_t& result) {
+  if (result.find(COLUMN_IDENTIFIER_EMPTY) != result.end()) {
+    result.erase(COLUMN_IDENTIFIER_EMPTY);
+  }
+}
 
 }  // namespace ext_nanoarrow
 }  // namespace duckdb
