@@ -1,7 +1,7 @@
 # nanoarrow for DuckDB
 
-This extension, nanoarrow, allows you to read Arrow IPC streams and files. It serves a similar purpose as the now-deprecated [Arrow DuckDB core extension](https://github.com/duckdb/arrow). 
-However, it comes with the added functionality to query Arrow IPC files and is much better tested. This extension is released as a DuckDB Community Extension. 
+This extension, nanoarrow, allows you to read Arrow IPC streams and files. It serves a similar purpose as the now-deprecated [Arrow DuckDB core extension](https://github.com/duckdb/arrow).
+However, it comes with the added functionality to query Arrow IPC files and is much better tested. This extension is released as a DuckDB Community Extension.
 For compatibility reasons with the previous Arrow core extension, this extension is also aliased as `arrow`.
 
 You can install and load it as:
@@ -51,13 +51,13 @@ In the remainder of this section, we cover the supported parameters and usages f
 ### IPC Files
 
 #### Write
-Writing an Arrow IPC file is done using the COPY statement Below is a simple example of how you can use DuckDB to create such a file. 
+Writing an Arrow IPC file is done using the COPY statement Below is a simple example of how you can use DuckDB to create such a file.
 
 ```sql
 COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrows";
 ```
 
-Both `.arrows` and `.arrow` will be automatically recognized by DuckDB as Arrow IPC files. 
+Both `.arrows` and `.arrow` will be automatically recognized by DuckDB as Arrow IPC files.
 However, if you wish to use a different extension, you can manually specify the format using:
 
 ```sql
