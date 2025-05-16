@@ -34,6 +34,13 @@ class ArrowFileScan : public BaseFileReader {
   ArrowSchemaWrapper schema_root;
   ArrowTableType arrow_table_type;
 
+  bool TryInitializeScan(ClientContext& context, GlobalTableFunctionState& gstate,
+                         LocalTableFunctionState& lstate) override;
+  void Scan(ClientContext& context, GlobalTableFunctionState& global_state,
+            LocalTableFunctionState& local_state, DataChunk& chunk) override;
+
+  shared_ptr<BaseUnionData> GetUnionData(idx_t file_idx) override;
+
  private:
   vector<string> names;
   vector<LogicalType> types;
