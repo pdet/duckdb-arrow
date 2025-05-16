@@ -44,13 +44,10 @@ SELECT count(*) FROM read_arrow('__TEST_DIR__/test_row_group.arrow');
 ----
 15487
 
-statement ok
+statement error
 COPY test TO '__TEST_DIR__/test_row_group.arrow' (row_group_size 100, chunk_size 10)
-
-query I
-SELECT count(*) FROM read_arrow('__TEST_DIR__/test_row_group.arrow');
 ----
-15487
+ROW_GROUP_SIZE and ROW_GROUP_SIZE_BYTES are mutually exclusive
 
 statement error
 COPY test TO '__TEST_DIR__/test_row_group.arrow' (row_group_size_bytes 100)

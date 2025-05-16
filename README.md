@@ -105,7 +105,7 @@ When reading multiple files, the following parameters are also supported:
 * `union_by_name`: If the schemas of the files differ, setting `union_by_name` allows DuckDB to construct the schema by aligning columns with the same name.
 * `filename`: If set to `True`, this will add a column with the name of the file that generated each row.
 * `hive_partitioning`: Enables reading data from a Hive-partitioned dataset and applies partition filtering.
-> [!NOTE]  
+> [!NOTE]
 > [Arrow IPC files (.arrow)](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams (.arrows)](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are distinct but related formats. This extension can read both but only writes Arrow IPC Streams.
 ### IPC Stream Buffers
 Similar to the old core Arrow extension, this extension also allows direct production and consumption of the Arrow IPC streaming format from in-memory buffers in both Python and Node.js.
