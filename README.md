@@ -57,7 +57,7 @@ Writing an Arrow IPC file is done using the COPY statement Below is a simple exa
 COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrows";
 ```
 
-Both `.arrows` and `.arrow` will be automatically recognized by DuckDB as Arrow IPC files.
+Both `.arrows` and `.arrow` will be automatically recognized by DuckDB as Arrow IPC streams.
 However, if you wish to use a different extension, you can manually specify the format using:
 
 ```sql
@@ -69,7 +69,7 @@ The Copy function of the Copy To Arrow File operation accepts the following para
 * `chunk_size`: An alias for the `row_group_size` parameter.
 * `row_group_size_bytes`: The size of row groups in bytes.
 * `row_groups_per_file`: The maximum number of row groups per file. If this option is set, multiple files can be generated in a single `COPY` call. This means the specified path will create a directory, and the `row_group_size` parameter will also be used to determine the partition sizes.
-* `kv_metadata`: Key-value metadata to be added to the file footer.
+* `kv_metadata`: Key-value metadata to be added to the file schema.
 
 If `row_group_size_bytes` and either `chunk_size` or `row_group_size` are used, the row groups will be defined by the smallest of these parameters.
 
@@ -105,7 +105,8 @@ When reading multiple files, the following parameters are also supported:
 * `union_by_name`: If the schemas of the files differ, setting `union_by_name` allows DuckDB to construct the schema by aligning columns with the same name.
 * `filename`: If set to `True`, this will add a column with the name of the file that generated each row.
 * `hive_partitioning`: Enables reading data from a Hive-partitioned dataset and applies partition filtering.
-
+> [!NOTE]  
+> [Arrow IPC files (.arrow)](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams (.arrows)](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are distinct but related formats. This extension can read both but only writes Arrow IPC Streams.
 ### IPC Stream Buffers
 Similar to the old core Arrow extension, this extension also allows direct production and consumption of the Arrow IPC streaming format from in-memory buffers in both Python and Node.js.
 In this section, we will demonstrate how to use the Python API, but you can find many tests that serve as examples for both [Node.js](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/nodejs) and [Python](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/python).
