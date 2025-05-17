@@ -1,6 +1,5 @@
-
-
 #include "ipc/stream_reader/ipc_file_stream_reader.hpp"
+#include "duckdb/common/file_system.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
@@ -95,8 +94,7 @@ data_ptr_t IPCFileStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
 }
 
 ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
-  if (finished || file_reader.Finished()) {
-    finished = true;
+  if (finished) {
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
   }
 

@@ -23,6 +23,11 @@ bool ArrowMultiFileInfo::ParseCopyOption(ClientContext& context, const string& k
   return false;
 }
 
+unique_ptr<MultiFileReaderInterface> ArrowMultiFileInfo::InitializeInterface(
+    ClientContext& context, MultiFileReader& reader, MultiFileList& file_list) {
+  return make_uniq<ArrowMultiFileInfo>();
+}
+
 bool ArrowMultiFileInfo::ParseOption(ClientContext& context, const string& key,
                                      const Value& val, MultiFileOptions& file_options,
                                      BaseFileReaderOptions& options) {
@@ -52,14 +57,14 @@ void ArrowMultiFileInfo::BindReader(ClientContext& context,
   ArrowFileReaderOptions options;
   auto& multi_file_list = *bind_data.file_list;
   if (!bind_data.file_options.union_by_name) {
-    bind_data.reader_bind = bind_data.multi_file_reader->BindReader<ArrowMultiFileInfo>(
+    bind_data.reader_bind = bind_data.multi_file_reader->BindReader(
         context, return_types, names, *bind_data.file_list, bind_data, options,
         bind_data.file_options);
+
   } else {
-    bind_data.reader_bind =
-        bind_data.multi_file_reader->BindUnionReader<ArrowMultiFileInfo>(
-            context, return_types, names, multi_file_list, bind_data, options,
-            bind_data.file_options);
+    bind_data.reader_bind = bind_data.multi_file_reader->BindUnionReader(
+        context, return_types, names, multi_file_list, bind_data, options,
+        bind_data.file_options);
   }
   D_ASSERT(names.size() == return_types.size());
 }
@@ -80,45 +85,12 @@ optional_idx ArrowMultiFileInfo::MaxThreads(const MultiFileBindData& bind_data_p
   return 1;
 }
 
-struct ArrowFileGlobalState : public GlobalTableFunctionState {
- public:
-  ArrowFileGlobalState(ClientContext& context_p, idx_t total_file_count,
-                       const MultiFileBindData& bind_data,
-                       MultiFileGlobalState& global_state)
-      : global_state(global_state), context(context_p) {};
-
-  ~ArrowFileGlobalState() override = default;
-
-  const MultiFileGlobalState& global_state;
-  ClientContext& context;
-  set<idx_t> files;
-};
-
 unique_ptr<GlobalTableFunctionState> ArrowMultiFileInfo::InitializeGlobalState(
     ClientContext& context, MultiFileBindData& bind_data,
     MultiFileGlobalState& global_state) {
   return make_uniq<ArrowFileGlobalState>(
       context, bind_data.file_list->GetTotalFileCount(), bind_data, global_state);
 }
-
-//! The Arrow Local File State, basically refers to the Scan of one Arrow File
-//! This is done by calling the Arrow Scan directly on one file.
-struct ArrowFileLocalState : public LocalTableFunctionState {
- public:
-  explicit ArrowFileLocalState(ExecutionContext& execution_context)
-      : execution_context(execution_context) {};
-  //! Factory Pointer
-  shared_ptr<ArrowFileScan> file_scan;
-
-  ExecutionContext& execution_context;
-
-  //! Each local state refers to an Arrow Scan on a local file
-  unique_ptr<ArrowScanFunctionData> local_arrow_function_data;
-  unique_ptr<TableFunctionInitInput> init_input;
-  unique_ptr<GlobalTableFunctionState> local_arrow_global_state;
-  unique_ptr<LocalTableFunctionState> local_arrow_local_state;
-  unique_ptr<TableFunctionInput> table_function_input;
-};
 
 unique_ptr<LocalTableFunctionState> ArrowMultiFileInfo::InitializeLocalState(
     ExecutionContext& context, GlobalTableFunctionState& function_state) {
@@ -132,82 +104,19 @@ shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
 }
 
 shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
-    ClientContext& context, GlobalTableFunctionState& gstate_p, const string& filename,
-    idx_t file_idx, const MultiFileBindData& bind_data) {
-  return make_shared_ptr<ArrowFileScan>(context, filename);
+    ClientContext& context, GlobalTableFunctionState& gstate_p,
+    const OpenFileInfo& file_info, idx_t file_idx, const MultiFileBindData& bind_data) {
+  return make_shared_ptr<ArrowFileScan>(context, file_info.path);
 }
 
 shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
-    ClientContext& context, const string& filename, ArrowFileReaderOptions& options,
+    ClientContext& context, const OpenFileInfo& file, BaseFileReaderOptions& options,
     const MultiFileOptions& file_options) {
-  return make_shared_ptr<ArrowFileScan>(context, filename);
-}
-
-shared_ptr<BaseUnionData> ArrowMultiFileInfo::GetUnionData(
-    shared_ptr<BaseFileReader> scan_p, idx_t file_idx) {
-  auto& scan = scan_p->Cast<ArrowFileScan>();
-  auto data = make_shared_ptr<BaseUnionData>(scan_p->GetFileName());
-  if (file_idx == 0) {
-    data->names = scan.GetNames();
-    data->types = scan.GetTypes();
-    data->reader = std::move(scan_p);
-  } else {
-    data->names = scan.GetNames();
-    data->types = scan.GetTypes();
-  }
-  return data;
+  return make_shared_ptr<ArrowFileScan>(context, file.path);
 }
 
 void ArrowMultiFileInfo::FinalizeReader(ClientContext& context, BaseFileReader& reader,
                                         GlobalTableFunctionState&) {}
-
-bool ArrowMultiFileInfo::TryInitializeScan(ClientContext& context,
-                                           const shared_ptr<BaseFileReader>& reader,
-                                           GlobalTableFunctionState& gstate_p,
-                                           LocalTableFunctionState& lstate_p) {
-  auto& gstate = gstate_p.Cast<ArrowFileGlobalState>();
-  auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
-  if (gstate.files.find(reader->file_list_idx.GetIndex()) != gstate.files.end()) {
-    // Return false because we don't currently support more than one thread
-    // scanning a file. In the future we may be able to support this by (e.g.)
-    // reading the Arrow file footer or sending a thread to read ahead to scan
-    // for RecordBatch messages.
-    return false;
-  }
-  gstate.files.insert(reader->file_list_idx.GetIndex());
-
-  lstate.file_scan = shared_ptr_cast<BaseFileReader, ArrowFileScan>(reader);
-  lstate.local_arrow_function_data = make_uniq<ArrowScanFunctionData>(
-      &FileIPCStreamFactory::Produce,
-      reinterpret_cast<uintptr_t>(lstate.file_scan->factory.get()));
-  lstate.local_arrow_function_data->schema_root = lstate.file_scan->schema_root;
-  lstate.local_arrow_function_data->arrow_table = lstate.file_scan->arrow_table_type;
-  if (!reader->column_indexes.empty()) {
-    lstate.init_input = make_uniq<TableFunctionInitInput>(
-        *lstate.local_arrow_function_data, reader->column_indexes,
-        gstate.global_state.projection_ids, reader->filters);
-  } else {
-    lstate.init_input = make_uniq<TableFunctionInitInput>(
-        *lstate.local_arrow_function_data, gstate.global_state.column_indexes,
-        gstate.global_state.projection_ids, reader->filters);
-  }
-  lstate.local_arrow_global_state =
-      ArrowTableFunction::ArrowScanInitGlobal(context, *lstate.init_input);
-  lstate.local_arrow_local_state =
-      ArrowTableFunction::ArrowScanInitLocal(lstate.execution_context, *lstate.init_input,
-                                             lstate.local_arrow_global_state.get());
-  lstate.table_function_input = make_uniq<TableFunctionInput>(
-      lstate.local_arrow_function_data.get(), lstate.local_arrow_local_state.get(),
-      lstate.local_arrow_global_state.get());
-  return true;
-}
-
-void ArrowMultiFileInfo::Scan(ClientContext& context, BaseFileReader& reader,
-                              GlobalTableFunctionState& global_state,
-                              LocalTableFunctionState& local_state, DataChunk& chunk) {
-  auto& lstate = local_state.Cast<ArrowFileLocalState>();
-  ArrowTableFunction::ArrowScanFunction(context, *lstate.table_function_input, chunk);
-}
 
 void ArrowMultiFileInfo::FinishFile(ClientContext& context,
                                     GlobalTableFunctionState& global_state,
@@ -243,7 +152,11 @@ double ArrowMultiFileInfo::GetProgressInFile(ClientContext& context,
 }
 
 void ArrowMultiFileInfo::GetVirtualColumns(ClientContext&, MultiFileBindData&,
-                                           virtual_column_map_t& result) {}
+                                           virtual_column_map_t& result) {
+  if (result.find(COLUMN_IDENTIFIER_EMPTY) != result.end()) {
+    result.erase(COLUMN_IDENTIFIER_EMPTY);
+  }
+}
 
 }  // namespace ext_nanoarrow
 }  // namespace duckdb

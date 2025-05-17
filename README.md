@@ -1,11 +1,20 @@
 # nanoarrow for DuckDB
 
-This repository is based on https://github.com/duckdb/extension-template, check it out if you want to build and ship your own DuckDB extension.
+This extension, nanoarrow, allows you to read Arrow IPC streams and files. It serves a similar purpose as the now-deprecated [Arrow DuckDB core extension](https://github.com/duckdb/arrow).
+However, it comes with the added functionality to query Arrow IPC files and is much better tested. This extension is released as a DuckDB Community Extension.
+For compatibility reasons with the previous Arrow core extension, this extension is also aliased as `arrow`.
 
----
+You can install and load it as:
 
-This extension, nanoarrow, allows you to read Arrow IPC streams.
+```sql
+-- arrow would also be a suitable name
+INSTALL nanoarrow FROM community;
+LOAD nanoarrow;
+```
 
+## Usage
+Below is a complete example of how to use our extension to read an Arrow IPC file.
+In addition to our extension, you will also need the `httpfs` extension installed and loaded to fetch the data directly from GitHub.
 
 ```sql
 LOAD httpfs;
@@ -13,7 +22,7 @@ LOAD nanoarrow;
 SELECT
     commit, message
   FROM
-    read_arrow('https://github.com/apache/arrow-experiments/raw/refs/heads/main/data/arrow-commits/arrow-commits.arrows')
+    'https://github.com/apache/arrow-experiments/raw/refs/heads/main/data/arrow-commits/arrow-commits.arrows'
   LIMIT 10;
 ```
 
@@ -37,7 +46,115 @@ SELECT
 └───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-It is very new and proof-of-concept only at this point!
+In the remainder of this section, we cover the supported parameters and usages for our IPC readers/writers.
+
+### IPC Files
+
+#### Write
+Writing an Arrow IPC file is done using the COPY statement Below is a simple example of how you can use DuckDB to create such a file.
+
+```sql
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrows";
+```
+
+Both `.arrows` and `.arrow` will be automatically recognized by DuckDB as Arrow IPC streams.
+However, if you wish to use a different extension, you can manually specify the format using:
+
+```sql
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.ipc" (FORMAT ARROWS);
+```
+
+The Copy function of the Copy To Arrow File operation accepts the following parameters:
+* `row_group_size`: The size of a row group. By default, the value is 122,880. A lower value may reduce performance but can be beneficial for streaming. It is important to note that this value is not exact, a slightly higher value divisible by 2,048 (DuckDB's standard vector size) may be used as the actual row group size.
+* `chunk_size`: An alias for the `row_group_size` parameter.
+* `row_group_size_bytes`: The size of row groups in bytes.
+* `row_groups_per_file`: The maximum number of row groups per file. If this option is set, multiple files can be generated in a single `COPY` call. This means the specified path will create a directory, and the `row_group_size` parameter will also be used to determine the partition sizes.
+* `kv_metadata`: Key-value metadata to be added to the file schema.
+
+If `row_group_size_bytes` and either `chunk_size` or `row_group_size` are used, the row groups will be defined by the smallest of these parameters.
+
+#### Read
+You can consume the file using the `read_arrow` scanner. For example, to read the file we just created, you could run:
+```sql
+FROM read_arrow('test.arrows');
+```
+
+Similar to the copy function, the extension also registers `.arrows` and `.arrow` as valid extensions for the Arrow IPC format. This means that a replacement scan can be applied if that is the file extension, so the following would also be a valid query:
+```sql
+FROM 'test.arrows';
+```
+
+Besides single-file reading, our extension also fully supports multi-file reading, including all valid multi-file options.
+
+If we were to create a second test file using:
+```sql
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "test_2.arrows" (FORMAT ARROWS);
+```
+
+We can then run a query that reads both files using a glob pattern or a list of file paths:
+
+```sql
+-- Glob
+FROM read_arrow('*.arrows')
+
+-- List
+FROM read_arrow(['test.arrows','test_2.arrows'])
+```
+
+When reading multiple files, the following parameters are also supported:
+* `union_by_name`: If the schemas of the files differ, setting `union_by_name` allows DuckDB to construct the schema by aligning columns with the same name.
+* `filename`: If set to `True`, this will add a column with the name of the file that generated each row.
+* `hive_partitioning`: Enables reading data from a Hive-partitioned dataset and applies partition filtering.
+> [!NOTE]
+> [Arrow IPC files (.arrow)](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams (.arrows)](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are distinct but related formats. This extension can read both but only writes Arrow IPC Streams.
+### IPC Stream Buffers
+Similar to the old core Arrow extension, this extension also allows direct production and consumption of the Arrow IPC streaming format from in-memory buffers in both Python and Node.js.
+In this section, we will demonstrate how to use the Python API, but you can find many tests that serve as examples for both [Node.js](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/nodejs) and [Python](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/python).
+
+Our extension can create Arrow IPC buffers using the `to_arrow_ipc` function. This function returns two columns: one containing the serialized data as a `BLOB`, and another `BOOL` column indicating which tuples contain the header information of the messages. For example, consider the following table in our DuckDB database:
+```python
+import pyarrow as pa
+import duckdb
+import pyarrow.ipc as ipc
+
+connection = duckdb.connect()
+connection.execute("CREATE TABLE T (f0 integer, f1 varchar, f2 bool )")
+connection.execute("INSERT INTO T values (1, 'foo', true),(2, 'bar', NULL), (3, 'baz', false), (4, NULL, true) ")
+```
+
+We can then obtain our buffers by simply issuing a `to_arrow_ipc` call, like this:
+
+```python
+buffers = connection.execute("FROM to_arrow_ipc((FROM T))").fetchall()
+```
+In this case, our buffers will contain two tuples: the first is the header of our message, and the second is the data. To convert this into an Arrow table, we simply concatenate the tuples and use the `ipc.RecordBatchStreamReader`. For example, you can read them as follows:
+
+
+```python
+batches = []
+with pa.BufferReader(pa.py_buffer(buffers[0][0] + buffers[1][0])) as reader:
+     stream_reader = ipc.RecordBatchStreamReader(reader)
+     schema = stream_reader.schema
+     batches.extend(stream_reader)
+arrow_table = pa.Table.from_batches(batches, schema=schema)
+```
+
+To read buffers with DuckDB, you must use the Python function `from_arrow`. Continuing from our example, we would first need to convert our Arrow table into the Arrow IPC format.
+```python
+batch = arrow_table.to_batches()[0]
+sink = pa.BufferOutputStream()
+with pa.ipc.new_stream(sink, batch.schema) as writer:
+     writer.write_batch(batch)
+buffer = sink.getvalue()
+buf_reader = pa.BufferReader(buffer)
+msg_reader = ipc.MessageReader.open_stream(buf_reader)
+```
+
+After this, the following query will return a DuckDB relation with the deserialized Arrow IPC:
+
+```python
+connection.from_arrow(msg_reader)
+```
 
 ## Building
 

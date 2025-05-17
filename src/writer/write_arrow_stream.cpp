@@ -31,6 +31,7 @@ struct ArrowWriteBindData : public TableFunctionData {
   // case of "write it all then read it all" (at the expense of not being as
   // useful for streaming).
   idx_t row_group_size = 122880;
+  bool row_group_size_set = false;
   optional_idx row_groups_per_file;
   static constexpr const idx_t BYTES_PER_ROW = 1024;
   idx_t row_group_size_bytes{};
@@ -67,7 +68,12 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
     }
 
     if (loption == "row_group_size" || loption == "chunk_size") {
+      if (bind_data->row_group_size_set) {
+        throw BinderException(
+            "ROW_GROUP_SIZE and ROW_GROUP_SIZE_BYTES are mutually exclusive");
+      }
       bind_data->row_group_size = option.second[0].GetValue<uint64_t>();
+      bind_data->row_group_size_set = true;
     } else if (loption == "row_group_size_bytes") {
       auto roption = option.second[0];
       if (roption.GetTypeMutable().id() == LogicalTypeId::VARCHAR) {
