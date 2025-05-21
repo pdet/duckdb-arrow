@@ -64,10 +64,8 @@ def compare_ipc_buffer_reader(con, file):
 def compare_ipc_buffer_writer(con, file):
     arrow_result = ipc.open_stream(file).read_all()
     buffers = con.execute(f"FROM to_arrow_ipc((FROM read_arrow('{file}')))").fetchall()
-
     if not buffers:
         return
-
     arrow_buffers = []
     for i in range (1, len(buffers)):
         # We have to concatenate the schema to the data
@@ -108,8 +106,7 @@ class TestArrowIntegrationTests(object):
 
     def test_write_ipc_buffer(self, connection):
         for file in little_big_integration_files:
-            if file not in ["generated_map_non_canonical.stream", "generated_map.stream", "generated_null.stream"]:
-                compare_ipc_buffer_writer(connection,os.path.join(big_endian_folder,file))
-                compare_ipc_buffer_writer(connection,os.path.join(little_endian_folder,file))
+            compare_ipc_buffer_writer(connection,os.path.join(big_endian_folder,file))
+            compare_ipc_buffer_writer(connection,os.path.join(little_endian_folder,file))
         for file in compression_2_0_0:
             compare_ipc_buffer_writer(connection,os.path.join(compression_folder,file))

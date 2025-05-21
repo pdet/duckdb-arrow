@@ -1,6 +1,5 @@
-
-
 #include "ipc/stream_reader/ipc_file_stream_reader.hpp"
+#include "duckdb/common/file_system.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
@@ -18,6 +17,15 @@ void IPCFileStreamReader::PopulateNames(vector<string>& names) {
       names.push_back(column->name);
     }
   }
+}
+
+double IPCFileStreamReader::GetProgress() {
+  idx_t file_size = file_reader.FileSize();
+  if (file_size == 0) {
+    return 100;
+  }
+  auto current_offset = static_cast<double>(file_reader.CurrentOffset());
+  return (current_offset / static_cast<double>(file_size)) * 100;
 }
 
 void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder& decoder,
@@ -86,8 +94,7 @@ data_ptr_t IPCFileStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
 }
 
 ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
-  if (finished || file_reader.Finished()) {
-    finished = true;
+  if (finished) {
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
   }
 
