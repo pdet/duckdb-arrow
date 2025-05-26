@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
 // writer/column_data_collection_serializer.hpp
 //
@@ -17,7 +17,7 @@
 #include "nanoarrow_errors.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 class ColumnDataCollectionSerializer {
  public:
@@ -51,5 +51,5 @@ class ColumnDataCollectionSerializer {
   ArrowError error{};
 };
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

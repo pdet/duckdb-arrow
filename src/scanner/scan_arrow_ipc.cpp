@@ -14,7 +14,7 @@
 #include "duckdb/main/config.hpp"
 namespace duckdb {
 
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 struct ScanArrowIPCFunction : ArrowTableFunction {
   static unique_ptr<FunctionData> ScanArrowIPCBind(ClientContext& context,
@@ -69,5 +69,5 @@ void ScanArrowIPC::RegisterReadArrowStream(DatabaseInstance& db) {
   ExtensionUtil::RegisterFunction(db, function);
 }
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

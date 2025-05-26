@@ -1,7 +1,7 @@
 #include "ipc/array_stream.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 IpcArrayStream::IpcArrayStream(unique_ptr<IPCStreamReader> reader)
     : reader(std::move(reader)) {}
@@ -25,5 +25,5 @@ int IpcArrayStream::GetNext(ArrowArray* array) {
 
 const char* IpcArrayStream::GetLastError() const { return last_msg.c_str(); }
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

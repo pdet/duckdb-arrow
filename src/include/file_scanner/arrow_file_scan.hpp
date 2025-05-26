@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
 // file_scanner/arrow_file_scan.hpp
 //
@@ -13,7 +13,7 @@
 #include "duckdb/common/multi_file/base_file_reader.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 //! This class refers to an Arrow File Scan
 class ArrowFileScan : public BaseFileReader {
@@ -45,5 +45,5 @@ class ArrowFileScan : public BaseFileReader {
   vector<string> names;
   vector<LogicalType> types;
 };
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

@@ -38,7 +38,7 @@
 
 namespace duckdb {
 
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 struct ReadArrowStream : ArrowTableFunction {
   static TableFunction Function() {
@@ -85,5 +85,5 @@ void RegisterReadArrowStream(DatabaseInstance& db) {
   config.replacement_scans.emplace_back(ReadArrowStream::ScanReplacement);
 }
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

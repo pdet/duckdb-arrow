@@ -3,7 +3,7 @@
 #include "file_scanner/arrow_multi_file_info.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 struct ArrowFileLocalState;
 
 ArrowFileScan::ArrowFileScan(ClientContext& context, const string& file_name)
@@ -78,5 +78,5 @@ shared_ptr<BaseUnionData> ArrowFileScan::GetUnionData(idx_t file_idx) {
   return data;
 }
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

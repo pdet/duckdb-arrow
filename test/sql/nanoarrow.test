@@ -1,15 +1,15 @@
-# name: test/sql/nanoarrow.test
-# description: test nanoarrow extension
-# group: [nanoarrow]
+# name: test/sql/arrow.test
+# description: test arrow extension
+# group: [arrow]
 
 # Before we load the extension, this will fail
 statement error
-SELECT nanoarrow_version();
+SELECT arrow_version();
 ----
-Catalog Error: Scalar Function with name nanoarrow_version does not exist!
+Catalog Error: Scalar Function with name arrow_version does not exist!
 
 # Require statement will ensure this test is run with this extension loaded
-require nanoarrow
+require arrow
 
 # Confirm the extension works
 query I

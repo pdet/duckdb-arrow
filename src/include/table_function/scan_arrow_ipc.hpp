@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
 // table_function/scan_arrow_ipc.hpp
 //
@@ -13,7 +13,7 @@
 #include "duckdb.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 //! Arrow IPC Buffer, basically a pointer to the buffer and its size
 struct ArrowIPCBuffer {
@@ -28,5 +28,5 @@ struct ArrowIPCBuffer {
 struct ScanArrowIPC {
   static void RegisterReadArrowStream(DatabaseInstance& db);
 };
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

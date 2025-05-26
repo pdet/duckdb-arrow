@@ -1,6 +1,6 @@
-# nanoarrow for DuckDB
+# Arrow for DuckDB
 
-This extension, nanoarrow, allows you to read Arrow IPC streams and files. It serves a similar purpose as the now-deprecated [Arrow DuckDB core extension](https://github.com/duckdb/arrow).
+This extension, arrow, allows you to read Arrow IPC streams and files. It serves a similar purpose as the now-deprecated [Arrow DuckDB core extension](https://github.com/duckdb/arrow).
 However, it comes with the added functionality to query Arrow IPC files and is much better tested. This extension is released as a DuckDB Community Extension.
 For compatibility reasons with the previous Arrow core extension, this extension is also aliased as `arrow`.
 
@@ -8,8 +8,8 @@ You can install and load it as:
 
 ```sql
 -- arrow would also be a suitable name
-INSTALL nanoarrow FROM community;
-LOAD nanoarrow;
+INSTALL arrow FROM community;
+LOAD arrow;
 ```
 
 ## Usage
@@ -18,7 +18,7 @@ In addition to our extension, you will also need the `httpfs` extension installe
 
 ```sql
 LOAD httpfs;
-LOAD nanoarrow;
+LOAD arrow;
 SELECT
     commit, message
   FROM
@@ -109,7 +109,7 @@ When reading multiple files, the following parameters are also supported:
 > [Arrow IPC files (.arrow)](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams (.arrows)](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are distinct but related formats. This extension can read both but only writes Arrow IPC Streams.
 ### IPC Stream Buffers
 Similar to the old core Arrow extension, this extension also allows direct production and consumption of the Arrow IPC streaming format from in-memory buffers in both Python and Node.js.
-In this section, we will demonstrate how to use the Python API, but you can find many tests that serve as examples for both [Node.js](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/nodejs) and [Python](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/python).
+In this section, we will demonstrate how to use the Python API, but you can find many tests that serve as examples for both [Node.js](https://github.com/paleolimbot/duckdb-arrow/tree/main/test/nodejs) and [Python](https://github.com/paleolimbot/duckdb-arrow/tree/main/test/python).
 
 Our extension can create Arrow IPC buffers using the `to_arrow_ipc` function. This function returns two columns: one containing the serialized data as a `BLOB`, and another `BOOL` column indicating which tuples contain the header information of the messages. For example, consider the following table in our DuckDB database:
 ```python
@@ -182,12 +182,12 @@ The main binaries that will be built are:
 ```sh
 ./build/release/duckdb
 ./build/release/test/unittest
-./build/release/extension/nanoarrow/nanoarrow.duckdb_extension
+./build/release/extension/arrow/arrow.duckdb_extension
 ```
 
 - `duckdb` is the binary for the duckdb shell with the extension code automatically loaded.
 - `unittest` is the test runner of duckdb. Again, the extension is already linked into the binary.
-- `nanoarrow.duckdb_extension` is the loadable binary as it would be distributed.
+- `arrow.duckdb_extension` is the loadable binary as it would be distributed.
 
 If you'd like to use VSCode with the integration provided by the CMake/clangd extension, you
 can run:

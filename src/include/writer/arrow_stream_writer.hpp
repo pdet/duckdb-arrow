@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
 // writer/arrow_stream_writer.hpp
 //
@@ -11,7 +11,7 @@
 #include "writer/column_data_collection_serializer.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 struct ArrowStreamWriter {
   ArrowStreamWriter(ClientContext& context, FileSystem& fs, const string& file_path,
@@ -50,5 +50,5 @@ struct ArrowStreamWriter {
   nanoarrow::UniqueSchema schema;
 };
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

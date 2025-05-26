@@ -1,9 +1,9 @@
 # name: test/sql/write_arrow_stream.test
-# description: test nanoarrow extension
-# group: [nanoarrow]
+# description: test arrow extension
+# group: [arrow]
 
 # Require statement will ensure this test is run with this extension loaded
-require nanoarrow
+require arrow
 
 statement ok
 CREATE TABLE test AS SELECT * FROM read_arrow('__WORKING_DIRECTORY__/data/test.arrows');

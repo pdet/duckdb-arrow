@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
 // table_function/arrow_ipc_function_data.hpp
 //
@@ -12,7 +12,7 @@
 #include "ipc/stream_factory.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 //! Our FunctionData is the same as the ArrowScanFunctionData except we extend it
 //! to keep the ArrowIpcArrowArrayStreamFactory alive.
 struct ArrowIPCFunctionData : public ArrowScanFunctionData {
@@ -22,5 +22,5 @@ struct ArrowIPCFunctionData : public ArrowScanFunctionData {
         factory(std::move(factory)) {}
   std::unique_ptr<ArrowIPCStreamFactory> factory;
 };
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

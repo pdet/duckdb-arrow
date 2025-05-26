@@ -2,7 +2,7 @@
 #include "duckdb/common/file_system.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle,
                                          Allocator& allocator)
     : IPCStreamReader(allocator), file_reader(fs, std::move(handle)) {}
@@ -140,5 +140,5 @@ void IPCFileStreamReader::EnsureInputStreamAligned() {
   D_ASSERT((file_reader.CurrentOffset() % 8) == 0);
 }
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

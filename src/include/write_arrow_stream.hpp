@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
 // write_arrow_stream.hpp
 //
@@ -10,9 +10,9 @@
 #include "duckdb/function/copy_function.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 void RegisterArrowStreamCopyFunction(DatabaseInstance& db);
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

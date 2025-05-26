@@ -17,7 +17,7 @@
 
 namespace duckdb {
 
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 namespace {
 
@@ -271,5 +271,5 @@ void RegisterArrowStreamCopyFunction(DatabaseInstance& db) {
   ExtensionUtil::RegisterFunction(db, function);
 }
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

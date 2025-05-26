@@ -12,7 +12,7 @@
 
 namespace duckdb {
 
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 struct ToArrowIpcFunctionData : public TableFunctionData {
   ToArrowIpcFunctionData() = default;
@@ -193,5 +193,5 @@ void ToArrowIPCFunction::RegisterToIPCFunction(DatabaseInstance& db) {
   const auto function = GetFunction();
   ExtensionUtil::RegisterFunction(db, function);
 }
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

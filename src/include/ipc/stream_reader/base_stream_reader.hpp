@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
 // ipc/stream_reader/base_stream_reader.hpp
 //
@@ -20,7 +20,7 @@
 #include "table_function/scan_arrow_ipc.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 //! Missing in nanoarrow_ipc.hpp
 struct UniqueSharedBuffer {
@@ -113,5 +113,5 @@ class IPCStreamReader {
   static constexpr uint32_t kContinuationToken = 0xFFFFFFFF;
 };
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

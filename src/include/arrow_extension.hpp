@@ -1,7 +1,7 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
-// nanoarrow_extension.hpp
+// arrow_extension.hpp
 //
 //
 //===----------------------------------------------------------------------===//
@@ -12,7 +12,7 @@
 
 namespace duckdb {
 
-class NanoarrowExtension : public Extension {
+class ArrowExtension : public Extension {
  public:
   void Load(DuckDB& db) override;
   std::string Name() override;

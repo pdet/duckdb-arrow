@@ -1,6 +1,6 @@
 #define DUCKDB_EXTENSION_MAIN
 
-#include "nanoarrow_extension.hpp"
+#include "arrow_extension.hpp"
 
 #include <string>
 #include "writer/to_arrow_ipc.hpp"
@@ -32,19 +32,19 @@ struct NanoarrowVersion {
 
 void LoadInternal(DatabaseInstance& db) {
   NanoarrowVersion::Register(db);
-  ext_nanoarrow::RegisterReadArrowStream(db);
-  ext_nanoarrow::RegisterArrowStreamCopyFunction(db);
+  ext_arrow::RegisterReadArrowStream(db);
+  ext_arrow::RegisterArrowStreamCopyFunction(db);
 
-  ext_nanoarrow::ScanArrowIPC::RegisterReadArrowStream(db);
-  ext_nanoarrow::ToArrowIPCFunction::RegisterToIPCFunction(db);
+  ext_arrow::ScanArrowIPC::RegisterReadArrowStream(db);
+  ext_arrow::ToArrowIPCFunction::RegisterToIPCFunction(db);
 }
 
 }  // namespace
 
-void NanoarrowExtension::Load(DuckDB& db) { LoadInternal(*db.instance); }
-std::string NanoarrowExtension::Name() { return "nanoarrow"; }
+void ArrowExtension::Load(DuckDB& db) { LoadInternal(*db.instance); }
+std::string ArrowExtension::Name() { return "arrow"; }
 
-std::string NanoarrowExtension::Version() const {
+std::string ArrowExtension::Version() const {
 #ifdef EXT_VERSION_NANOARROW
   return EXT_VERSION_NANOARROW;
 #else
@@ -56,12 +56,12 @@ std::string NanoarrowExtension::Version() const {
 
 extern "C" {
 
-DUCKDB_EXTENSION_API void nanoarrow_init(duckdb::DatabaseInstance& db) {
+DUCKDB_EXTENSION_API void arrow_init(duckdb::DatabaseInstance& db) {
   duckdb::DuckDB db_wrapper(db);
-  db_wrapper.LoadExtension<duckdb::NanoarrowExtension>();
+  db_wrapper.LoadExtension<duckdb::ArrowExtension>();
 }
 
-DUCKDB_EXTENSION_API const char* nanoarrow_version() {
+DUCKDB_EXTENSION_API const char* arrow_version() {
   return duckdb::DuckDB::LibraryVersion();
 }
 }

@@ -1,8 +1,8 @@
 # name: test/sql/multifile_reading.test
 # description: Test read_arrow over multiple files.
-# group: [nanoarrow]
+# group: [arrow]
 
-require nanoarrow
+require arrow
 
 # Test File List Works
 statement ok

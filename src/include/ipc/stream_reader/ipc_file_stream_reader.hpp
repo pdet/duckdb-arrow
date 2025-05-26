@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
 // ipc/stream_reader/ipc_file_stream_reader.hpp
 //
@@ -11,7 +11,7 @@
 #include "ipc/stream_reader/base_stream_reader.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 //! IPC File
 class IPCFileStreamReader final : public IPCStreamReader {
@@ -39,5 +39,5 @@ class IPCFileStreamReader final : public IPCStreamReader {
   void PopulateNames(vector<string>& names);
 };
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

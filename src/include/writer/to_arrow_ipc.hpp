@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
 // writer/to_arrow_ipc.hpp
 //
@@ -11,7 +11,7 @@
 #include "nanoarrow/hpp/unique.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 class ArrowStringVectorBuffer : public VectorBuffer {
  public:
@@ -48,5 +48,5 @@ class ToArrowIPCFunction {
                                                   DataChunk& output);
 };
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

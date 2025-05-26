@@ -7,7 +7,7 @@
 #include "ipc/stream_factory.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 unique_ptr<BaseFileReaderOptions> ArrowMultiFileInfo::InitializeOptions(
     ClientContext& context, optional_ptr<TableFunctionInfo> info) {
@@ -158,5 +158,5 @@ void ArrowMultiFileInfo::GetVirtualColumns(ClientContext&, MultiFileBindData&,
   }
 }
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

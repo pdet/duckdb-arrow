@@ -3,7 +3,7 @@
 #include <iostream>
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 IPCBufferStreamReader::IPCBufferStreamReader(vector<ArrowIPCBuffer> buffers,
                                              Allocator& allocator)
@@ -74,5 +74,5 @@ nanoarrow::UniqueBuffer IPCBufferStreamReader::GetUniqueBuffer() {
   return out;
 }
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

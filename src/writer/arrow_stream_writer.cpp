@@ -1,7 +1,7 @@
 #include "writer/arrow_stream_writer.hpp"
 namespace duckdb {
 
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 ArrowStreamWriter::ArrowStreamWriter(ClientContext& context, FileSystem& fs,
                                      const string& file_path,
@@ -85,5 +85,5 @@ idx_t ArrowStreamWriter::NumberOfRowGroups() const { return row_group_count; }
 
 idx_t ArrowStreamWriter::FileSize() const { return writer->GetTotalWritten(); }
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

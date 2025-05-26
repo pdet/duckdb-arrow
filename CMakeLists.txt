@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 include(FetchContent)
 
 # Set extension name here
-set(TARGET_NAME nanoarrow)
+set(TARGET_NAME arrow)
 
 set(NANOARROW_IPC ON)
 set(NANOARROW_NAMESPACE "DuckDBExt${TARGET_NAME}")
@@ -28,7 +28,7 @@ set(EXTENSION_SOURCES
     src/ipc/stream_reader/ipc_buffer_stream_reader.cpp
     src/scanner/read_arrow.cpp
     src/scanner/scan_arrow_ipc.cpp
-    src/nanoarrow_extension.cpp
+    src/arrow_extension.cpp
     src/writer/arrow_stream_writer.cpp
     src/writer/column_data_collection_serializer.cpp
     src/writer/write_arrow_stream.cpp

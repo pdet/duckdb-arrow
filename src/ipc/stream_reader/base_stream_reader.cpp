@@ -4,7 +4,7 @@
 #include "zstd.h"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 // A version of ArrowDecompressZstd that uses DuckDB's C++ name-specified
 // zstd.h header that doesn't work with a C compiler
@@ -312,5 +312,5 @@ const char* IPCStreamReader::MessageTypeString(ArrowIpcMessageType message_type)
   }
 }
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

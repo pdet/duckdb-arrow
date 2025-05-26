@@ -1,9 +1,8 @@
 #include "writer/column_data_collection_serializer.hpp"
 
-#include <utility>
 namespace duckdb {
 
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 // Initialize buffer whose realloc operations go through DuckDB's memory
 // accounting. Note that the Allocator must outlive the buffer (true for
@@ -128,5 +127,5 @@ nanoarrow::UniqueBuffer ColumnDataCollectionSerializer::GetBody() {
   InitArrowDuckBuffer(body.get(), allocator);
   return result_body;
 }
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

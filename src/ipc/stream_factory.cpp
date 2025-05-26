@@ -1,13 +1,12 @@
 #include "ipc/stream_factory.hpp"
 
 #include <iostream>
-#include <utility>
 
 #include "ipc/stream_reader/ipc_buffer_stream_reader.hpp"
 #include "ipc/stream_reader/ipc_file_stream_reader.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 ArrowIPCStreamFactory::ArrowIPCStreamFactory(Allocator& allocator_p)
     : allocator(allocator_p) {}
 
@@ -62,5 +61,5 @@ void FileIPCStreamFactory::InitReader() {
   reader = make_uniq<IPCFileStreamReader>(fs, std::move(handle), allocator);
 }
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

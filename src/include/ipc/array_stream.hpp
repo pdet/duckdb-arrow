@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
 // ipc/array_stream.hpp
 //
@@ -11,7 +11,7 @@
 #include "ipc/stream_reader/base_stream_reader.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 class IpcArrayStream {
  public:
   explicit IpcArrayStream(unique_ptr<IPCStreamReader> reader);
@@ -51,5 +51,5 @@ class IpcArrayStream {
   unique_ptr<IPCStreamReader> reader;
   string last_msg;
 };
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

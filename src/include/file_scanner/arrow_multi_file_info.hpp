@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
 // file_scanner/arrow_multi_file_info.hpp
 //
@@ -12,7 +12,7 @@
 #include "duckdb/function/table/arrow.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 //! We might have arrow specific options one day
 class ArrowFileReaderOptions : public BaseFileReaderOptions {};
@@ -134,5 +134,5 @@ struct ArrowMultiFileInfo : MultiFileReaderInterface {
                          virtual_column_map_t& result) override;
 };
 
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

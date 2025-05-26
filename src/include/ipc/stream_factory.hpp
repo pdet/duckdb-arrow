@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-//                         DuckDB - nanoarrow
+//                         DuckDB - arrow
 //
 // ipc/ipc_stream_factory.hpp
 //
@@ -15,7 +15,7 @@
 #include "table_function/scan_arrow_ipc.hpp"
 
 namespace duckdb {
-namespace ext_nanoarrow {
+namespace ext_arrow {
 
 class ArrowStreamFactory {
   ArrowStreamFactory() {};
@@ -63,5 +63,5 @@ class FileIPCStreamFactory final : public ArrowIPCStreamFactory {
   FileSystem& fs;
   string src_string;
 };
-}  // namespace ext_nanoarrow
+}  // namespace ext_arrow
 }  // namespace duckdb

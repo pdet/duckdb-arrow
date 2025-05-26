@@ -1,9 +1,9 @@
 # name: test/sql/read_arrow.test
-# description: test nanoarrow extension
-# group: [nanoarrow]
+# description: test arrow extension
+# group: [arrow]
 
 # Require statement will ensure this test is run with this extension loaded
-require nanoarrow
+require arrow
 
 # Check a basic roundtrip
 statement ok

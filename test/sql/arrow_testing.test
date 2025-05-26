@@ -1,9 +1,9 @@
 # name:
-# description: test nanoarrow extension
-# group: [nanoarrow]
+# description: test arrow extension
+# group: [arrow]
 
 # Require statement will ensure this test is run with this extension loaded
-require nanoarrow
+require arrow
 
 statement ok
 SET VARIABLE test_files = '__WORKING_DIRECTORY__/arrow-testing/data/arrow-ipc-stream/integration/';
