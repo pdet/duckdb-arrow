@@ -58,7 +58,7 @@ struct ArrowWriteLocalState : public LocalFunctionData {
 vector<pair<string, string>> ReadMetadataPairs(const Value& kv_struct,
                                                const string& what) {
   auto& kv_struct_type = kv_struct.type();
-  if (kv_struct_type.id() != LogicalTypeId::STRUCT) {
+  if (kv_struct.IsNull() || kv_struct_type.id() != LogicalTypeId::STRUCT) {
     throw BinderException("Expected %s to be a STRUCT", what);
   }
   vector<pair<string, string>> result;
@@ -66,6 +66,13 @@ vector<pair<string, string>> ReadMetadataPairs(const Value& kv_struct,
   for (idx_t i = 0; i < values.size(); i++) {
     const auto& value = values[i];
     auto key = StructType::GetChildName(kv_struct_type, i);
+    if (StringUtil::StartsWith(key, "ARROW:")) {
+      throw BinderException(
+          "Metadata key \"%s\" is reserved, keys must not start with \"ARROW:\"", key);
+    }
+    if (value.IsNull()) {
+      throw BinderException("Metadata value for key \"%s\" must not be NULL", key);
+    }
     if (value.type().id() == LogicalTypeId::BLOB) {
       auto& bytes = StringValue::Get(value);
       if (!Utf8Proc::IsValid(bytes.data(), bytes.size())) {
@@ -82,7 +89,7 @@ vector<pair<string, string>> ReadMetadataPairs(const Value& kv_struct,
 // Reads a STRUCT of column name to STRUCT of key/value pairs
 vector<ArrowFieldMetadata> ReadFieldMetadata(const Value& columns,
                                              const vector<string>& names) {
-  if (columns.type().id() != LogicalTypeId::STRUCT) {
+  if (columns.IsNull() || columns.type().id() != LogicalTypeId::STRUCT) {
     throw BinderException("Expected field_metadata argument to be a STRUCT");
   }
   vector<ArrowFieldMetadata> result;

@@ -12,11 +12,13 @@ FROM read_arrow('__TEST_DIR__/fields.arrows')
 ----
 42	foo
 
-# The schema message carries every key and value
-query I
-SELECT bool_and(contains(hex(content), hex(needle))) FROM read_blob('__TEST_DIR__/fields.arrows'), (VALUES ('file_owner'), ('test_suite'), ('measurement_unit'), ('row_count'), ('language_code'), ('english'), ('raw_bytes'), ('binary_value')) t(needle)
+query III
+SELECT field_path, key, value FROM arrow_kv_metadata('__TEST_DIR__/fields.arrows') ORDER BY field_path NULLS FIRST, key
 ----
-true
+NULL	file_owner	test_suite
+[id]	measurement_unit	row_count
+[label]	language_code	english
+[label]	raw_bytes	binary_value
 
 statement error
 COPY (SELECT 42 AS id) TO '__TEST_DIR__/error.arrows' (FORMAT ARROWS, FIELD_METADATA 'nope')
@@ -24,7 +26,7 @@ COPY (SELECT 42 AS id) TO '__TEST_DIR__/error.arrows' (FORMAT ARROWS, FIELD_META
 Expected field_metadata argument to be a STRUCT
 
 statement error
-COPY (SELECT 42 AS id) TO '__TEST_DIR__/error.arrows' (FORMAT ARROWS, FIELD_METADATA {'id': 'nope'})
+COPY (SELECT 42 AS id) TO '__TEST_DIR__/error.arrows' (FORMAT ARROWS, FIELD_METADATA {'id': NULL::STRUCT(k VARCHAR)})
 ----
 Expected field_metadata entry for column "id" to be a STRUCT
 
@@ -32,6 +34,16 @@ statement error
 COPY (SELECT 42 AS id) TO '__TEST_DIR__/error.arrows' (FORMAT ARROWS, FIELD_METADATA {'missing': {'measurement_unit': 'row_count'}})
 ----
 Column "missing" in field_metadata is not among the written columns
+
+statement error
+COPY (SELECT 42 AS id) TO '__TEST_DIR__/error.arrows' (FORMAT ARROWS, FIELD_METADATA {'id': {'measurement_unit': NULL}})
+----
+Metadata value for key "measurement_unit" must not be NULL
+
+statement error
+COPY (SELECT 42 AS id) TO '__TEST_DIR__/error.arrows' (FORMAT ARROWS, FIELD_METADATA {'id': {'ARROW:extension:name': 'bogus'}})
+----
+Metadata key "ARROW:extension:name" is reserved
 
 statement error
 COPY (SELECT 42 AS id) TO '__TEST_DIR__/error.arrows' (FORMAT ARROWS, FIELD_METADATA {'id': {'raw_bytes': '\xFF\xFE'::BLOB}})

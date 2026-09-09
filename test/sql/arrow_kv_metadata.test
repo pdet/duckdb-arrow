@@ -1,0 +1,41 @@
+# name: test/sql/arrow_kv_metadata.test
+# description: Read the key value metadata of Arrow IPC schemas and fields
+# group: [sql]
+
+require nanoarrow
+
+statement ok
+COPY (SELECT 42 AS id, 'foo' AS label) TO '__TEST_DIR__/kv_1.arrows' (FORMAT ARROWS, KV_METADATA {'file_owner': 'test_suite'}, FIELD_METADATA {'id': {'measurement_unit': 'row_count'}})
+
+statement ok
+COPY (SELECT 42 AS id) TO '__TEST_DIR__/kv_2.arrows' (FORMAT ARROWS, FIELD_METADATA {'id': {'measurement_unit': 'row_count'}})
+
+query III
+SELECT field_path, key, value FROM arrow_kv_metadata('__TEST_DIR__/kv_1.arrows') ORDER BY field_path NULLS FIRST
+----
+NULL	file_owner	test_suite
+[id]	measurement_unit	row_count
+
+query II
+SELECT count(DISTINCT file_name), count(*) FROM arrow_kv_metadata('__TEST_DIR__/kv_*.arrows')
+----
+2	3
+
+query I
+SELECT count(*) FROM arrow_kv_metadata(['__TEST_DIR__/kv_1.arrows', '__TEST_DIR__/kv_2.arrows']) WHERE key = 'measurement_unit'
+----
+2
+
+statement ok
+SET arrow_lossless_conversion = true
+
+statement ok
+COPY (SELECT gen_random_uuid() AS uid, {'h': 1::HUGEINT} AS s) TO '__TEST_DIR__/kv_types.arrows' (FORMAT ARROWS, FIELD_METADATA {'uid': {'role': 'key'}})
+
+# The metadata DuckDB attaches to fields, nested ones included, is reported next to the added keys
+query III
+SELECT field_path, key, value FROM arrow_kv_metadata('__TEST_DIR__/kv_types.arrows') WHERE key IN ('ARROW:extension:name', 'role') ORDER BY field_path, key
+----
+[s, h]	ARROW:extension:name	arrow.opaque
+[uid]	ARROW:extension:name	arrow.uuid
+[uid]	role	key

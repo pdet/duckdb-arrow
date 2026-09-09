@@ -26,6 +26,7 @@ set(EXTENSION_SOURCES
     src/ipc/stream_reader/base_stream_reader.cpp
     src/ipc/stream_reader/ipc_file_stream_reader.cpp
     src/ipc/stream_reader/ipc_buffer_stream_reader.cpp
+    src/scanner/arrow_kv_metadata.cpp
     src/scanner/read_arrow.cpp
     src/scanner/scan_arrow_ipc.cpp
     src/nanoarrow_extension.cpp
