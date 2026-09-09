@@ -6,13 +6,22 @@ set(TARGET_NAME nanoarrow)
 
 set(NANOARROW_IPC ON)
 set(NANOARROW_NAMESPACE "DuckDBExt${TARGET_NAME}")
+# nanoarrow 0.9.0 plus the IPC body compression API for the encoder/writer
+# (ArrowIpcEncoderSetCompression and friends, pdet/arrow-nanoarrow branch
+# ipc-write-compression). Point this back at apache/arrow-nanoarrow once a release
+# ships that API.
+# TODO: add URL_HASH SHA256=<sha256 of the zip> once commit cf9d060 is pushed to the fork
 fetchcontent_declare(nanoarrow
-                     URL "https://github.com/apache/arrow-nanoarrow/archive/9fad80292360d0f3978264c11ba865ccc94020d8.zip"
-                     URL_HASH SHA256=7dae6a078981463c7cbf9d430c27056812cdac0963e368f3f1ea6736c5f8280f
+                     URL "https://github.com/pdet/arrow-nanoarrow/archive/cf9d0604b7f15c6f455a712155c50d8b4a129292.zip"
 )
-# nanoarrow builds its own LZ4 decompressor but must be told where liblz4 lives
-# In CI the library comes from vcpkg (see vcpkg.json), otherwise a system copy is found
-# The extension links liblz4 transitively through nanoarrow_ipc (needs CMake 3.24 or newer)
+# nanoarrow compresses and decompresses IPC bodies itself, using liblz4 and libzstd.
+# In CI both come from vcpkg (see vcpkg.json), otherwise system copies are found.
+# DuckDB's bundled zstd cannot be used: it is compiled as C++ inside a namespace, so
+# nanoarrow's C sources cannot link against it. The extension links both libraries
+# transitively through nanoarrow_ipc (needs CMake 3.24 or newer) and never includes
+# their headers itself.
+set(NANOARROW_IPC_WITH_ZSTD ON)
+find_path(ZSTD_INCLUDE_DIR zstd.h REQUIRED)
 find_path(LZ4_INCLUDE_DIR lz4frame.h REQUIRED)
 find_library(LZ4_LIBRARY NAMES lz4 liblz4 REQUIRED)
 get_filename_component(LZ4_LIBRARY_DIR "${LZ4_LIBRARY}" DIRECTORY)
@@ -21,6 +30,18 @@ set(LZ4_INCLUDE_DIRS "${LZ4_INCLUDE_DIR}")
 set(LZ4_LIBRARY_DIRS "${LZ4_LIBRARY_DIR}")
 set(LZ4_LIBRARIES "${LZ4_LIBRARY}")
 fetchcontent_makeavailable(nanoarrow)
+# DuckDB adds its own (namespaced, C++) zstd.h to the include path of every target in
+# the tree, nanoarrow's C sources included. Put the real libzstd header ahead of it:
+# BEFORE makes it the first include directory, and NO_SYSTEM_FROM_IMPORTED stops CMake
+# from turning it into -isystem (which is searched after every -I) because the
+# imported zstd target exports the same directory.
+foreach(nanoarrow_ipc_target nanoarrow_ipc_static nanoarrow_ipc_shared)
+  if(TARGET ${nanoarrow_ipc_target})
+    set_target_properties(${nanoarrow_ipc_target} PROPERTIES NO_SYSTEM_FROM_IMPORTED ON)
+    target_include_directories(${nanoarrow_ipc_target} BEFORE
+                               PRIVATE "${ZSTD_INCLUDE_DIR}")
+  endif()
+endforeach()
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)

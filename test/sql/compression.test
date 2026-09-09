@@ -1,0 +1,224 @@
+# name: test/sql/compression.test
+# description: test reading and writing Arrow IPC with compressed record batch bodies
+# group: [sql]
+
+# Require statement will ensure this test is run with this extension loaded
+require nanoarrow
+
+statement ok
+CREATE TABLE test AS SELECT * FROM read_arrow('__WORKING_DIRECTORY__/data/test.arrows');
+
+foreach compression zstd lz4 uncompressed
+
+statement ok
+COPY test TO '__TEST_DIR__/test_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}');
+
+query I
+SELECT count(*) FROM read_arrow('__TEST_DIR__/test_${compression}.arrows');
+----
+15487
+
+query I
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_${compression}.arrows'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM read_arrow('__TEST_DIR__/test_${compression}.arrows') EXCEPT ALL SELECT * FROM test);
+----
+0
+
+endloop
+
+# Compressed files are smaller than the uncompressed one
+query I
+SELECT (SELECT size FROM read_blob('__TEST_DIR__/test_zstd.arrows')) < (SELECT size FROM read_blob('__TEST_DIR__/test_uncompressed.arrows'));
+----
+true
+
+query I
+SELECT (SELECT size FROM read_blob('__TEST_DIR__/test_lz4.arrows')) < (SELECT size FROM read_blob('__TEST_DIR__/test_uncompressed.arrows'));
+----
+true
+
+# Aliases and case insensitivity
+statement ok
+COPY test TO '__TEST_DIR__/test_alias.arrows' (FORMAT ARROWS, COMPRESSION 'LZ4_FRAME');
+
+query I
+SELECT count(*) FROM read_arrow('__TEST_DIR__/test_alias.arrows');
+----
+15487
+
+statement ok
+COPY test TO '__TEST_DIR__/test_alias.arrows' (FORMAT ARROWS, COMPRESSION 'None');
+
+query I
+SELECT count(*) FROM read_arrow('__TEST_DIR__/test_alias.arrows');
+----
+15487
+
+# Compression levels (in any option order)
+statement ok
+COPY test TO '__TEST_DIR__/test_zstd_level.arrows' (FORMAT ARROWS, COMPRESSION 'zstd', COMPRESSION_LEVEL 10);
+
+query I
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_zstd_level.arrows'));
+----
+0
+
+statement ok
+COPY test TO '__TEST_DIR__/test_lz4_level.arrows' (FORMAT ARROWS, COMPRESSION_LEVEL 9, COMPRESSION 'lz4');
+
+query I
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_lz4_level.arrows'));
+----
+0
+
+# Levels change the output: a higher level yields a smaller file than a lower one,
+# the zstd default (3) beats level 1, and the lz4 default is level 0
+statement ok
+COPY test TO '__TEST_DIR__/test_zstd_1.arrows' (FORMAT ARROWS, COMPRESSION 'zstd', COMPRESSION_LEVEL 1);
+
+statement ok
+COPY test TO '__TEST_DIR__/test_zstd_19.arrows' (FORMAT ARROWS, COMPRESSION 'zstd', COMPRESSION_LEVEL 19);
+
+query I
+SELECT (SELECT size FROM read_blob('__TEST_DIR__/test_zstd_19.arrows')) < (SELECT size FROM read_blob('__TEST_DIR__/test_zstd_1.arrows'));
+----
+true
+
+query I
+SELECT (SELECT size FROM read_blob('__TEST_DIR__/test_zstd.arrows')) < (SELECT size FROM read_blob('__TEST_DIR__/test_zstd_1.arrows'));
+----
+true
+
+query I
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_zstd_19.arrows'));
+----
+0
+
+statement ok
+COPY test TO '__TEST_DIR__/test_lz4_0.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', COMPRESSION_LEVEL 0);
+
+statement ok
+COPY test TO '__TEST_DIR__/test_lz4_12.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', COMPRESSION_LEVEL 12);
+
+query I
+SELECT (SELECT size FROM read_blob('__TEST_DIR__/test_lz4_12.arrows')) < (SELECT size FROM read_blob('__TEST_DIR__/test_lz4_0.arrows'));
+----
+true
+
+query I
+SELECT (SELECT content FROM read_blob('__TEST_DIR__/test_lz4_0.arrows')) = (SELECT content FROM read_blob('__TEST_DIR__/test_lz4.arrows'));
+----
+true
+
+query I
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_lz4_12.arrows'));
+----
+0
+
+# Option errors
+statement error
+COPY test TO '__TEST_DIR__/test_error.arrows' (FORMAT ARROWS, COMPRESSION 'snappy');
+----
+Unsupported compression type "snappy"
+
+statement error
+COPY test TO '__TEST_DIR__/test_error.arrows' (FORMAT ARROWS, COMPRESSION_LEVEL 3);
+----
+COMPRESSION_LEVEL requires COMPRESSION
+
+statement error
+COPY test TO '__TEST_DIR__/test_error.arrows' (FORMAT ARROWS, COMPRESSION 'uncompressed', COMPRESSION_LEVEL 3);
+----
+COMPRESSION_LEVEL requires COMPRESSION
+
+statement error
+COPY test TO '__TEST_DIR__/test_error.arrows' (FORMAT ARROWS, COMPRESSION 'zstd', COMPRESSION_LEVEL 1000);
+----
+Compression level for zstd must be between
+
+statement error
+COPY test TO '__TEST_DIR__/test_error.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', COMPRESSION_LEVEL 13);
+----
+Compression level for lz4 must be between -65536 and 12
+
+# Negative lz4 levels select an acceleration and are valid
+statement ok
+COPY test TO '__TEST_DIR__/test_lz4_fast.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', COMPRESSION_LEVEL -1);
+
+query I
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_lz4_fast.arrows'));
+----
+0
+
+# Various types, nulls, nested types, high-entropy data and multiple record batches
+statement ok
+CREATE TABLE various AS
+SELECT i,
+       i::VARCHAR AS s,
+       CASE WHEN i % 3 = 0 THEN NULL ELSE i * 2 END AS n,
+       [i, i + 1, NULL] AS l,
+       {'a': i, 'b': i::VARCHAR} AS st,
+       i::DOUBLE / 7 AS d,
+       (i % 2 = 0) AS b,
+       md5(i::VARCHAR)::BLOB AS bl
+FROM range(100000) t(i);
+
+foreach compression zstd lz4
+
+statement ok
+COPY various TO '__TEST_DIR__/various_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}', ROW_GROUP_SIZE 4096);
+
+query I
+SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/various_${compression}.arrows'));
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT * FROM read_arrow('__TEST_DIR__/various_${compression}.arrows') EXCEPT ALL SELECT * FROM various);
+----
+0
+
+# Projection pushdown over a compressed file
+query II
+SELECT sum(i), count(s) FROM read_arrow('__TEST_DIR__/various_${compression}.arrows');
+----
+4999950000	100000
+
+# Buffers that grow when compressed are stored uncompressed within the compressed batch
+statement ok
+COPY (SELECT 42 AS i, 'x' AS s) TO '__TEST_DIR__/tiny_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}');
+
+query II
+FROM read_arrow('__TEST_DIR__/tiny_${compression}.arrows');
+----
+42	x
+
+# Empty result
+statement ok
+COPY (SELECT 42 AS i WHERE false) TO '__TEST_DIR__/empty_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}');
+
+query I
+SELECT count(*) FROM read_arrow('__TEST_DIR__/empty_${compression}.arrows');
+----
+0
+
+# Parallel (batched) writing uses a serializer per thread
+statement ok
+SET preserve_insertion_order = false;
+
+statement ok
+COPY various TO '__TEST_DIR__/various_parallel_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}', ROW_GROUP_SIZE 4096);
+
+query I
+SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/various_parallel_${compression}.arrows'));
+----
+0
+
+statement ok
+SET preserve_insertion_order = true;
+
+endloop

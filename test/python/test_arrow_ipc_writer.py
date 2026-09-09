@@ -1,3 +1,4 @@
+import os
 import pytest
 import pyarrow as pa
 import duckdb
@@ -113,6 +114,35 @@ class TestArrowIPCBufferWriter(object):
 
 
 class TestArrowIPCCompression(object):
+    @pytest.mark.parametrize("compression", ["zstd", "lz4"])
+    def test_duckdb_writes_pyarrow_reads(self, connection, compression, tmp_path):
+        create_table(connection)
+        path = str(tmp_path / f"test_{compression}.arrows")
+        connection.execute(f"COPY T TO '{path}' (FORMAT ARROWS, COMPRESSION '{compression}')")
+        with pa.OSFile(path, 'rb') as source, ipc.open_stream(source) as reader:
+            arrow_table = reader.read_all()
+        tables_match(connection.execute("FROM arrow_table").fetchall())
+
+    @pytest.mark.parametrize("compression", ["zstd", "lz4"])
+    def test_compressed_output_is_smaller(self, connection, compression, tmp_path):
+        source = "SELECT i, i::VARCHAR AS s, i % 7 AS m FROM range(100000) t(i)"
+        uncompressed = str(tmp_path / "uncompressed.arrows")
+        compressed = str(tmp_path / f"{compression}.arrows")
+        connection.execute(f"COPY ({source}) TO '{uncompressed}' (FORMAT ARROWS)")
+        connection.execute(f"COPY ({source}) TO '{compressed}' (FORMAT ARROWS, COMPRESSION '{compression}')")
+        assert os.path.getsize(compressed) < os.path.getsize(uncompressed)
+
+        # pyarrow sees the body compression the extension declared and can decode it
+        with pa.OSFile(compressed, 'rb') as f, ipc.open_stream(f) as reader:
+            arrow_table = reader.read_all()
+        assert connection.execute(
+            f"""
+            SELECT (SELECT count(*) FROM arrow_table),
+                   (SELECT count(*) FROM (({source}) EXCEPT ALL FROM arrow_table)),
+                   (SELECT count(*) FROM (FROM arrow_table EXCEPT ALL ({source})))
+            """
+        ).fetchone() == (100000, 0, 0)
+
     @pytest.mark.parametrize("compression", ["zstd", "lz4"])
     def test_pyarrow_writes_duckdb_reads(self, connection, compression, tmp_path):
         arrow_table = pa.table(

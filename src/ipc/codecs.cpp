@@ -1,59 +1,66 @@
 #include "ipc/codecs.hpp"
 
-#include <cinttypes>
-
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/exception/binder_exception.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "nanoarrow_errors.hpp"
-#include "zstd.h"
 
 namespace duckdb {
 namespace ext_nanoarrow {
 
-namespace {
-
-// Uses DuckDB's bundled zstd, whose C++ header cannot be used from nanoarrow's C sources
-ArrowErrorCode DuckDBDecompressZstd(struct ArrowBufferView src, uint8_t* dst,
-                                    int64_t dst_size, struct ArrowError* error) {
-  size_t code = duckdb_zstd::ZSTD_decompress((void*)dst, (size_t)dst_size, src.data.data,
-                                             src.size_bytes);
-  if (duckdb_zstd::ZSTD_isError(code)) {
-    ArrowErrorSet(error,
-                  "ZSTD_decompress([buffer with %" PRId64
-                  " bytes] -> [buffer with %" PRId64 " bytes]) failed with error '%s'",
-                  src.size_bytes, dst_size, duckdb_zstd::ZSTD_getErrorName(code));
-    return EIO;
+ArrowIpcCompressionType ParseArrowIpcCompressionType(const string& name) {
+  // nanoarrow knows the codecs by their canonical names; accept a few spellings that
+  // DuckDB users expect from other COPY formats on top of those
+  auto lname = StringUtil::Lower(name);
+  if (lname == "uncompressed") {
+    lname = "none";
+  } else if (lname == "lz4_frame") {
+    lname = "lz4";
   }
 
-  if (dst_size != static_cast<int64_t>(code)) {
-    ArrowErrorSet(error,
-                  "Expected decompressed size of %" PRId64 " bytes but got %" PRId64
-                  " bytes",
-                  dst_size, static_cast<int64_t>(code));
-    return EIO;
+  ArrowIpcCompressionType type;
+  ArrowError error{};
+  if (ArrowIpcCompressionTypeFromString(lname.c_str(), &type, &error) != NANOARROW_OK) {
+    throw BinderException(
+        "Unsupported compression type \"%s\" for Arrow IPC, expected one of "
+        "'uncompressed', 'zstd' or 'lz4'",
+        name);
   }
-
-  return NANOARROW_OK;
+  return type;
 }
 
-}  // namespace
-
-nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder() {
-  // A threaded decompressor could parallelize batches with many columns
-  nanoarrow::ipc::UniqueDecompressor decompressor;
-  NANOARROW_THROW_NOT_OK(ArrowIpcSerialDecompressor(decompressor.get()));
-  NANOARROW_THROW_NOT_OK(ArrowIpcSerialDecompressorSetFunction(
-      decompressor.get(), NANOARROW_IPC_COMPRESSION_TYPE_ZSTD, DuckDBDecompressZstd));
-  // nanoarrow's own LZ4 function is registered by the serial decompressor by default
-  if (ArrowIpcGetLZ4DecompressionFunction() == nullptr) {
-    throw InternalException("nanoarrow was built without LZ4 support");
+void ValidateArrowIpcCompressionLevel(ArrowIpcCompressionType type, int64_t level) {
+  if (type == NANOARROW_IPC_COMPRESSION_TYPE_NONE) {
+    throw BinderException(
+        "COMPRESSION_LEVEL requires COMPRESSION to be set to 'zstd' or 'lz4'");
   }
 
+  // The encoder rejects out-of-range levels too, but only once the writer is created;
+  // checking here reports the problem while binding the COPY statement
+  int min_level;
+  int max_level;
+  NANOARROW_THROW_NOT_OK(ArrowIpcGetCompressionLevelRange(type, &min_level, &max_level));
+  if (level < min_level || level > max_level) {
+    throw BinderException("Compression level for %s must be between %d and %d",
+                          ArrowIpcCompressionTypeToString(type), min_level, max_level);
+  }
+}
+
+nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder() {
+  // The decoder creates nanoarrow's serial decompressor on first use. A threaded
+  // decompressor could parallelize batches with many columns.
   nanoarrow::ipc::UniqueDecoder decoder;
   NANOARROW_THROW_NOT_OK(ArrowIpcDecoderInit(decoder.get()));
-  // The decoder takes ownership of the decompressor
-  NANOARROW_THROW_NOT_OK(
-      ArrowIpcDecoderSetDecompressor(decoder.get(), decompressor.get()));
   return decoder;
+}
+
+void SetArrowIpcEncoderCompression(ArrowIpcEncoder& encoder,
+                                   const ArrowIpcCompressionOptions& options) {
+  // Likewise the encoder creates nanoarrow's serial compressor on first use
+  ArrowError error{};
+  THROW_NOT_OK(InternalException, &error,
+               ArrowIpcEncoderSetCompression(&encoder, options.type,
+                                             static_cast<int>(options.level), &error));
 }
 
 }  // namespace ext_nanoarrow

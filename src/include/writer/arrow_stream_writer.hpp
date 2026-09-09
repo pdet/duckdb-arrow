@@ -17,7 +17,8 @@ struct ArrowStreamWriter {
   ArrowStreamWriter(ClientContext& context, FileSystem& fs, const string& file_path,
                     const vector<LogicalType>& logical_types,
                     const vector<string>& column_names,
-                    const vector<pair<string, string>>& metadata);
+                    const vector<pair<string, string>>& metadata,
+                    const ArrowIpcCompressionOptions& compression);
 
   void InitSchema(const vector<LogicalType>& logical_types,
                   const vector<string>& column_names,
@@ -42,6 +43,7 @@ struct ArrowStreamWriter {
  private:
   ClientProperties options;
   Allocator& allocator;
+  ArrowIpcCompressionOptions compression;
   ColumnDataCollectionSerializer serializer;
   string file_name;
   vector<LogicalType> logical_types;

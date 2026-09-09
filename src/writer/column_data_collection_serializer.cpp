@@ -36,9 +36,10 @@ inline void InitArrowDuckBuffer(ArrowBuffer* buffer, Allocator& duck_allocator) 
   buffer->allocator.private_data = &duck_allocator;
 }
 
-ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(ClientProperties options,
-                                                               Allocator& allocator)
-    : options(std::move(options)), allocator(allocator) {}
+ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(
+    ClientProperties options, Allocator& allocator,
+    ArrowIpcCompressionOptions compression)
+    : options(std::move(options)), allocator(allocator), compression(compression) {}
 
 void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema_p,
                                           const vector<LogicalType>& logical_types) {
@@ -51,6 +52,7 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema_p,
   InitArrowDuckBuffer(header.get(), allocator);
   InitArrowDuckBuffer(body.get(), allocator);
   NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
+  SetArrowIpcEncoderCompression(*encoder.get(), compression);
   THROW_NOT_OK(InternalException, &error,
                ArrowArrayViewInitFromSchema(chunk_view.get(), schema_p, &error));
 

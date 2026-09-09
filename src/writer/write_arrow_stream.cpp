@@ -36,6 +36,7 @@ struct ArrowWriteBindData : public TableFunctionData {
   optional_idx row_groups_per_file;
   static constexpr const idx_t BYTES_PER_ROW = 1024;
   idx_t row_group_size_bytes{};
+  ArrowIpcCompressionOptions compression;
 };
 
 struct ArrowWriteGlobalState : public GlobalFunctionData {
@@ -103,7 +104,19 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
           bind_data->kv_metadata.emplace_back(key, value.ToString());
         }
       }
+    } else if (loption == "compression") {
+      bind_data->compression.type =
+          ParseArrowIpcCompressionType(option.second[0].ToString());
+    } else if (loption == "compression_level") {
+      bind_data->compression.level = option.second[0].GetValue<int64_t>();
+      bind_data->compression.level_set = true;
     }
+  }
+
+  if (bind_data->compression.level_set) {
+    // Validated after the loop since the options can be given in any order
+    ValidateArrowIpcCompressionLevel(bind_data->compression.type,
+                                     bind_data->compression.level);
   }
 
   if (row_group_size_bytes_set) {
@@ -132,9 +145,9 @@ unique_ptr<GlobalFunctionData> ArrowWriteInitializeGlobal(ClientContext& context
   auto& arrow_bind = bind_data.Cast<ArrowWriteBindData>();
 
   auto& fs = FileSystem::GetFileSystem(context);
-  global_state->writer =
-      make_uniq<ArrowStreamWriter>(context, fs, file_path, arrow_bind.sql_types,
-                                   arrow_bind.column_names, arrow_bind.kv_metadata);
+  global_state->writer = make_uniq<ArrowStreamWriter>(
+      context, fs, file_path, arrow_bind.sql_types, arrow_bind.column_names,
+      arrow_bind.kv_metadata, arrow_bind.compression);
   global_state->writer->WriteSchema();
   return std::move(global_state);
 }
