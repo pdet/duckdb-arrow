@@ -13,15 +13,23 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 
+//! Key/value metadata for one field of the written schema
+struct ArrowFieldMetadata {
+  idx_t column_index;
+  vector<pair<string, string>> metadata;
+};
+
 struct ArrowStreamWriter {
   ArrowStreamWriter(ClientContext& context, FileSystem& fs, const string& file_path,
                     const vector<LogicalType>& logical_types,
                     const vector<string>& column_names,
-                    const vector<pair<string, string>>& metadata);
+                    const vector<pair<string, string>>& metadata,
+                    const vector<ArrowFieldMetadata>& field_metadata);
 
   void InitSchema(const vector<LogicalType>& logical_types,
                   const vector<string>& column_names,
-                  const vector<pair<string, string>>& metadata);
+                  const vector<pair<string, string>>& metadata,
+                  const vector<ArrowFieldMetadata>& field_metadata);
 
   void InitOutputFile(FileSystem& fs, const string& file_path);
 

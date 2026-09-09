@@ -110,3 +110,22 @@ class TestArrowIPCBufferWriter(object):
 
         result_table = pa.Table.from_batches(batches, schema=stream_reader.schema)
         assert result_table.column("priority").to_pylist() == ["low", "high", "high", "low"]
+
+
+class TestArrowIPCFieldMetadata(object):
+    def test_field_metadata(self, connection, tmp_path):
+        path = str(tmp_path / "field_metadata.arrows")
+        connection.execute("SET arrow_lossless_conversion = true")
+        connection.execute(
+            f"""COPY (SELECT 1 AS id, 'foo' AS label, gen_random_uuid() AS uid) TO '{path}'
+            (FORMAT ARROWS, KV_METADATA {{'file_owner': 'test_suite'}},
+             FIELD_METADATA {{'id': {{'measurement_unit': 'row_count'}}, 'uid': {{'role': 'key'}}}})"""
+        )
+        with pa.OSFile(path, 'rb') as f:
+            schema = ipc.open_stream(f).schema
+        assert schema.metadata == {b'file_owner': b'test_suite'}
+        assert schema.field('id').metadata == {b'measurement_unit': b'row_count'}
+        assert schema.field('label').metadata is None
+        # The extension type DuckDB declares on the field survives the merge
+        assert schema.field('uid').type.extension_name == 'arrow.uuid'
+        assert schema.field('uid').metadata == {b'role': b'key'}

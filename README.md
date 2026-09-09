@@ -70,6 +70,7 @@ The Copy function of the Copy To Arrow File operation accepts the following para
 * `row_group_size_bytes`: The size of row groups in bytes.
 * `row_groups_per_file`: The maximum number of row groups per file. If this option is set, multiple files can be generated in a single `COPY` call. This means the specified path will create a directory, and the `row_group_size` parameter will also be used to determine the partition sizes.
 * `kv_metadata`: Key-value metadata to be added to the file schema.
+* `field_metadata`: Key-value metadata to be added to individual fields of the file schema, as a struct of column name to struct of metadata, e.g. `FIELD_METADATA {'id': {'unit': 'count'}}`. The keys are merged with the metadata DuckDB attaches to the field and replace it on conflict. Values of both options must be valid UTF-8.
 
 If `row_group_size_bytes` and either `chunk_size` or `row_group_size` are used, the row groups will be defined by the smallest of these parameters.
 
