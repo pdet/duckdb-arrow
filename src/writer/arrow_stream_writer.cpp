@@ -10,7 +10,6 @@ ArrowStreamWriter::ArrowStreamWriter(ClientContext& context, FileSystem& fs,
                                      const vector<pair<string, string>>& metadata)
     : options(context.GetClientProperties()),
       allocator(BufferAllocator::Get(context)),
-      serializer(options, allocator),
       file_name(file_path),
       logical_types(logical_types) {
   InitSchema(logical_types, column_names, metadata);
@@ -42,8 +41,6 @@ void ArrowStreamWriter::InitSchema(const vector<LogicalType>& logical_types,
     NANOARROW_THROW_NOT_OK(ArrowSchemaSetMetadata(
         schema.get(), reinterpret_cast<char*>(metadata_packed->data)));
   }
-
-  serializer.Init(schema.get(), logical_types);
 }
 
 void ArrowStreamWriter::InitOutputFile(FileSystem& fs, const string& file_path) {
@@ -53,37 +50,40 @@ void ArrowStreamWriter::InitOutputFile(FileSystem& fs, const string& file_path) 
 }
 
 void ArrowStreamWriter::WriteSchema() {
-  serializer.SerializeSchema();
-  serializer.Flush(*writer);
+  auto serializer = NewSerializer();
+  serializer->SerializeSchema();
+  lock_guard<mutex> guard(lock);
+  serializer->Flush(*writer);
 }
 
-unique_ptr<ColumnDataCollectionSerializer> ArrowStreamWriter::NewSerializer() {
+unique_ptr<ColumnDataCollectionSerializer> ArrowStreamWriter::NewSerializer() const {
   auto serializer = make_uniq<ColumnDataCollectionSerializer>(options, allocator);
   serializer->Init(schema.get(), logical_types);
   return serializer;
 }
 
-void ArrowStreamWriter::Flush(ColumnDataCollection& buffer) {
-  serializer.Serialize(buffer);
-  buffer.Reset();
-  serializer.Flush(*writer);
-  ++row_group_count;
-}
-
 void ArrowStreamWriter::Flush(ColumnDataCollectionSerializer& serializer) {
+  lock_guard<mutex> guard(lock);
   serializer.Flush(*writer);
   ++row_group_count;
 }
 
-void ArrowStreamWriter::Finalize() const {
+void ArrowStreamWriter::Finalize() {
   uint8_t end_of_stream[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
+  lock_guard<mutex> guard(lock);
   writer->WriteData(end_of_stream, sizeof(end_of_stream));
   writer->Close();
 }
 
-idx_t ArrowStreamWriter::NumberOfRowGroups() const { return row_group_count; }
+idx_t ArrowStreamWriter::NumberOfRowGroups() const {
+  lock_guard<mutex> guard(lock);
+  return row_group_count;
+}
 
-idx_t ArrowStreamWriter::FileSize() const { return writer->GetTotalWritten(); }
+idx_t ArrowStreamWriter::FileSize() const {
+  lock_guard<mutex> guard(lock);
+  return writer->GetTotalWritten();
+}
 
 }  // namespace ext_nanoarrow
 }  // namespace duckdb

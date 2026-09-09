@@ -7,12 +7,14 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
+#include "duckdb/common/mutex.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "writer/column_data_collection_serializer.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
 
+//! Writes one Arrow IPC stream that several threads may append to at the same time
 struct ArrowStreamWriter {
   ArrowStreamWriter(ClientContext& context, FileSystem& fs, const string& file_path,
                     const vector<LogicalType>& logical_types,
@@ -27,13 +29,11 @@ struct ArrowStreamWriter {
 
   void WriteSchema();
 
-  unique_ptr<ColumnDataCollectionSerializer> NewSerializer();
-
-  void Flush(ColumnDataCollection& buffer);
+  unique_ptr<ColumnDataCollectionSerializer> NewSerializer() const;
 
   void Flush(ColumnDataCollectionSerializer& serializer);
 
-  void Finalize() const;
+  void Finalize();
 
   idx_t NumberOfRowGroups() const;
 
@@ -42,12 +42,13 @@ struct ArrowStreamWriter {
  private:
   ClientProperties options;
   Allocator& allocator;
-  ColumnDataCollectionSerializer serializer;
   string file_name;
   vector<LogicalType> logical_types;
+  nanoarrow::UniqueSchema schema;
+  //! Guards writer and row_group_count
+  mutable mutex lock;
   unique_ptr<BufferedFileWriter> writer;
   idx_t row_group_count{0};
-  nanoarrow::UniqueSchema schema;
 };
 
 }  // namespace ext_nanoarrow

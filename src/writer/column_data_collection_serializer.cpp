@@ -47,14 +47,14 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema_p,
   encoder.reset();
   chunk_view.reset();
   chunk_arrow.reset();
+  schema.reset();
 
   InitArrowDuckBuffer(header.get(), allocator);
   InitArrowDuckBuffer(body.get(), allocator);
   NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
+  NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(schema_p, schema.get()));
   THROW_NOT_OK(InternalException, &error,
-               ArrowArrayViewInitFromSchema(chunk_view.get(), schema_p, &error));
-
-  schema = schema_p;
+               ArrowArrayViewInitFromSchema(chunk_view.get(), schema.get(), &error));
 
   extension_types =
       ArrowTypeExtensionData::GetExtensionTypes(*options.client_context, logical_types);
@@ -64,7 +64,7 @@ void ColumnDataCollectionSerializer::SerializeSchema() {
   header->size_bytes = 0;
   body->size_bytes = 0;
   THROW_NOT_OK(InternalException, &error,
-               ArrowIpcEncoderEncodeSchema(encoder.get(), schema, &error));
+               ArrowIpcEncoderEncodeSchema(encoder.get(), schema.get(), &error));
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
 }

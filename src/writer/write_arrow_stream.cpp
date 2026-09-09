@@ -48,8 +48,20 @@ struct ArrowWriteLocalState : public LocalFunctionData {
     buffer.InitializeAppend(append_state);
   }
 
+  // Encodes the buffered rows on this thread and appends them to the shared file
+  void Flush(ArrowStreamWriter& writer) {
+    if (!serializer) {
+      serializer = writer.NewSerializer();
+    }
+    if (serializer->Serialize(buffer) > 0) {
+      writer.Flush(*serializer);
+    }
+    buffer.Reset();
+  }
+
   ColumnDataCollection buffer;
   ColumnDataAppendState append_state;
+  unique_ptr<ColumnDataCollectionSerializer> serializer;
 };
 
 unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
@@ -154,7 +166,7 @@ void ArrowWriteSink(ExecutionContext& context, FunctionData& bind_data_p,
     // if the chunk collection exceeds a certain size (rows/bytes) we flush it to the
     // Arrow file
     local_state.append_state.current_chunk_state.handles.clear();
-    global_state.writer->Flush(local_state.buffer);
+    local_state.Flush(*global_state.writer);
     local_state.buffer.InitializeAppend(local_state.append_state);
   }
 }
@@ -164,7 +176,7 @@ void ArrowWriteCombine(ExecutionContext& context, FunctionData& bind_data,
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
   auto& local_state = lstate.Cast<ArrowWriteLocalState>();
   // flush any data left in the local state to the file
-  global_state.writer->Flush(local_state.buffer);
+  local_state.Flush(*global_state.writer);
 }
 
 void ArrowWriteFinalize(ClientContext& context, FunctionData& bind_data,
