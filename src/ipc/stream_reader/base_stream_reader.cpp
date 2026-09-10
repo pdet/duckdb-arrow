@@ -1,53 +1,9 @@
 #include "ipc/stream_reader/base_stream_reader.hpp"
 #include <cinttypes>
 #include <iostream>
-#include "zstd.h"
 
 namespace duckdb {
 namespace ext_nanoarrow {
-
-// A version of ArrowDecompressZstd that uses DuckDB's C++ name-specified
-// zstd.h header that doesn't work with a C compiler
-static ArrowErrorCode DuckDBDecompressZstd(struct ArrowBufferView src, uint8_t* dst,
-                                           int64_t dst_size, struct ArrowError* error) {
-  size_t code = duckdb_zstd::ZSTD_decompress((void*)dst, (size_t)dst_size, src.data.data,
-                                             src.size_bytes);
-  if (duckdb_zstd::ZSTD_isError(code)) {
-    ArrowErrorSet(error,
-                  "ZSTD_decompress([buffer with %" PRId64
-                  " bytes] -> [buffer with %" PRId64 " bytes]) failed with error '%s'",
-                  src.size_bytes, dst_size, duckdb_zstd::ZSTD_getErrorName(code));
-    return EIO;
-  }
-
-  if (dst_size != static_cast<int64_t>(code)) {
-    ArrowErrorSet(error,
-                  "Expected decompressed size of %" PRId64 " bytes but got %" PRId64
-                  " bytes",
-                  dst_size, static_cast<int64_t>(code));
-    return EIO;
-  }
-
-  return NANOARROW_OK;
-}
-
-// Create an ArrowIpcDecoder() with the appropriate decompressor set.
-// We could also define a decompressor that uses threads to parellelize
-// decompression for batches with many columns.
-nanoarrow::ipc::UniqueDecoder IPCStreamReader::NewDuckDBArrowDecoder() {
-  nanoarrow::ipc::UniqueDecompressor decompressor;
-  NANOARROW_THROW_NOT_OK(ArrowIpcSerialDecompressor(decompressor.get()));
-  NANOARROW_THROW_NOT_OK(ArrowIpcSerialDecompressorSetFunction(
-      decompressor.get(), NANOARROW_IPC_COMPRESSION_TYPE_ZSTD, DuckDBDecompressZstd));
-
-  nanoarrow::ipc::UniqueDecoder decoder;
-  NANOARROW_THROW_NOT_OK(ArrowIpcDecoderInit(decoder.get()));
-  NANOARROW_THROW_NOT_OK(
-      ArrowIpcDecoderSetDecompressor(decoder.get(), decompressor.get()));
-  // Bug in nanoarrow!
-  decompressor->release = nullptr;
-  return decoder;
-}
 
 const ArrowSchema* IPCStreamReader::GetBaseSchema() {
   if (base_schema->release) {
@@ -60,15 +16,22 @@ const ArrowSchema* IPCStreamReader::GetBaseSchema() {
     throw IOException("This stream uses unsupported feature DICTIONARY_REPLACEMENT");
   }
 
-  // Decode the schema
+  // Decode the schema and retain its dictionary encoding information.
+  nanoarrow::ipc::UniqueDictionaryEncodings dictionary_encodings;
   THROW_NOT_OK(IOException, &error,
-               ArrowIpcDecoderDecodeSchema(decoder.get(), base_schema.get(), &error));
+               ArrowIpcDecoderDecodeSchemaWithDictionaries(
+                   decoder.get(), base_schema.get(), dictionary_encodings.get(), &error));
+
+  THROW_NOT_OK(
+      IOException, &error,
+      ArrowIpcDictionariesInit(dictionaries.get(), dictionary_encodings.get(), &error));
 
   // Set up the decoder to decode batches
   THROW_NOT_OK(InternalException, &error,
                ArrowIpcDecoderSetEndianness(decoder.get(), decoder->endianness));
   THROW_NOT_OK(InternalException, &error,
-               ArrowIpcDecoderSetSchema(decoder.get(), base_schema.get(), &error));
+               ArrowIpcDecoderSetSchemaWithDictionaries(
+                   decoder.get(), base_schema.get(), dictionary_encodings.get(), &error));
 
   return base_schema.get();
 }
@@ -84,21 +47,37 @@ const ArrowSchema* IPCStreamReader::GetOutputSchema() {
 }
 
 bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
-  // When nanoarrow supports dictionary batches, we'd accept either a
-  // RecordBatch or DictionaryBatch message, recording the dictionary batch
-  // (or possibly ignoring it if it is for a field that we don't care about),
-  // but looping until we end up with a RecordBatch in the decoder.
-  ArrowIpcMessageType message_type =
-      ReadNextMessage({NANOARROW_IPC_MESSAGE_TYPE_RECORD_BATCH});
-  if (message_type == NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED) {
-    out->release = nullptr;
-    return false;
+  const bool thread_safe_shared = ArrowSharedBufferIsThreadSafe();
+  while (true) {
+    ArrowIpcMessageType message_type =
+        ReadNextMessage({NANOARROW_IPC_MESSAGE_TYPE_RECORD_BATCH,
+                         NANOARROW_IPC_MESSAGE_TYPE_DICTIONARY_BATCH});
+    if (message_type == NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED) {
+      out->release = nullptr;
+      return false;
+    }
+
+    if (message_type == NANOARROW_IPC_MESSAGE_TYPE_RECORD_BATCH) {
+      break;
+    }
+
+    struct ArrowBufferView body_view = AllocatedDataView(cur_ptr, cur_size);
+    nanoarrow::UniqueBuffer body_shared = GetUniqueBuffer();
+    if (thread_safe_shared) {
+      nanoarrow::UniqueBuffer shared;
+      NANOARROW_THROW_NOT_OK(ArrowSharedBufferInit(shared.get(), body_shared.get()));
+      THROW_NOT_OK(InternalException, &error,
+                   ArrowIpcDecoderDecodeDictionaryFromShared(
+                       decoder.get(), shared.get(), NANOARROW_VALIDATION_LEVEL_FULL,
+                       dictionaries.get(), &error));
+    } else {
+      THROW_NOT_OK(InternalException, &error,
+                   ArrowIpcDecoderDecodeDictionary(decoder.get(), body_view,
+                                                   NANOARROW_VALIDATION_LEVEL_FULL,
+                                                   dictionaries.get(), &error));
+    }
   }
 
-  // Use the ArrowSharedBuffer if we have thread safety (i.e., if this was
-  // compiled with a compiler that supports C11 atomics, i.e., not gcc 4.8 or
-  // MSVC)
-  bool thread_safe_shared = ArrowSharedBufferIsThreadSafe();
   struct ArrowBufferView body_view = AllocatedDataView(cur_ptr, cur_size);
   nanoarrow::UniqueBuffer body_shared = GetUniqueBuffer();
   nanoarrow::UniqueBuffer shared;
@@ -111,17 +90,19 @@ bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
 
     if (thread_safe_shared) {
       for (int64_t i = 0; i < array->n_children; i++) {
-        THROW_NOT_OK(InternalException, &error,
-                     ArrowIpcDecoderDecodeArrayFromShared(
-                         decoder.get(), shared.get(), projected_fields[i],
-                         array->children[i], NANOARROW_VALIDATION_LEVEL_FULL, &error));
+        THROW_NOT_OK(
+            InternalException, &error,
+            ArrowIpcDecoderDecodeArrayFromSharedWithDictionaries(
+                decoder.get(), shared.get(), projected_fields[i], dictionaries.get(),
+                array->children[i], NANOARROW_VALIDATION_LEVEL_FULL, &error));
       }
     } else {
       for (int64_t i = 0; i < array->n_children; i++) {
-        THROW_NOT_OK(InternalException, &error,
-                     ArrowIpcDecoderDecodeArray(decoder.get(), body_view,
-                                                projected_fields[i], array->children[i],
-                                                NANOARROW_VALIDATION_LEVEL_FULL, &error));
+        THROW_NOT_OK(
+            InternalException, &error,
+            ArrowIpcDecoderDecodeArrayWithDictionaries(
+                decoder.get(), body_view, projected_fields[i], dictionaries.get(),
+                array->children[i], NANOARROW_VALIDATION_LEVEL_FULL, &error));
       }
     }
 
@@ -129,14 +110,15 @@ bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
     array->length = array->children[0]->length;
     array->null_count = 0;
   } else if (thread_safe_shared) {
-    THROW_NOT_OK(
-        InternalException, &error,
-        ArrowIpcDecoderDecodeArrayFromShared(decoder.get(), shared.get(), -1, array.get(),
-                                             NANOARROW_VALIDATION_LEVEL_FULL, &error));
+    THROW_NOT_OK(InternalException, &error,
+                 ArrowIpcDecoderDecodeArrayFromSharedWithDictionaries(
+                     decoder.get(), shared.get(), -1, dictionaries.get(), array.get(),
+                     NANOARROW_VALIDATION_LEVEL_FULL, &error));
   } else {
     THROW_NOT_OK(InternalException, &error,
-                 ArrowIpcDecoderDecodeArray(decoder.get(), body_view, -1, array.get(),
-                                            NANOARROW_VALIDATION_LEVEL_FULL, &error));
+                 ArrowIpcDecoderDecodeArrayWithDictionaries(
+                     decoder.get(), body_view, -1, dictionaries.get(), array.get(),
+                     NANOARROW_VALIDATION_LEVEL_FULL, &error));
   }
 
   ArrowArrayMove(array.get(), out);

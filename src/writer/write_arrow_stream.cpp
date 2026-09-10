@@ -88,7 +88,7 @@ vector<pair<string, string>> ReadMetadataPairs(const Value& kv_struct,
 
 // Reads a STRUCT of column name to STRUCT of key/value pairs
 vector<ArrowFieldMetadata> ReadFieldMetadata(const Value& columns,
-                                             const vector<string>& names) {
+                                             vector<string>& names) {
   if (columns.IsNull() || columns.type().id() != LogicalTypeId::STRUCT) {
     throw BinderException("Expected field_metadata argument to be a STRUCT");
   }
@@ -96,14 +96,8 @@ vector<ArrowFieldMetadata> ReadFieldMetadata(const Value& columns,
   auto& values = StructValue::GetChildren(columns);
   for (idx_t i = 0; i < values.size(); i++) {
     auto column = StructType::GetChildName(columns.type(), i);
-    idx_t column_index = names.size();
-    for (idx_t j = 0; j < names.size(); j++) {
-      if (StringUtil::CIEquals(names[j], column)) {
-        column_index = j;
-        break;
-      }
-    }
-    if (column_index == names.size()) {
+    auto column_index = StringUtil::CIFind(names, column);
+    if (column_index == DConstants::INVALID_INDEX) {
       throw BinderException(
           "Column \"%s\" in field_metadata is not among the written columns", column);
     }
@@ -119,6 +113,8 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
                                         const vector<LogicalType>& sql_types) {
   D_ASSERT(names.size() == sql_types.size());
   auto bind_data = make_uniq<ArrowWriteBindData>();
+  bind_data->sql_types = sql_types;
+  bind_data->column_names = names;
   bool row_group_size_bytes_set = false;
 
   for (auto& option : input.info.options) {
@@ -150,7 +146,8 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
       bind_data->kv_metadata =
           ReadMetadataPairs(option.second[0], "kv_metadata argument");
     } else if (loption == "field_metadata") {
-      bind_data->field_metadata = ReadFieldMetadata(option.second[0], names);
+      bind_data->field_metadata =
+          ReadFieldMetadata(option.second[0], bind_data->column_names);
     }
   }
 
@@ -166,9 +163,6 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
     bind_data->row_group_size_bytes =
         bind_data->row_group_size * ArrowWriteBindData::BYTES_PER_ROW;
   }
-
-  bind_data->sql_types = sql_types;
-  bind_data->column_names = names;
 
   return std::move(bind_data);
 }

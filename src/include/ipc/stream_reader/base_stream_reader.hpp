@@ -15,6 +15,7 @@
 #include "duckdb/common/bswap.hpp"
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/serializer/buffered_file_reader.hpp"
+#include "ipc/codecs.hpp"
 #include "nanoarrow_errors.hpp"
 
 #include "table_function/scan_arrow_ipc.hpp"
@@ -72,7 +73,6 @@ class IPCStreamReader {
   }
 
   bool HasProjection() const;
-  static nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder();
 
   static ArrowBufferView AllocatedDataView(const_data_ptr_t data, int64_t size);
   static nanoarrow::UniqueBuffer AllocatedDataToOwningBuffer(
@@ -84,6 +84,7 @@ class IPCStreamReader {
 
   ArrowError error{};
   nanoarrow::ipc::UniqueDecoder decoder{};
+  nanoarrow::ipc::UniqueDictionaries dictionaries{};
   vector<int64_t> projected_fields;
   nanoarrow::UniqueSchema projected_schema;
   //! Schema without projection applied to it

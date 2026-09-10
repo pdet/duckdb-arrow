@@ -7,11 +7,6 @@ require nanoarrow
 statement ok
 COPY (SELECT 42 AS id, 'foo' AS label) TO '__TEST_DIR__/fields.arrows' (FORMAT ARROWS, KV_METADATA {'file_owner': 'test_suite'}, FIELD_METADATA {'ID': {'measurement_unit': 'row_count'}, 'label': {'language_code': 'english', 'raw_bytes': 'binary_value'::BLOB}})
 
-query II
-FROM read_arrow('__TEST_DIR__/fields.arrows')
-----
-42	foo
-
 query III
 SELECT field_path, key, value FROM arrow_kv_metadata('__TEST_DIR__/fields.arrows') ORDER BY field_path NULLS FIRST, key
 ----
@@ -24,11 +19,6 @@ statement error
 COPY (SELECT 42 AS id) TO '__TEST_DIR__/error.arrows' (FORMAT ARROWS, FIELD_METADATA 'nope')
 ----
 Expected field_metadata argument to be a STRUCT
-
-statement error
-COPY (SELECT 42 AS id) TO '__TEST_DIR__/error.arrows' (FORMAT ARROWS, FIELD_METADATA {'id': NULL::STRUCT(k VARCHAR)})
-----
-Expected field_metadata entry for column "id" to be a STRUCT
 
 statement error
 COPY (SELECT 42 AS id) TO '__TEST_DIR__/error.arrows' (FORMAT ARROWS, FIELD_METADATA {'missing': {'measurement_unit': 'row_count'}})

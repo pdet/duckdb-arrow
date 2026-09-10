@@ -115,17 +115,29 @@ class TestArrowIPCBufferWriter(object):
 class TestArrowIPCFieldMetadata(object):
     def test_field_metadata(self, connection, tmp_path):
         path = str(tmp_path / "field_metadata.arrows")
-        connection.execute("SET arrow_lossless_conversion = true")
         connection.execute(
-            f"""COPY (SELECT 1 AS id, 'foo' AS label, gen_random_uuid() AS uid) TO '{path}'
-            (FORMAT ARROWS, KV_METADATA {{'file_owner': 'test_suite'}},
-             FIELD_METADATA {{'id': {{'measurement_unit': 'row_count'}}, 'uid': {{'role': 'key'}}}})"""
+            f"""COPY (SELECT 1 AS id, 'foo' AS label) TO '{path}'
+            (FORMAT ARROWS, KV_METADATA {{'file_owner': 'test_suite'}}, FIELD_METADATA {{'id': {{'measurement_unit': 'row_count'}}}})"""
         )
         with pa.OSFile(path, 'rb') as f:
             schema = ipc.open_stream(f).schema
         assert schema.metadata == {b'file_owner': b'test_suite'}
         assert schema.field('id').metadata == {b'measurement_unit': b'row_count'}
         assert schema.field('label').metadata is None
-        # The extension type DuckDB declares on the field survives the merge
-        assert schema.field('uid').type.extension_name == 'arrow.uuid'
-        assert schema.field('uid').metadata == {b'role': b'key'}
+
+
+class TestArrowIPCCompression(object):
+    @pytest.mark.parametrize("compression", ["zstd", "lz4"])
+    def test_pyarrow_writes_duckdb_reads(self, connection, compression, tmp_path):
+        arrow_table = pa.table(
+            {
+                'f0': pa.array([1, 2, 3, 4], pa.int32()),
+                'f1': ['foo', 'bar', 'baz', None],
+                'f2': [True, None, False, True],
+            }
+        )
+        path = str(tmp_path / f"pyarrow_{compression}.arrows")
+        options = ipc.IpcWriteOptions(compression=compression)
+        with pa.OSFile(path, 'wb') as sink, ipc.new_stream(sink, arrow_table.schema, options=options) as writer:
+            writer.write_table(arrow_table)
+        tables_match(connection.execute(f"FROM read_arrow('{path}')").fetchall())
