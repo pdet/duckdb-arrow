@@ -14,7 +14,7 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 
-//! Writes one Arrow IPC stream that several threads may append to at the same time
+//! Arrow IPC stream shared by threads; encoding is per thread, the lock guards the file
 struct ArrowStreamWriter {
   ArrowStreamWriter(ClientContext& context, FileSystem& fs, const string& file_path,
                     const vector<LogicalType>& logical_types,
@@ -29,8 +29,10 @@ struct ArrowStreamWriter {
 
   void WriteSchema();
 
+  //! Creates a per-thread serializer (own ArrowIpcEncoder) that may outlive this writer
   unique_ptr<ColumnDataCollectionSerializer> NewSerializer() const;
 
+  //! Appends the encoded row group held by serializer to the file
   void Flush(ColumnDataCollectionSerializer& serializer);
 
   void Finalize();
@@ -45,7 +47,7 @@ struct ArrowStreamWriter {
   string file_name;
   vector<LogicalType> logical_types;
   nanoarrow::UniqueSchema schema;
-  //! Guards writer and row_group_count
+  //! Guards writer and row_group_count only; encoding happens outside of it
   mutable mutex lock;
   unique_ptr<BufferedFileWriter> writer;
   idx_t row_group_count{0};

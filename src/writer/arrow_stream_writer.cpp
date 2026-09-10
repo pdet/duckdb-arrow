@@ -51,7 +51,7 @@ void ArrowStreamWriter::InitOutputFile(FileSystem& fs, const string& file_path) 
 
 void ArrowStreamWriter::WriteSchema() {
   auto serializer = NewSerializer();
-  serializer->SerializeSchema();
+  serializer->SerializeSchema(schema.get());
   lock_guard<mutex> guard(lock);
   serializer->Flush(*writer);
 }

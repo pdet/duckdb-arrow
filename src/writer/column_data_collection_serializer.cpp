@@ -40,31 +40,30 @@ ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(ClientProperties 
                                                                Allocator& allocator)
     : options(std::move(options)), allocator(allocator) {}
 
-void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema_p,
+void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
                                           const vector<LogicalType>& logical_types) {
   header.reset();
   body.reset();
   encoder.reset();
   chunk_view.reset();
   chunk_arrow.reset();
-  schema.reset();
 
   InitArrowDuckBuffer(header.get(), allocator);
   InitArrowDuckBuffer(body.get(), allocator);
   NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
-  NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(schema_p, schema.get()));
+  // The view copies the type info it needs, so the schema need not outlive this call
   THROW_NOT_OK(InternalException, &error,
-               ArrowArrayViewInitFromSchema(chunk_view.get(), schema.get(), &error));
+               ArrowArrayViewInitFromSchema(chunk_view.get(), schema, &error));
 
   extension_types =
       ArrowTypeExtensionData::GetExtensionTypes(*options.client_context, logical_types);
 }
 
-void ColumnDataCollectionSerializer::SerializeSchema() {
+void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema) {
   header->size_bytes = 0;
   body->size_bytes = 0;
   THROW_NOT_OK(InternalException, &error,
-               ArrowIpcEncoderEncodeSchema(encoder.get(), schema.get(), &error));
+               ArrowIpcEncoderEncodeSchema(encoder.get(), schema, &error));
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
 }

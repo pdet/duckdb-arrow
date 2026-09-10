@@ -131,7 +131,7 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
   }
 
   if (sending_schema) {
-    local_state.serializer->SerializeSchema();
+    local_state.serializer->SerializeSchema(data.schema.get());
     arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
     output.data[1].SetValue(0, Value::BOOLEAN(true));
   } else {
