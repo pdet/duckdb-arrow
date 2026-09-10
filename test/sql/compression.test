@@ -75,8 +75,7 @@ SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__
 ----
 0
 
-# Levels change the output: a higher level yields a smaller file than a lower one,
-# the zstd default (3) beats level 1, and the lz4 default is level 0
+# Higher levels yield smaller files, the zstd default (3) beats level 1 and the lz4 default is 0
 statement ok
 COPY test TO '__TEST_DIR__/test_zstd_1.arrows' (FORMAT ARROWS, COMPRESSION 'zstd', COMPRESSION_LEVEL 1);
 
@@ -154,7 +153,7 @@ SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__
 ----
 0
 
-# Various types, nulls, nested types, high-entropy data and multiple record batches
+# Various types, nulls, nested types, high entropy data and multiple record batches
 statement ok
 CREATE TABLE various AS
 SELECT i,
@@ -220,5 +219,95 @@ SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow(
 
 statement ok
 SET preserve_insertion_order = true;
+
+endloop
+
+# Extreme levels of both codecs
+foreach level -131072 22
+
+statement ok
+COPY test TO '__TEST_DIR__/test_zstd_extreme.arrows' (FORMAT ARROWS, COMPRESSION 'zstd', COMPRESSION_LEVEL ${level});
+
+query I
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_zstd_extreme.arrows'));
+----
+0
+
+endloop
+
+statement ok
+COPY test TO '__TEST_DIR__/test_lz4_extreme.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', COMPRESSION_LEVEL -65536);
+
+query I
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_lz4_extreme.arrows'));
+----
+0
+
+# Every file of a multi file write declares the compression in its own schema message
+statement ok
+COPY various TO '__TEST_DIR__/various_files' (FORMAT ARROWS, COMPRESSION 'zstd', ROW_GROUP_SIZE 4096, ROW_GROUPS_PER_FILE 4);
+
+query I
+SELECT count(*) > 1 FROM glob('__TEST_DIR__/various_files/*.arrows');
+----
+true
+
+query I
+SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/various_files/*.arrows'));
+----
+0
+
+# Files with different codecs are read together, each with its own decoder
+query II
+SELECT count(*), sum(i) FROM read_arrow(['__TEST_DIR__/various_zstd.arrows', '__TEST_DIR__/various_lz4.arrows', '__TEST_DIR__/various_files/*.arrows']);
+----
+300000	14999850000
+
+# Metadata and the compression flag share the schema message
+statement ok
+COPY test TO '__TEST_DIR__/test_meta.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', KV_METADATA {'origin': 'duckdb'});
+
+query I
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_meta.arrows'));
+----
+0
+
+# COPY FROM goes through the same reader
+statement ok
+CREATE TABLE various_copy AS SELECT * FROM various WHERE false;
+
+statement ok
+COPY various_copy FROM '__TEST_DIR__/various_zstd.arrows';
+
+query I
+SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM various_copy);
+----
+0
+
+# Columns without buffers or with empty buffers
+statement ok
+COPY (SELECT NULL AS n, NULL::INT AS ni, '' AS e, []::INT[] AS l FROM range(1000)) TO '__TEST_DIR__/empty_buffers.arrows' (FORMAT ARROWS, COMPRESSION 'zstd');
+
+query IIIII
+SELECT count(*), count(n), count(ni), count(e), count(l) FROM read_arrow('__TEST_DIR__/empty_buffers.arrows');
+----
+1000	0	0	1000	1000
+
+# Arrow output settings change the buffer layout that gets compressed
+foreach setting arrow_output_list_view arrow_large_buffer_size
+
+statement ok
+SET ${setting} = true;
+
+statement ok
+COPY various TO '__TEST_DIR__/various_setting.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', ROW_GROUP_SIZE 4096);
+
+query I
+SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/various_setting.arrows'));
+----
+0
+
+statement ok
+SET ${setting} = false;
 
 endloop

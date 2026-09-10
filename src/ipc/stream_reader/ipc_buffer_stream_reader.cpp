@@ -34,7 +34,9 @@ ArrowIpcMessageType IPCBufferStreamReader::ReadNextMessage() {
 }
 
 data_ptr_t IPCBufferStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
-  D_ASSERT(size + cur_buffer.pos < cur_buffer.size);
+  if (cur_buffer.pos + size > static_cast<idx_t>(cur_buffer.size)) {
+    throw IOException("Arrow IPC buffer is truncated, it ends inside a message");
+  }
   data_ptr_t cur_ptr = cur_buffer.ptr + cur_buffer.pos;
   cur_buffer.pos += size;
   return cur_ptr;

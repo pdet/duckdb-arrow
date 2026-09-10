@@ -21,9 +21,9 @@ const ArrowSchema* IPCStreamReader::GetBaseSchema() {
                ArrowIpcDecoderDecodeSchema(decoder.get(), base_schema.get(), &error));
 
   // Set up the decoder to decode batches
-  THROW_NOT_OK(InternalException, &error,
+  THROW_NOT_OK(IOException, &error,
                ArrowIpcDecoderSetEndianness(decoder.get(), decoder->endianness));
-  THROW_NOT_OK(InternalException, &error,
+  THROW_NOT_OK(IOException, &error,
                ArrowIpcDecoderSetSchema(decoder.get(), base_schema.get(), &error));
 
   return base_schema.get();
@@ -67,14 +67,14 @@ bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
 
     if (thread_safe_shared) {
       for (int64_t i = 0; i < array->n_children; i++) {
-        THROW_NOT_OK(InternalException, &error,
+        THROW_NOT_OK(IOException, &error,
                      ArrowIpcDecoderDecodeArrayFromShared(
                          decoder.get(), shared.get(), projected_fields[i],
                          array->children[i], NANOARROW_VALIDATION_LEVEL_FULL, &error));
       }
     } else {
       for (int64_t i = 0; i < array->n_children; i++) {
-        THROW_NOT_OK(InternalException, &error,
+        THROW_NOT_OK(IOException, &error,
                      ArrowIpcDecoderDecodeArray(decoder.get(), body_view,
                                                 projected_fields[i], array->children[i],
                                                 NANOARROW_VALIDATION_LEVEL_FULL, &error));
@@ -86,11 +86,11 @@ bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
     array->null_count = 0;
   } else if (thread_safe_shared) {
     THROW_NOT_OK(
-        InternalException, &error,
+        IOException, &error,
         ArrowIpcDecoderDecodeArrayFromShared(decoder.get(), shared.get(), -1, array.get(),
                                              NANOARROW_VALIDATION_LEVEL_FULL, &error));
   } else {
-    THROW_NOT_OK(InternalException, &error,
+    THROW_NOT_OK(IOException, &error,
                  ArrowIpcDecoderDecodeArray(decoder.get(), body_view, -1, array.get(),
                                             NANOARROW_VALIDATION_LEVEL_FULL, &error));
   }

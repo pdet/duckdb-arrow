@@ -145,8 +145,7 @@ class TestArrowIPCCompression(object):
 
     @pytest.mark.parametrize("compression", ["zstd", "lz4"])
     def test_to_arrow_ipc_compressed_buffers(self, connection, compression):
-        # to_arrow_ipc takes the same options as COPY and pyarrow reads its
-        # compressed messages back, concatenated just like uncompressed ones
+        # to_arrow_ipc takes the same options as COPY and pyarrow reads the joined messages back
         source = "SELECT i, i::VARCHAR AS s, i % 7 AS m FROM range(100000) t(i)"
         buffers = connection.execute(f"FROM to_arrow_ipc(({source}))").fetchall()
         compressed = connection.execute(

@@ -8,9 +8,8 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 
-ArrowIpcCompressionType ParseArrowIpcCompressionType(const string& name) {
-  // nanoarrow knows the codecs by their canonical names; accept a few spellings that
-  // DuckDB users expect from other COPY formats on top of those
+static ArrowIpcCompressionType ParseArrowIpcCompressionType(const string& name) {
+  // Accept the spellings DuckDB users know from other COPY formats on top of nanoarrow's
   auto lname = StringUtil::Lower(name);
   if (lname == "uncompressed") {
     lname = "none";
@@ -29,14 +28,28 @@ ArrowIpcCompressionType ParseArrowIpcCompressionType(const string& name) {
   return type;
 }
 
-void ValidateArrowIpcCompressionLevel(ArrowIpcCompressionType type, int64_t level) {
+bool ArrowIpcCompressionOptions::TrySetOption(const string& name, const Value& value) {
+  if (StringUtil::CIEquals(name, "compression")) {
+    type = ParseArrowIpcCompressionType(value.ToString());
+  } else if (StringUtil::CIEquals(name, "compression_level")) {
+    level = value.GetValue<int64_t>();
+    level_set = true;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+void ArrowIpcCompressionOptions::Validate() const {
+  if (!level_set) {
+    return;
+  }
   if (type == NANOARROW_IPC_COMPRESSION_TYPE_NONE) {
     throw BinderException(
         "COMPRESSION_LEVEL requires COMPRESSION to be set to 'zstd' or 'lz4'");
   }
 
-  // The encoder rejects out-of-range levels too, but only once the writer is created;
-  // checking here reports the problem while binding the COPY statement
+  // nanoarrow checks the level too but only once the encoder exists, binding is earlier
   int min_level;
   int max_level;
   NANOARROW_THROW_NOT_OK(ArrowIpcGetCompressionLevelRange(type, &min_level, &max_level));
@@ -47,8 +60,7 @@ void ValidateArrowIpcCompressionLevel(ArrowIpcCompressionType type, int64_t leve
 }
 
 nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder() {
-  // The decoder creates nanoarrow's serial decompressor on first use. A threaded
-  // decompressor could parallelize batches with many columns.
+  // nanoarrow adds its serial decompressor on first use, a threaded one could be set here
   nanoarrow::ipc::UniqueDecoder decoder;
   NANOARROW_THROW_NOT_OK(ArrowIpcDecoderInit(decoder.get()));
   return decoder;
@@ -56,7 +68,7 @@ nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder() {
 
 void SetArrowIpcEncoderCompression(ArrowIpcEncoder& encoder,
                                    const ArrowIpcCompressionOptions& options) {
-  // Likewise the encoder creates nanoarrow's serial compressor on first use
+  // Installs nanoarrow's serial compressor, ArrowIpcEncoderSetCompressor takes others
   ArrowError error{};
   THROW_NOT_OK(InternalException, &error,
                ArrowIpcEncoderSetCompression(&encoder, options.type,

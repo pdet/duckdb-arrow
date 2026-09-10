@@ -65,7 +65,8 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema_p,
 void ColumnDataCollectionSerializer::SerializeSchema() {
   header->size_bytes = 0;
   body->size_bytes = 0;
-  THROW_NOT_OK(InternalException, &error,
+  // Fails for types nanoarrow cannot write yet, such as string views
+  THROW_NOT_OK(NotImplementedException, &error,
                ArrowIpcEncoderEncodeSchema(encoder.get(), schema, &error));
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));

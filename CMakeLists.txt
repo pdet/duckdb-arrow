@@ -6,21 +6,16 @@ set(TARGET_NAME nanoarrow)
 
 set(NANOARROW_IPC ON)
 set(NANOARROW_NAMESPACE "DuckDBExt${TARGET_NAME}")
-# nanoarrow main as of 2026-09-09: 0.9.0 plus IPC body compression in the encoder
-# (ArrowIpcEncoderSetCompression and friends, apache/arrow-nanoarrow#935). Move to a
-# release tag once one ships that API.
+# nanoarrow main with IPC body compression (#935), move to a release tag once one ships it
 fetchcontent_declare(nanoarrow
                      URL "https://github.com/apache/arrow-nanoarrow/archive/665794510011c07d4a6932b248608c2c02113796.zip"
                      URL_HASH SHA256=a81178c68929c74e97cff6b02f9a9f77fc656966ad7dbc4ae858cb45496d6b6f
 )
-# nanoarrow compresses and decompresses IPC bodies itself, using liblz4 and libzstd.
-# In CI both come from vcpkg (see vcpkg.json), otherwise system copies are found.
-# DuckDB's bundled zstd cannot be used: it is compiled as C++ inside a namespace, so
-# nanoarrow's C sources cannot link against it. The extension links both libraries
-# transitively through nanoarrow_ipc (needs CMake 3.24 or newer) and never includes
-# their headers itself.
+# nanoarrow compresses and decompresses itself with liblz4 and libzstd, from vcpkg in CI
 set(NANOARROW_IPC_WITH_ZSTD ON)
+# DuckDB's bundled zstd is namespaced C++ that nanoarrow's C sources cannot link against
 find_path(ZSTD_INCLUDE_DIR zstd.h REQUIRED)
+# nanoarrow looks lz4 up through pkgconfig unless these variables are set
 find_path(LZ4_INCLUDE_DIR lz4frame.h REQUIRED)
 find_library(LZ4_LIBRARY NAMES lz4 liblz4 REQUIRED)
 get_filename_component(LZ4_LIBRARY_DIR "${LZ4_LIBRARY}" DIRECTORY)
@@ -28,14 +23,12 @@ set(NANOARROW_IPC_WITH_LZ4 ON)
 set(LZ4_INCLUDE_DIRS "${LZ4_INCLUDE_DIR}")
 set(LZ4_LIBRARY_DIRS "${LZ4_LIBRARY_DIR}")
 set(LZ4_LIBRARIES "${LZ4_LIBRARY}")
+# Both libraries link into the extension transitively through nanoarrow_ipc (CMake 3.24)
 fetchcontent_makeavailable(nanoarrow)
-# DuckDB adds its own (namespaced, C++) zstd.h to the include path of every target in
-# the tree, nanoarrow's C sources included. Put the real libzstd header ahead of it:
-# BEFORE makes it the first include directory, and NO_SYSTEM_FROM_IMPORTED stops CMake
-# from turning it into -isystem (which is searched after every -I) because the
-# imported zstd target exports the same directory.
+# DuckDB puts its namespaced zstd.h on every target, nanoarrow must see the real one first
 foreach(nanoarrow_ipc_target nanoarrow_ipc_static nanoarrow_ipc_shared)
   if(TARGET ${nanoarrow_ipc_target})
+    # The imported zstd target exports the same directory, this keeps it out of isystem
     set_target_properties(${nanoarrow_ipc_target} PROPERTIES NO_SYSTEM_FROM_IMPORTED ON)
     target_include_directories(${nanoarrow_ipc_target} BEFORE
                                PRIVATE "${ZSTD_INCLUDE_DIR}")

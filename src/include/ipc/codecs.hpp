@@ -9,6 +9,7 @@
 #pragma once
 
 #include "duckdb/common/common.hpp"
+#include "duckdb/common/types/value.hpp"
 #include "nanoarrow/nanoarrow_ipc.hpp"
 
 namespace duckdb {
@@ -17,23 +18,20 @@ namespace ext_nanoarrow {
 //! How the bodies of RecordBatch messages are compressed when writing Arrow IPC
 struct ArrowIpcCompressionOptions {
   ArrowIpcCompressionType type = NANOARROW_IPC_COMPRESSION_TYPE_NONE;
-  //! Codec-specific compression level, passed to nanoarrow as-is
-  bool level_set = false;
+  //! Codec specific level passed to nanoarrow unchanged
   int64_t level = NANOARROW_IPC_COMPRESSION_LEVEL_DEFAULT;
+  bool level_set = false;
+
+  //! Applies a COMPRESSION or COMPRESSION_LEVEL option, returns false for any other name
+  bool TrySetOption(const string& name, const Value& value);
+  //! Throws a BinderException if the level does not fit the codec, call once all are set
+  void Validate() const;
 };
 
-//! Parses the value of the COMPRESSION copy option (case-insensitive): 'uncompressed',
-//! 'none', 'zstd', 'lz4' or 'lz4_frame'. Throws a BinderException for anything else.
-ArrowIpcCompressionType ParseArrowIpcCompressionType(const string& name);
-
-//! Throws a BinderException if level is out of range for the compression type
-void ValidateArrowIpcCompressionLevel(ArrowIpcCompressionType type, int64_t level);
-
-//! Creates an IPC decoder. nanoarrow decompresses zstd and lz4 RecordBatch bodies itself.
+//! Creates an IPC decoder, nanoarrow decompresses zstd and lz4 bodies itself
 nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder();
 
-//! Configures an IPC encoder to compress the RecordBatch bodies it encodes. Throws if
-//! this build of nanoarrow does not support the codec.
+//! Makes an IPC encoder compress bodies, throws if this nanoarrow build lacks the codec
 void SetArrowIpcEncoderCompression(ArrowIpcEncoder& encoder,
                                    const ArrowIpcCompressionOptions& options);
 

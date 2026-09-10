@@ -23,3 +23,26 @@ query I
 SELECT sum((test.time = written.time)::INTEGER) FROM test INNER JOIN written ON test.commit = written.commit;
 ----
 15487
+
+# String views cannot be written yet, the error must not be an internal one
+statement ok
+SET arrow_output_version = '1.5';
+
+statement ok
+SET produce_arrow_string_view = true;
+
+statement error
+COPY (SELECT 'abc' AS s) TO '__TEST_DIR__/string_view.arrows' (FORMAT ARROWS);
+----
+Not implemented Error
+
+statement error
+SELECT count(*) FROM to_arrow_ipc((SELECT 'abc' AS s));
+----
+Not implemented Error
+
+statement ok
+SET produce_arrow_string_view = false;
+
+statement ok
+RESET arrow_output_version;

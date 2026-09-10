@@ -5,7 +5,6 @@
 
 #include "duckdb/common/arrow/arrow_appender.hpp"
 #include "duckdb/common/exception/binder_exception.hpp"
-#include "duckdb/common/string_util.hpp"
 #include "duckdb/execution/physical_operator.hpp"
 #include "duckdb/function/function.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -62,22 +61,14 @@ unique_ptr<FunctionData> ToArrowIPCFunction::Bind(ClientContext& context,
                                                   vector<string>& names) {
   auto result = make_uniq<ToArrowIpcFunctionData>();
 
-  // Same options and validation as COPY ... (FORMAT ARROWS)
+  // The binder only lets the declared parameters through, all of them compression options
   for (auto& kv : input.named_parameters) {
     if (kv.second.IsNull()) {
       throw BinderException("Cannot use NULL as function argument");
     }
-    const auto loption = StringUtil::Lower(kv.first);
-    if (loption == "compression") {
-      result->compression.type = ParseArrowIpcCompressionType(kv.second.ToString());
-    } else if (loption == "compression_level") {
-      result->compression.level = kv.second.GetValue<int64_t>();
-      result->compression.level_set = true;
-    }
+    result->compression.TrySetOption(kv.first, kv.second);
   }
-  if (result->compression.level_set) {
-    ValidateArrowIpcCompressionLevel(result->compression.type, result->compression.level);
-  }
+  result->compression.Validate();
 
   // Set return schema
   return_types.emplace_back(LogicalType::BLOB);

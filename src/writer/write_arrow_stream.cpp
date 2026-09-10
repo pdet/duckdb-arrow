@@ -69,6 +69,9 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
                             StringUtil::Upper(loption));
     }
 
+    if (bind_data->compression.TrySetOption(loption, option.second[0])) {
+      continue;
+    }
     if (loption == "row_group_size" || loption == "chunk_size") {
       if (bind_data->row_group_size_set) {
         throw BinderException(
@@ -104,20 +107,10 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
           bind_data->kv_metadata.emplace_back(key, value.ToString());
         }
       }
-    } else if (loption == "compression") {
-      bind_data->compression.type =
-          ParseArrowIpcCompressionType(option.second[0].ToString());
-    } else if (loption == "compression_level") {
-      bind_data->compression.level = option.second[0].GetValue<int64_t>();
-      bind_data->compression.level_set = true;
     }
   }
-
-  if (bind_data->compression.level_set) {
-    // Validated after the loop since the options can be given in any order
-    ValidateArrowIpcCompressionLevel(bind_data->compression.type,
-                                     bind_data->compression.level);
-  }
+  // Checked after the loop since the options can be given in any order
+  bind_data->compression.Validate();
 
   if (row_group_size_bytes_set) {
     if (Settings::Get<PreserveInsertionOrderSetting>(context)) {
