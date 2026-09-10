@@ -73,15 +73,16 @@ vector<pair<string, string>> ReadMetadataPairs(const Value& kv_struct,
     if (value.IsNull()) {
       throw BinderException("Metadata value for key \"%s\" must not be NULL", key);
     }
-    if (value.type().id() == LogicalTypeId::BLOB) {
-      auto& bytes = StringValue::Get(value);
-      if (!Utf8Proc::IsValid(bytes.data(), bytes.size())) {
-        throw BinderException("Metadata value for key \"%s\" is not valid UTF-8", key);
-      }
-      result.emplace_back(key, bytes);
-    } else {
-      result.emplace_back(key, value.ToString());
+    auto bytes = value.type().id() == LogicalTypeId::BLOB ? StringValue::Get(value)
+                                                          : value.ToString();
+    if (!Utf8Proc::IsValid(bytes.data(), bytes.size())) {
+      throw BinderException("Metadata value for key \"%s\" is not valid UTF-8", key);
     }
+    if (bytes.find('\0') != string::npos) {
+      throw BinderException("Metadata value for key \"%s\" must not contain NUL bytes",
+                            key);
+    }
+    result.emplace_back(key, std::move(bytes));
   }
   return result;
 }

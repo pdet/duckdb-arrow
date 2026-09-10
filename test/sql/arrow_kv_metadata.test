@@ -28,3 +28,21 @@ SELECT field_path, key, value FROM arrow_kv_metadata('__TEST_DIR__/types.arrows'
 [s, h]	ARROW:extension:name	arrow.opaque
 [uid]	ARROW:extension:name	arrow.uuid
 [uid]	role	key
+
+# Dictionary value children keep the field path in the fixture made by scripts/generate_metadata_test_data.py
+query III
+SELECT field_path, key, value FROM arrow_kv_metadata('data/metadata_dictionary.arrows') WHERE field_path IS NOT NULL ORDER BY field_path, key
+----
+[encoded]	role	code
+[encoded, child]	unit	count
+[items, item]	unit	count
+[nested, encoded]	role	code
+[nested, encoded, child]	unit	count
+
+# Keys and values come back as raw bytes with invalid utf8 and repeated keys intact
+query II
+SELECT hex(key), hex(value) FROM arrow_kv_metadata('data/metadata_dictionary.arrows') WHERE field_path IS NULL ORDER BY key, value
+----
+726570656174	6F6E65
+726570656174	74776F
+FF	FE

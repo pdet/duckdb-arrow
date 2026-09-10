@@ -50,6 +50,10 @@ void CollectMetadata(const ArrowSchema* schema, vector<Value>& path,
     rows.push_back({field_path, string(key.data, key.size_bytes),
                     string(value.data, value.size_bytes)});
   }
+  // Dictionary values keep the path of the field so their children read as nested fields
+  if (schema->dictionary) {
+    CollectMetadata(schema->dictionary, path, rows);
+  }
   for (int64_t i = 0; i < schema->n_children; i++) {
     auto child = schema->children[i];
     string name = child->name ? child->name : "";
