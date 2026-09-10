@@ -31,6 +31,30 @@ SELECT count(*) FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/bad_body_lz4
 ----
 LZ4 frame
 
+# Validate the message length before allocating or reading metadata.
+statement ok
+COPY (SELECT unhex('FFFFFFFFFFFFFFFF')) TO '__TEST_DIR__/negative_length.arrows' (FORMAT BLOB);
+
+statement error
+FROM read_arrow('__TEST_DIR__/negative_length.arrows');
+----
+Expected message size > 0
+
+# An invalid FlatBuffer root offset must fail before decoding the schema.
+statement ok
+COPY (SELECT unhex('FFFFFFFF08000000F0FFFF7F00000000')) TO '__TEST_DIR__/bad_header.arrows' (FORMAT BLOB);
+
+statement error
+FROM read_arrow('__TEST_DIR__/bad_header.arrows');
+----
+Message flatbuffer verification failed
+
+# A batch without a body must not reuse the previous body, that silently duplicated rows
+statement error
+FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/zero_body.arrows');
+----
+body has size 0
+
 # The errors above leave the database usable
 query I
 SELECT 42;

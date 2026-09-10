@@ -12,7 +12,6 @@
 #include "nanoarrow/nanoarrow_ipc.hpp"
 
 #include "duckdb/common/allocator.hpp"
-#include "duckdb/common/bswap.hpp"
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/serializer/buffered_file_reader.hpp"
 #include "ipc/codecs.hpp"
@@ -62,7 +61,9 @@ class IPCStreamReader {
   //! Decode Message is composed of 3 steps
   ArrowIpcMessageType DecodeMessage();
   //! 1. We decode the message metadata, and return the message_header_size
-  idx_t DecodeMetadata() const;
+  idx_t DecodeMetadata();
+  //! Validate and decode a complete header, returning true for end of stream
+  bool DecodeHeaderBuffer(ArrowBufferView header);
   //! 2. We decode the message head, if message is finished we return true
   virtual bool DecodeHeader(idx_t message_header_size) {
     throw InternalException("IPCStreamReader::DecodeHead not implemented");
@@ -82,6 +83,8 @@ class IPCStreamReader {
 
   static int64_t CountFields(const ArrowSchema* schema);
 
+  //! Keeps unaligned input headers alive in aligned storage for the decoder
+  AllocatedData aligned_header;
   ArrowError error{};
   nanoarrow::ipc::UniqueDecoder decoder{};
   nanoarrow::ipc::UniqueDictionaries dictionaries{};

@@ -24,6 +24,20 @@ SELECT sum((test.time = written.time)::INTEGER) FROM test INNER JOIN written ON 
 ----
 15487
 
+# Dictionaries, nested ones too, are rejected until DictionaryBatch messages get written
+statement ok
+CREATE TYPE mood AS ENUM ('happy', 'sad');
+
+statement error
+COPY (SELECT 'happy'::mood AS m) TO '__TEST_DIR__/enum.arrows' (FORMAT ARROWS, COMPRESSION ZSTD);
+----
+Writing dictionary-encoded Arrow IPC is not supported
+
+statement error
+FROM to_arrow_ipc((SELECT {'m': 'happy'::mood}), compression := 'lz4');
+----
+Writing dictionary-encoded Arrow IPC is not supported
+
 # String views cannot be written yet, the error must not be an internal one
 statement ok
 SET arrow_output_version = '1.5';

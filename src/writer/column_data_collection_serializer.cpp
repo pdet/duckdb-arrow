@@ -46,11 +46,19 @@ ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(
 
 void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema_p,
                                           const vector<LogicalType>& logical_types) {
+  // Dictionaries need DictionaryBatch messages that this serializer never emits
+  nanoarrow::ipc::UniqueDictionaryEncodings dictionaries;
+  NANOARROW_THROW_NOT_OK(
+      ArrowIpcDictionaryEncodingsAppendSchema(dictionaries.get(), schema_p));
+  if (dictionaries->encodings.size_bytes != 0) {
+    throw NotImplementedException(
+        "Writing dictionary-encoded Arrow IPC is not supported");
+  }
+
   header.reset();
   body.reset();
   encoder.reset();
   chunk_view.reset();
-  chunk_arrow.reset();
 
   InitArrowDuckBuffer(header.get(), allocator);
   InitArrowDuckBuffer(body.get(), allocator);
@@ -90,9 +98,9 @@ idx_t ColumnDataCollectionSerializer::Serialize(ArrowArray& array) {
   return 1;
 }
 idx_t ColumnDataCollectionSerializer::Serialize(DataChunk& chunk) {
-  chunk_arrow.reset();
-  ArrowConverter::ToArrowArray(chunk, chunk_arrow.get(), options, extension_types);
-  return Serialize(*chunk_arrow.get());
+  nanoarrow::UniqueArray array;
+  ArrowConverter::ToArrowArray(chunk, array.get(), options, extension_types);
+  return Serialize(*array.get());
 }
 
 idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buffer) {
@@ -101,14 +109,13 @@ idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buff
   if (buffer.Count() == 0) {
     return 0;
   }
-  chunk_arrow.reset();
   ArrowAppender appender(buffer.Types(), buffer.Count(), options, extension_types);
   for (auto& chunk : buffer.Chunks()) {
     appender.Append(chunk, 0, chunk.size(), chunk.size());
   }
-  ArrowArray array = appender.Finalize();
-  ArrowArrayMove(&array, chunk_arrow.get());
-  return Serialize(*chunk_arrow.get());
+  ArrowArray finalized = appender.Finalize();
+  nanoarrow::UniqueArray array(&finalized);
+  return Serialize(*array.get());
 }
 
 void ColumnDataCollectionSerializer::Flush(BufferedFileWriter& writer) {

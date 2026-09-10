@@ -27,14 +27,14 @@ ArrowIpcMessageType IPCBufferStreamReader::ReadNextMessage() {
     cur_buffer.pos = 0;
     initialized = true;
   }
-  auto* message_prefix_ptr = reinterpret_cast<const ArrowIpcMessagePrefix*>(
-      ReadData(reinterpret_cast<data_ptr_t>(&message_prefix), sizeof(message_prefix)));
-  message_prefix = *message_prefix_ptr;
+  std::memcpy(&message_prefix, ReadData(nullptr, sizeof(message_prefix)),
+              sizeof(message_prefix));
   return DecodeMessage();
 }
 
 data_ptr_t IPCBufferStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
-  if (cur_buffer.pos + size > static_cast<idx_t>(cur_buffer.size)) {
+  if (cur_buffer.pos > static_cast<idx_t>(cur_buffer.size) ||
+      size > static_cast<idx_t>(cur_buffer.size) - cur_buffer.pos) {
     throw IOException("Arrow IPC buffer is truncated, it ends inside a message");
   }
   data_ptr_t cur_ptr = cur_buffer.ptr + cur_buffer.pos;
@@ -44,20 +44,14 @@ data_ptr_t IPCBufferStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
 
 bool IPCBufferStreamReader::DecodeHeader(idx_t message_header_size) {
   // Our Header must contain the message prefix
-  header.ptr =
-      ReadData(header.ptr, message_prefix.metadata_size) - sizeof(message_prefix);
+  header.ptr = ReadData(header.ptr, message_header_size - sizeof(message_prefix)) -
+               sizeof(message_prefix);
   header.size = message_header_size;
-  const ArrowErrorCode decode_header_status = ArrowIpcDecoderDecodeHeader(
-      decoder.get(), AllocatedDataView(header.ptr, header.size), &error);
-  if (decode_header_status == ENODATA) {
-    finished = true;
-    return true;
-  }
-  THROW_NOT_OK(IOException, &error, decode_header_status);
-  return false;
+  return DecodeHeaderBuffer(AllocatedDataView(header.ptr, header.size));
 }
 
 void IPCBufferStreamReader::DecodeBody() {
+  body = IPCBuffer{};
   if (decoder->body_size_bytes > 0) {
     body.ptr = ReadData(body.ptr, decoder->body_size_bytes);
     body.size = decoder->body_size_bytes;

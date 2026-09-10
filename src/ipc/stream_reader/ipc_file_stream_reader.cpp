@@ -53,22 +53,14 @@ bool IPCFileStreamReader::DecodeHeader(const idx_t message_header_size) {
   // an attempt to read a very large message_header_size can be cancelled. If this
   // is not the case, we might want to implement our own buffering.
   std::memcpy(message_header.get(), &message_prefix, sizeof(message_prefix));
-  ReadData(message_header.get() + sizeof(message_prefix), message_prefix.metadata_size);
+  ReadData(message_header.get() + sizeof(message_prefix),
+           message_header_size - sizeof(message_prefix));
 
-  ArrowErrorCode decode_header_status = ArrowIpcDecoderDecodeHeader(
-      decoder.get(),
-      AllocatedDataView(message_header.get(),
-                        static_cast<int64_t>(message_header.GetSize())),
-      &error);
-  if (decode_header_status == ENODATA) {
-    finished = true;
-    return true;
-  }
-  THROW_NOT_OK(IOException, &error, decode_header_status);
-  return false;
+  return DecodeHeaderBuffer(AllocatedDataView(message_header.get(), message_header_size));
 }
 
 void IPCFileStreamReader::DecodeBody() {
+  message_body.reset();
   if (decoder->body_size_bytes > 0) {
     EnsureInputStreamAligned();
     message_body =

@@ -29,6 +29,7 @@ class ColumnDataCollectionSerializer {
 
   void SerializeSchema();
 
+  //! Copies the array buffers, so the array only needs to live through this call
   idx_t Serialize(ArrowArray& array);
   idx_t Serialize(DataChunk& chunk);
 
@@ -48,7 +49,6 @@ class ColumnDataCollectionSerializer {
   unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>> extension_types;
   nanoarrow::ipc::UniqueEncoder encoder;
   nanoarrow::UniqueArrayView chunk_view;
-  nanoarrow::UniqueArray chunk_arrow;
   nanoarrow::UniqueBuffer header;
   nanoarrow::UniqueBuffer body;
   ArrowError error{};
