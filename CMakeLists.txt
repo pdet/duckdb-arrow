@@ -6,13 +6,12 @@ set(TARGET_NAME nanoarrow)
 
 set(NANOARROW_IPC ON)
 set(NANOARROW_NAMESPACE "DuckDBExt${TARGET_NAME}")
-# nanoarrow 0.9.0 plus the IPC body compression API for the encoder/writer
-# (ArrowIpcEncoderSetCompression and friends, pdet/arrow-nanoarrow branch
-# ipc-write-compression). Point this back at apache/arrow-nanoarrow once a release
-# ships that API.
-# TODO: add URL_HASH SHA256=<sha256 of the zip> once commit cf9d060 is pushed to the fork
+# nanoarrow main as of 2026-09-09: 0.9.0 plus IPC body compression in the encoder
+# (ArrowIpcEncoderSetCompression and friends, apache/arrow-nanoarrow#935). Move to a
+# release tag once one ships that API.
 fetchcontent_declare(nanoarrow
-                     URL "https://github.com/pdet/arrow-nanoarrow/archive/cf9d0604b7f15c6f455a712155c50d8b4a129292.zip"
+                     URL "https://github.com/apache/arrow-nanoarrow/archive/665794510011c07d4a6932b248608c2c02113796.zip"
+                     URL_HASH SHA256=a81178c68929c74e97cff6b02f9a9f77fc656966ad7dbc4ae858cb45496d6b6f
 )
 # nanoarrow compresses and decompresses IPC bodies itself, using liblz4 and libzstd.
 # In CI both come from vcpkg (see vcpkg.json), otherwise system copies are found.

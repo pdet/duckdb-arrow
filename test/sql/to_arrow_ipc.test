@@ -59,3 +59,66 @@ SELECT (SELECT count(*) FROM run_a) = (SELECT count(*) FROM run_b),
        (SELECT count(*) FROM (FROM run_a EXCEPT ALL FROM run_b))
 ----
 true	0
+
+# Record batch bodies can be compressed like COPY ... (FORMAT ARROWS) does, with the
+# same options. The schema message is never compressed, so only the data messages
+# shrink; the compressed stream has to stay smaller overall.
+statement ok
+CREATE TABLE compressible AS
+SELECT i, i::VARCHAR AS s, i % 7 AS m, [i, i + 1, NULL] AS l FROM range(100000) t(i);
+
+foreach compression zstd lz4
+
+query II
+SELECT count(*) FILTER (WHERE header), count(*) FILTER (WHERE NOT header) >= 1
+FROM to_arrow_ipc((FROM compressible), compression := '${compression}');
+----
+1	true
+
+query I
+SELECT (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible), compression := '${compression}'))
+     < (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible)));
+----
+true
+
+endloop
+
+# Levels and aliases, in either parameter order
+query I
+SELECT (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible), compression := 'zstd', compression_level := 19))
+     < (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible), compression_level := 1, compression := 'ZSTD'));
+----
+true
+
+query I
+SELECT (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible), compression := 'lz4_frame'))
+     = (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible), compression := 'lz4'));
+----
+true
+
+query I
+SELECT (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible), compression := 'uncompressed'))
+     = (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible)));
+----
+true
+
+# Option errors, reported while binding
+statement error
+FROM to_arrow_ipc((FROM compressible), compression := 'snappy');
+----
+Unsupported compression type "snappy"
+
+statement error
+FROM to_arrow_ipc((FROM compressible), compression_level := 3);
+----
+COMPRESSION_LEVEL requires COMPRESSION
+
+statement error
+FROM to_arrow_ipc((FROM compressible), compression := 'lz4', compression_level := 13);
+----
+Compression level for lz4 must be between -65536 and 12
+
+statement error
+FROM to_arrow_ipc((FROM compressible), compression := NULL);
+----
+Cannot use NULL as function argument
