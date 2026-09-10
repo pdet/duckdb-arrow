@@ -91,15 +91,8 @@ void SerializeArray(const ToArrowIpcLocalState& local_state,
   local_state.serializer->Serialize(*arr.get());
   arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
   auto body = local_state.serializer->GetBody();
-  idx_t ipc_buffer_size = arrow_serialized_ipc_buffer->size_bytes;
-  arrow_serialized_ipc_buffer->data = arrow_serialized_ipc_buffer->allocator.reallocate(
-      &arrow_serialized_ipc_buffer->allocator, arrow_serialized_ipc_buffer->data,
-      static_cast<int64_t>(ipc_buffer_size),
-      static_cast<int64_t>(ipc_buffer_size + body->size_bytes));
-  arrow_serialized_ipc_buffer->size_bytes += body->size_bytes;
-  arrow_serialized_ipc_buffer->capacity_bytes += body->size_bytes;
-  memcpy(arrow_serialized_ipc_buffer->data + ipc_buffer_size, body->data,
-         body->size_bytes);
+  NANOARROW_THROW_NOT_OK(
+      ArrowBufferAppend(arrow_serialized_ipc_buffer.get(), body->data, body->size_bytes));
 }
 
 void InsertMessageToChunk(nanoarrow::UniqueBuffer& arrow_serialized_ipc_buffer,

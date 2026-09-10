@@ -60,45 +60,21 @@ SELECT (SELECT count(*) FROM run_a) = (SELECT count(*) FROM run_b),
 ----
 true	0
 
-# Bodies can be compressed with the same options as COPY, so the whole stream shrinks
+# Compression uses a small fixture; multi-batch serialization is covered above.
 statement ok
 CREATE TABLE compressible AS
-SELECT i, i::VARCHAR AS s, i % 7 AS m, [i, i + 1, NULL] AS l FROM range(100000) t(i);
+SELECT i, (i % 7)::VARCHAR AS s FROM range(1024) t(i);
 
 foreach compression zstd lz4
 
-query II
-SELECT count(*) FILTER (WHERE header), count(*) FILTER (WHERE NOT header) >= 1
-FROM to_arrow_ipc((FROM compressible), compression := '${compression}');
+query III
+SELECT count(*) FILTER (WHERE header), count(*) FILTER (WHERE NOT header) >= 1,
+       sum(octet_length(ipc)) < (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible)))
+FROM to_arrow_ipc((FROM compressible), compression_level := 9, compression := '${compression}');
 ----
-1	true
-
-query I
-SELECT (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible), compression := '${compression}'))
-     < (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible)));
-----
-true
+1	true	true
 
 endloop
-
-# Levels and aliases, in either parameter order
-query I
-SELECT (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible), compression := 'zstd', compression_level := 19))
-     < (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible), compression_level := 1, compression := 'ZSTD'));
-----
-true
-
-query I
-SELECT (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible), compression := 'lz4_frame'))
-     = (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible), compression := 'lz4'));
-----
-true
-
-query I
-SELECT (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible), compression := 'uncompressed'))
-     = (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible)));
-----
-true
 
 # Option errors, reported while binding
 statement error

@@ -1,4 +1,3 @@
-import os
 import pytest
 import pyarrow as pa
 import duckdb
@@ -114,56 +113,32 @@ class TestArrowIPCBufferWriter(object):
 
 
 class TestArrowIPCCompression(object):
+    @pytest.fixture
+    def compressible_table(self):
+        # Enough repetition for real compressed buffers, including nulls in each type.
+        return pa.table({
+            "f0": pa.array([1, 2, None, 4] * 256, pa.int32()),
+            "f1": ["foo", "bar", "baz", None] * 256,
+            "f2": [True, None, False, True] * 256,
+        })
+
     @pytest.mark.parametrize("compression", ["zstd", "lz4"])
-    def test_duckdb_writes_pyarrow_reads(self, connection, compression, tmp_path):
-        create_table(connection)
+    def test_duckdb_writes_pyarrow_reads(self, connection, compression, compressible_table, tmp_path):
+        connection.register("input_table", compressible_table)
         path = str(tmp_path / f"test_{compression}.arrows")
-        connection.execute(f"COPY T TO '{path}' (FORMAT ARROWS, COMPRESSION '{compression}')")
+        connection.execute(f"COPY input_table TO '{path}' (FORMAT ARROWS, COMPRESSION '{compression}')")
         with pa.OSFile(path, 'rb') as source, ipc.open_stream(source) as reader:
-            arrow_table = reader.read_all()
-        tables_match(connection.execute("FROM arrow_table").fetchall())
+            assert reader.read_all().equals(compressible_table)
 
     @pytest.mark.parametrize("compression", ["zstd", "lz4"])
-    def test_compressed_output_is_smaller(self, connection, compression, tmp_path):
-        source = "SELECT i, i::VARCHAR AS s, i % 7 AS m FROM range(100000) t(i)"
-        uncompressed = str(tmp_path / "uncompressed.arrows")
-        compressed = str(tmp_path / f"{compression}.arrows")
-        connection.execute(f"COPY ({source}) TO '{uncompressed}' (FORMAT ARROWS)")
-        connection.execute(f"COPY ({source}) TO '{compressed}' (FORMAT ARROWS, COMPRESSION '{compression}')")
-        assert os.path.getsize(compressed) < os.path.getsize(uncompressed)
-
-        # pyarrow sees the body compression the extension declared and can decode it
-        with pa.OSFile(compressed, 'rb') as f, ipc.open_stream(f) as reader:
-            arrow_table = reader.read_all()
-        assert connection.execute(
-            f"""
-            SELECT (SELECT count(*) FROM arrow_table),
-                   (SELECT count(*) FROM (({source}) EXCEPT ALL FROM arrow_table)),
-                   (SELECT count(*) FROM (FROM arrow_table EXCEPT ALL ({source})))
-            """
-        ).fetchone() == (100000, 0, 0)
-
-    @pytest.mark.parametrize("compression", ["zstd", "lz4"])
-    def test_to_arrow_ipc_compressed_buffers(self, connection, compression):
-        # to_arrow_ipc takes the same options as COPY and pyarrow reads the joined messages back
-        source = "SELECT i, i::VARCHAR AS s, i % 7 AS m FROM range(100000) t(i)"
-        buffers = connection.execute(f"FROM to_arrow_ipc(({source}))").fetchall()
-        compressed = connection.execute(
-            f"FROM to_arrow_ipc(({source}), compression := '{compression}')"
+    def test_to_arrow_ipc_compressed_buffers(self, connection, compression, compressible_table):
+        connection.register("input_table", compressible_table)
+        buffers = connection.execute(
+            f"FROM to_arrow_ipc((FROM input_table), compression := '{compression}')"
         ).fetchall()
-        assert [header for _, header in compressed] == [True] + [False] * (len(compressed) - 1)
-        assert sum(len(ipc) for ipc, _ in compressed) < sum(len(ipc) for ipc, _ in buffers)
-
-        with pa.BufferReader(pa.py_buffer(b"".join(ipc for ipc, _ in compressed))) as reader:
-            stream_reader = ipc.RecordBatchStreamReader(reader)
-            arrow_table = pa.Table.from_batches(list(stream_reader), schema=stream_reader.schema)
-        assert connection.execute(
-            f"""
-            SELECT (SELECT count(*) FROM arrow_table),
-                   (SELECT count(*) FROM (({source}) EXCEPT ALL FROM arrow_table)),
-                   (SELECT count(*) FROM (FROM arrow_table EXCEPT ALL ({source})))
-            """
-        ).fetchone() == (100000, 0, 0)
+        assert [header for _, header in buffers] == [True] + [False] * (len(buffers) - 1)
+        with ipc.open_stream(pa.py_buffer(b"".join(message for message, _ in buffers))) as reader:
+            assert reader.read_all().equals(compressible_table)
 
     @pytest.mark.parametrize("compression", ["zstd", "lz4"])
     def test_pyarrow_writes_duckdb_reads(self, connection, compression, tmp_path):

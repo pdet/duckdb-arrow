@@ -1,6 +1,9 @@
 #include "writer/column_data_collection_serializer.hpp"
 
 #include <utility>
+
+#include "duckdb/common/arrow/arrow_appender.hpp"
+
 namespace duckdb {
 
 namespace ext_nanoarrow {
@@ -87,20 +90,9 @@ idx_t ColumnDataCollectionSerializer::Serialize(ArrowArray& array) {
   return 1;
 }
 idx_t ColumnDataCollectionSerializer::Serialize(DataChunk& chunk) {
-  header->size_bytes = 0;
-  body->size_bytes = 0;
   chunk_arrow.reset();
-
   ArrowConverter::ToArrowArray(chunk, chunk_arrow.get(), options, extension_types);
-  THROW_NOT_OK(duckdb::InternalException, &error,
-               ArrowArrayViewSetArray(chunk_view.get(), chunk_arrow.get(), &error));
-  THROW_NOT_OK(InternalException, &error,
-               ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(),
-                                                      body.get(), &error));
-  NANOARROW_THROW_NOT_OK(
-      ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
-
-  return 1;
+  return Serialize(*chunk_arrow.get());
 }
 
 idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buffer) {
@@ -109,18 +101,14 @@ idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buff
   if (buffer.Count() == 0) {
     return 0;
   }
-  // The ArrowConverter requires all of this to be in one big DataChunk.
-  // It would be better to append these one at a time using other DuckDB
-  // internals like the ArrowAppender. (Possibly better would be to skip the
-  // owning ArrowArray entirely and just expose an ArrowArrayView of the
-  // chunk. keeping track of any owning elements that had to be allocated,
-  // since that's all that is strictly required to write).
-  DataChunk chunk;
-  chunk.Initialize(allocator, buffer.Types(), buffer.Count());
-  for (const auto& item : buffer.Chunks()) {
-    chunk.Append(item, true);
+  chunk_arrow.reset();
+  ArrowAppender appender(buffer.Types(), buffer.Count(), options, extension_types);
+  for (auto& chunk : buffer.Chunks()) {
+    appender.Append(chunk, 0, chunk.size(), chunk.size());
   }
-  return Serialize(chunk);
+  ArrowArray array = appender.Finalize();
+  ArrowArrayMove(&array, chunk_arrow.get());
+  return Serialize(*chunk_arrow.get());
 }
 
 void ColumnDataCollectionSerializer::Flush(BufferedFileWriter& writer) {
