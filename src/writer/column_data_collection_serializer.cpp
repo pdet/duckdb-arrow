@@ -40,7 +40,7 @@ ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(ClientProperties 
                                                                Allocator& allocator)
     : options(std::move(options)), allocator(allocator) {}
 
-void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema_p,
+void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
                                           const vector<LogicalType>& logical_types) {
   header.reset();
   body.reset();
@@ -51,16 +51,15 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema_p,
   InitArrowDuckBuffer(header.get(), allocator);
   InitArrowDuckBuffer(body.get(), allocator);
   NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
+  // The view copies the type info it needs, so the schema need not outlive this call
   THROW_NOT_OK(InternalException, &error,
-               ArrowArrayViewInitFromSchema(chunk_view.get(), schema_p, &error));
-
-  schema = schema_p;
+               ArrowArrayViewInitFromSchema(chunk_view.get(), schema, &error));
 
   extension_types =
       ArrowTypeExtensionData::GetExtensionTypes(*options.client_context, logical_types);
 }
 
-void ColumnDataCollectionSerializer::SerializeSchema() {
+void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema) {
   header->size_bytes = 0;
   body->size_bytes = 0;
   THROW_NOT_OK(InternalException, &error,
