@@ -1,8 +1,10 @@
 #include "writer/to_arrow_ipc.hpp"
 
+#include "ipc/codecs.hpp"
 #include "writer/column_data_collection_serializer.hpp"
 
 #include "duckdb/common/arrow/arrow_appender.hpp"
+#include "duckdb/common/exception/binder_exception.hpp"
 #include "duckdb/execution/physical_operator.hpp"
 #include "duckdb/function/function.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -18,6 +20,7 @@ struct ToArrowIpcFunctionData : public TableFunctionData {
   nanoarrow::UniqueSchema schema;
   vector<LogicalType> logical_types;
   const idx_t chunk_size = ToArrowIPCFunction::DEFAULT_CHUNK_SIZE * STANDARD_VECTOR_SIZE;
+  ArrowIpcCompressionOptions compression;
 };
 
 struct ToArrowIpcGlobalState : public GlobalTableFunctionState {
@@ -38,11 +41,11 @@ unique_ptr<LocalTableFunctionState> ToArrowIPCFunction::InitLocal(
     GlobalTableFunctionState* global_state) {
   auto local_state = make_uniq<ToArrowIpcLocalState>();
   auto properties = context.client.GetClientProperties();
+  auto& data = input.bind_data->Cast<ToArrowIpcFunctionData>();
   local_state->serializer = make_uniq<ColumnDataCollectionSerializer>(
-      properties, BufferAllocator::Get(context.client));
+      properties, BufferAllocator::Get(context.client), data.compression);
   // Init() allocates an encoder and an array view, so it belongs here and not
   // in Function(), which runs for every incoming chunk.
-  auto& data = input.bind_data->Cast<ToArrowIpcFunctionData>();
   local_state->serializer->Init(data.schema.get(), data.logical_types);
   return std::move(local_state);
 }
@@ -57,6 +60,15 @@ unique_ptr<FunctionData> ToArrowIPCFunction::Bind(ClientContext& context,
                                                   vector<LogicalType>& return_types,
                                                   vector<string>& names) {
   auto result = make_uniq<ToArrowIpcFunctionData>();
+
+  // The binder only lets the declared parameters through, all of them compression options
+  for (auto& kv : input.named_parameters) {
+    if (kv.second.IsNull()) {
+      throw BinderException("Cannot use NULL as function argument");
+    }
+    result->compression.TrySetOption(kv.first, kv.second);
+  }
+  result->compression.Validate();
 
   // Set return schema
   return_types.emplace_back(LogicalType::BLOB);
@@ -79,15 +91,8 @@ void SerializeArray(const ToArrowIpcLocalState& local_state,
   local_state.serializer->Serialize(*arr.get());
   arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
   auto body = local_state.serializer->GetBody();
-  idx_t ipc_buffer_size = arrow_serialized_ipc_buffer->size_bytes;
-  arrow_serialized_ipc_buffer->data = arrow_serialized_ipc_buffer->allocator.reallocate(
-      &arrow_serialized_ipc_buffer->allocator, arrow_serialized_ipc_buffer->data,
-      static_cast<int64_t>(ipc_buffer_size),
-      static_cast<int64_t>(ipc_buffer_size + body->size_bytes));
-  arrow_serialized_ipc_buffer->size_bytes += body->size_bytes;
-  arrow_serialized_ipc_buffer->capacity_bytes += body->size_bytes;
-  memcpy(arrow_serialized_ipc_buffer->data + ipc_buffer_size, body->data,
-         body->size_bytes);
+  NANOARROW_THROW_NOT_OK(
+      ArrowBufferAppend(arrow_serialized_ipc_buffer.get(), body->data, body->size_bytes));
 }
 
 void InsertMessageToChunk(nanoarrow::UniqueBuffer& arrow_serialized_ipc_buffer,
@@ -190,6 +195,8 @@ TableFunction ToArrowIPCFunction::GetFunction() {
                     InitLocal);
   fun.in_out_function = Function;
   fun.in_out_function_final = FunctionFinal;
+  fun.named_parameters["compression"] = LogicalType::VARCHAR;
+  fun.named_parameters["compression_level"] = LogicalType::BIGINT;
   return fun;
 }
 

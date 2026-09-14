@@ -59,3 +59,40 @@ SELECT (SELECT count(*) FROM run_a) = (SELECT count(*) FROM run_b),
        (SELECT count(*) FROM (FROM run_a EXCEPT ALL FROM run_b))
 ----
 true	0
+
+# Compression uses a small fixture; multi-batch serialization is covered above.
+statement ok
+CREATE TABLE compressible AS
+SELECT i, (i % 7)::VARCHAR AS s FROM range(1024) t(i);
+
+foreach compression zstd lz4
+
+query III
+SELECT count(*) FILTER (WHERE header), count(*) FILTER (WHERE NOT header) >= 1,
+       sum(octet_length(ipc)) < (SELECT sum(octet_length(ipc)) FROM to_arrow_ipc((FROM compressible)))
+FROM to_arrow_ipc((FROM compressible), compression_level := 9, compression := '${compression}');
+----
+1	true	true
+
+endloop
+
+# Option errors, reported while binding
+statement error
+FROM to_arrow_ipc((FROM compressible), compression := 'snappy');
+----
+Unsupported compression type "snappy"
+
+statement error
+FROM to_arrow_ipc((FROM compressible), compression_level := 3);
+----
+COMPRESSION_LEVEL requires COMPRESSION
+
+statement error
+FROM to_arrow_ipc((FROM compressible), compression := 'lz4', compression_level := 13);
+----
+Compression level for lz4 must be between -65536 and 12
+
+statement error
+FROM to_arrow_ipc((FROM compressible), compression := NULL);
+----
+Cannot use NULL as function argument

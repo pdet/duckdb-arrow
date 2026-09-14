@@ -1,6 +1,9 @@
 #include "writer/column_data_collection_serializer.hpp"
 
 #include <utility>
+
+#include "duckdb/common/arrow/arrow_appender.hpp"
+
 namespace duckdb {
 
 namespace ext_nanoarrow {
@@ -36,21 +39,31 @@ inline void InitArrowDuckBuffer(ArrowBuffer* buffer, Allocator& duck_allocator) 
   buffer->allocator.private_data = &duck_allocator;
 }
 
-ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(ClientProperties options,
-                                                               Allocator& allocator)
-    : options(std::move(options)), allocator(allocator) {}
+ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(
+    ClientProperties options, Allocator& allocator,
+    ArrowIpcCompressionOptions compression)
+    : options(std::move(options)), allocator(allocator), compression(compression) {}
 
 void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
                                           const vector<LogicalType>& logical_types) {
+  // Dictionaries need DictionaryBatch messages that this serializer never emits
+  nanoarrow::ipc::UniqueDictionaryEncodings dictionaries;
+  NANOARROW_THROW_NOT_OK(
+      ArrowIpcDictionaryEncodingsAppendSchema(dictionaries.get(), schema));
+  if (dictionaries->encodings.size_bytes != 0) {
+    throw NotImplementedException(
+        "Writing dictionary-encoded Arrow IPC is not supported");
+  }
+
   header.reset();
   body.reset();
   encoder.reset();
   chunk_view.reset();
-  chunk_arrow.reset();
 
   InitArrowDuckBuffer(header.get(), allocator);
   InitArrowDuckBuffer(body.get(), allocator);
   NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
+  SetArrowIpcEncoderCompression(*encoder.get(), compression);
   // The view copies the type info it needs, so the schema need not outlive this call
   THROW_NOT_OK(InternalException, &error,
                ArrowArrayViewInitFromSchema(chunk_view.get(), schema, &error));
@@ -62,7 +75,8 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
 void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema) {
   header->size_bytes = 0;
   body->size_bytes = 0;
-  THROW_NOT_OK(InternalException, &error,
+  // Fails for types nanoarrow cannot write yet, such as string views
+  THROW_NOT_OK(NotImplementedException, &error,
                ArrowIpcEncoderEncodeSchema(encoder.get(), schema, &error));
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
@@ -83,20 +97,9 @@ idx_t ColumnDataCollectionSerializer::Serialize(ArrowArray& array) {
   return 1;
 }
 idx_t ColumnDataCollectionSerializer::Serialize(DataChunk& chunk) {
-  header->size_bytes = 0;
-  body->size_bytes = 0;
-  chunk_arrow.reset();
-
-  ArrowConverter::ToArrowArray(chunk, chunk_arrow.get(), options, extension_types);
-  THROW_NOT_OK(duckdb::InternalException, &error,
-               ArrowArrayViewSetArray(chunk_view.get(), chunk_arrow.get(), &error));
-  THROW_NOT_OK(InternalException, &error,
-               ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(),
-                                                      body.get(), &error));
-  NANOARROW_THROW_NOT_OK(
-      ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
-
-  return 1;
+  nanoarrow::UniqueArray array;
+  ArrowConverter::ToArrowArray(chunk, array.get(), options, extension_types);
+  return Serialize(*array.get());
 }
 
 idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buffer) {
@@ -105,18 +108,13 @@ idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buff
   if (buffer.Count() == 0) {
     return 0;
   }
-  // The ArrowConverter requires all of this to be in one big DataChunk.
-  // It would be better to append these one at a time using other DuckDB
-  // internals like the ArrowAppender. (Possibly better would be to skip the
-  // owning ArrowArray entirely and just expose an ArrowArrayView of the
-  // chunk. keeping track of any owning elements that had to be allocated,
-  // since that's all that is strictly required to write).
-  DataChunk chunk;
-  chunk.Initialize(allocator, buffer.Types(), buffer.Count());
-  for (const auto& item : buffer.Chunks()) {
-    chunk.Append(item, true);
+  ArrowAppender appender(buffer.Types(), buffer.Count(), options, extension_types);
+  for (auto& chunk : buffer.Chunks()) {
+    appender.Append(chunk, 0, chunk.size(), chunk.size());
   }
-  return Serialize(chunk);
+  ArrowArray finalized = appender.Finalize();
+  nanoarrow::UniqueArray array(&finalized);
+  return Serialize(*array.get());
 }
 
 void ColumnDataCollectionSerializer::Flush(BufferedFileWriter& writer) {
