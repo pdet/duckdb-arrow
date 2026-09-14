@@ -27,7 +27,7 @@ struct ArrowStreamWriter {
 
   void WriteSchema();
 
-  unique_ptr<ColumnDataCollectionSerializer> NewSerializer();
+  unique_ptr<ColumnDataCollectionSerializer> NewSerializer() const;
 
   void Flush(ColumnDataCollection& buffer);
 
@@ -40,18 +40,15 @@ struct ArrowStreamWriter {
   idx_t FileSize() const;
 
  private:
-  // Called with lock held so each footer entry describes a complete written batch.
   void FlushInternal(ColumnDataCollectionSerializer& serializer);
   void WriteFooter();
 
   ClientProperties options;
   Allocator& allocator;
   ColumnDataCollectionSerializer serializer;
-  string file_name;
   vector<LogicalType> logical_types;
   mutable mutex lock;
   unique_ptr<BufferedFileWriter> writer;
-  idx_t row_group_count{0};
   vector<ArrowIpcFileBlock> blocks;
   nanoarrow::UniqueSchema schema;
 };

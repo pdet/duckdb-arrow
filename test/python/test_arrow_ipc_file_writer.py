@@ -5,6 +5,14 @@ import pyarrow.ipc as ipc
 import pytest
 
 
+@pytest.fixture
+def source_row_count(connection):
+    row_count = 500000
+    # Use a table scan so COPY can run on multiple workers.
+    connection.execute(f"CREATE TABLE source AS SELECT i FROM range({row_count}) t(i)")
+    return row_count
+
+
 @pytest.mark.parametrize(
     "suffix,format_option",
     [
@@ -35,14 +43,14 @@ def test_buffer_output_remains_a_stream(connection, tmp_path):
     assert payload[:4] == b"\xff\xff\xff\xff"
     assert ipc.open_stream(payload).read_all().to_pydict() == {"x": [42]}
 
-    # The JS buffer-registration helper persists stream bytes and uses read_arrow.
+    # Match the JS helper that saves stream bytes before calling read_arrow.
     path = tmp_path / "registered.ipc"
     path.write_bytes(payload)
     assert connection.execute(f"FROM read_arrow('{path}')").fetchall() == [(42,)]
 
 
 @pytest.mark.parametrize("preserve_order", [True, False])
-def test_file_footer_random_access(connection, tmp_path, preserve_order):
+def test_file_footer_random_access(connection, tmp_path, preserve_order, source_row_count):
     path = tmp_path / "batches.arrow"
     connection.execute("SET threads=4")
     connection.execute(f"SET preserve_insertion_order={str(preserve_order).lower()}")
@@ -50,7 +58,7 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order):
         f"""
         COPY (
             SELECT i, CASE WHEN i % 7 = 0 THEN NULL ELSE i::VARCHAR END AS s
-            FROM range(100000) t(i)
+            FROM source
         ) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048,
                       KV_METADATA {{'source': 'file-format-test'}})
         """
@@ -58,8 +66,7 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order):
 
     payload = path.read_bytes()
     file_reader = ipc.open_file(payload)
-    # Reading the embedded stream independently catches a footer that points to
-    # the wrong batches or contains a different schema from the opening message.
+    # Compare indexed reads against the embedded stream.
     stream_reader = ipc.open_stream(payload[8:])
     assert file_reader.schema.equals(stream_reader.schema, check_metadata=True)
     assert file_reader.schema.metadata[b"source"] == b"file-format-test"
@@ -70,14 +77,15 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order):
         batch.validate(full=True)
         assert batch.equals(batches[i], check_metadata=True)
 
-    result = file_reader.read_all().sort_by("i")
-    assert result.column("i").to_pylist() == list(range(100000))
+    result = file_reader.read_all()
+    if not preserve_order:
+        result = result.sort_by("i")
+    assert result.column("i").to_pylist() == list(range(source_row_count))
     assert result.column("s").to_pylist() == [
-        None if i % 7 == 0 else str(i) for i in range(100000)
+        None if i % 7 == 0 else str(i) for i in range(source_row_count)
     ]
 
-    # The trailer stores a little-endian footer length. Inspect the FlatBuffer's
-    # version field as well as each embedded Message's version.
+    # Check the footer version independently of the message versions.
     footer_size = struct.unpack_from("<i", payload, len(payload) - 10)[0]
     assert 0 < footer_size < len(payload) - 18
     footer = payload[-10 - footer_size:-10]
@@ -99,13 +107,42 @@ def test_file_footer_without_batches(connection, tmp_path):
     assert reader.read_all().num_rows == 0
 
 
-def test_rotated_files_have_independent_footers(connection, tmp_path):
+@pytest.mark.parametrize("preserve_order", [True, False])
+def test_nested_columns_across_batches(connection, tmp_path, preserve_order, source_row_count):
+    path = tmp_path / "nested.arrow"
+    connection.execute("SET threads=4")
+    connection.execute(f"SET preserve_insertion_order={str(preserve_order).lower()}")
+    source = """
+        SELECT i,
+               CASE WHEN i % 7 = 0 THEN NULL ELSE [i, NULL, i + 1] END AS l,
+               {'number': i, 'text': i::VARCHAR} AS s,
+               [i, i + 1]::BIGINT[2] AS a,
+               map(['key'], [i]) AS m,
+               CASE WHEN i % 2 = 0
+                    THEN union_value(n := i)::UNION(n BIGINT, s VARCHAR)
+                    ELSE union_value(s := i::VARCHAR)::UNION(n BIGINT, s VARCHAR) END AS u
+        FROM source
+    """
+    expected = connection.execute(source).to_arrow_table().sort_by("i")
+    connection.execute(
+        f"COPY ({source}) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048)"
+    )
+    reader = ipc.open_file(path)
+    assert reader.num_record_batches > 1
+    result = reader.read_all()
+    result.validate(full=True)
+    if not preserve_order:
+        result = result.sort_by("i")
+    assert result.equals(expected, check_metadata=True)
+
+
+def test_rotated_files_have_independent_footers(connection, tmp_path, source_row_count):
     path = tmp_path / "parts"
     connection.execute("SET threads=4")
     connection.execute("SET preserve_insertion_order=false")
     connection.execute(
         f"""
-        COPY (SELECT i FROM range(100000) t(i)) TO '{path}'
+        COPY source TO '{path}'
         (FORMAT ARROW, ROW_GROUP_SIZE 2048, ROW_GROUPS_PER_FILE 3)
         """
     )
@@ -117,4 +154,4 @@ def test_rotated_files_have_independent_footers(connection, tmp_path):
         table = reader.read_all()
         table.validate(full=True)
         values.extend(table.column("i").to_pylist())
-    assert sorted(values) == list(range(100000))
+    assert sorted(values) == list(range(source_row_count))

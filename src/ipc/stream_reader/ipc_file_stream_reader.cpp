@@ -1,5 +1,6 @@
 #include "ipc/stream_reader/ipc_file_stream_reader.hpp"
 #include "duckdb/common/file_system.hpp"
+#include "ipc/file_format.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
@@ -104,19 +105,9 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
     file_reader.ReadData(reinterpret_cast<data_ptr_t>(&message_prefix),
                          sizeof(message_prefix));
 
-    // If we're at the beginning of the read, and we see the Arrow file format
-    // header bytes, skip them and try to read the stream anyway. This works because
-    // there's a full stream within an Arrow file (including the EOS indicator, which
-    // is key to success. This EOS indicator is unfortunately missing in Rust releases
-    // prior to ~September 2024).
-    //
-    // When we support dictionary encoding we will possibly need to seek to the footer
-    // here, parse that, and maybe lazily seek and read dictionaries for if/when they are
-    // required.
-    if (file_reader.CurrentOffset() == 8 &&
-        std::memcmp("ARROW1\0\0", &message_prefix, 8) == 0) {
-      // We're at the beginning of the file. Skip upto and including the continuation
-      // token
+    // Read the embedded stream after the file header.
+    if (file_reader.CurrentOffset() == kArrowIPCFileHeaderSize &&
+        std::memcmp(kArrowIPCFileMagic, &message_prefix, kArrowIPCFileHeaderSize) == 0) {
       uint32_t token;
       do {
         file_reader.ReadData(reinterpret_cast<data_ptr_t>(&token), sizeof(token));

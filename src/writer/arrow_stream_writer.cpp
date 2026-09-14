@@ -2,15 +2,11 @@
 
 #include "duckdb/common/bswap.hpp"
 #include "duckdb/common/numeric_utils.hpp"
+#include "ipc/file_format.hpp"
 
 namespace duckdb {
 
 namespace ext_nanoarrow {
-
-namespace {
-constexpr char kArrowFileMagic[8] = "ARROW1\0";
-constexpr idx_t kArrowFileMagicSize = 6;
-}  // namespace
 
 ArrowStreamWriter::ArrowStreamWriter(ClientContext& context, FileSystem& fs,
                                      const string& file_path,
@@ -20,7 +16,6 @@ ArrowStreamWriter::ArrowStreamWriter(ClientContext& context, FileSystem& fs,
     : options(context.GetClientProperties()),
       allocator(BufferAllocator::Get(context)),
       serializer(options, allocator),
-      file_name(file_path),
       logical_types(logical_types) {
   InitSchema(logical_types, column_names, metadata);
   InitOutputFile(fs, file_path);
@@ -29,15 +24,12 @@ ArrowStreamWriter::ArrowStreamWriter(ClientContext& context, FileSystem& fs,
 void ArrowStreamWriter::InitSchema(const vector<LogicalType>& logical_types,
                                    const vector<string>& column_names,
                                    const vector<pair<string, string>>& metadata) {
-  nanoarrow::UniqueSchema tmp_schema;
-  ArrowConverter::ToArrowSchema(tmp_schema.get(), logical_types, column_names, options);
+  ArrowConverter::ToArrowSchema(schema.get(), logical_types, column_names, options);
 
-  if (metadata.empty()) {
-    ArrowSchemaMove(tmp_schema.get(), schema.get());
-  } else {
+  if (!metadata.empty()) {
     nanoarrow::UniqueBuffer metadata_packed;
     NANOARROW_THROW_NOT_OK(
-        ArrowMetadataBuilderInit(metadata_packed.get(), tmp_schema->metadata));
+        ArrowMetadataBuilderInit(metadata_packed.get(), schema->metadata));
     ArrowStringView key{};
     ArrowStringView value{};
     for (const auto& item : metadata) {
@@ -47,7 +39,6 @@ void ArrowStreamWriter::InitSchema(const vector<LogicalType>& logical_types,
           ArrowMetadataBuilderAppend(metadata_packed.get(), key, value));
     }
 
-    NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(tmp_schema.get(), schema.get()));
     NANOARROW_THROW_NOT_OK(ArrowSchemaSetMetadata(
         schema.get(), reinterpret_cast<char*>(metadata_packed->data)));
   }
@@ -59,22 +50,25 @@ void ArrowStreamWriter::InitOutputFile(FileSystem& fs, const string& file_path) 
   writer = make_uniq<BufferedFileWriter>(
       fs, file_path.c_str(),
       FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW);
-  writer->WriteData(const_data_ptr_cast(kArrowFileMagic), sizeof(kArrowFileMagic));
+  writer->WriteData(const_data_ptr_cast(kArrowIPCFileMagic), kArrowIPCFileHeaderSize);
 }
 
 void ArrowStreamWriter::WriteSchema() {
   lock_guard<mutex> guard(lock);
-  serializer.SerializeSchema();
+  serializer.SerializeSchema(schema.get());
   serializer.Flush(*writer);
 }
 
-unique_ptr<ColumnDataCollectionSerializer> ArrowStreamWriter::NewSerializer() {
+unique_ptr<ColumnDataCollectionSerializer> ArrowStreamWriter::NewSerializer() const {
   auto serializer = make_uniq<ColumnDataCollectionSerializer>(options, allocator);
   serializer->Init(schema.get(), logical_types);
   return serializer;
 }
 
 void ArrowStreamWriter::Flush(ColumnDataCollection& buffer) {
+  if (buffer.Count() == 0) {
+    return;
+  }
   lock_guard<mutex> guard(lock);
   serializer.Serialize(buffer);
   buffer.Reset();
@@ -88,12 +82,9 @@ void ArrowStreamWriter::Flush(ColumnDataCollectionSerializer& serializer) {
 
 void ArrowStreamWriter::FlushInternal(ColumnDataCollectionSerializer& serializer) {
   auto block = serializer.Flush(*writer);
-  // Empty collections do not emit a RecordBatch and must not appear in the footer.
-  if (block.metadata_length == 0) {
-    return;
+  if (block.metadata_length != 0) {
+    blocks.push_back(block);
   }
-  blocks.push_back(block);
-  ++row_group_count;
 }
 
 void ArrowStreamWriter::Finalize() {
@@ -105,16 +96,17 @@ void ArrowStreamWriter::Finalize() {
 }
 
 void ArrowStreamWriter::WriteFooter() {
-  serializer.SerializeFooter(blocks);
+  serializer.SerializeFooter(schema.get(), blocks);
   auto footer = serializer.GetHeader();
+  auto footer_size = NumericCast<int32_t>(footer->size_bytes);
   writer->WriteData(footer->data, footer->size_bytes);
-  writer->Write<int32_t>(BSwapIfBE(NumericCast<int32_t>(footer->size_bytes)));
-  writer->WriteData(const_data_ptr_cast(kArrowFileMagic), kArrowFileMagicSize);
+  writer->Write<int32_t>(BSwapIfBE(footer_size));
+  writer->WriteData(const_data_ptr_cast(kArrowIPCFileMagic), kArrowIPCFileMagicSize);
 }
 
 idx_t ArrowStreamWriter::NumberOfRowGroups() const {
   lock_guard<mutex> guard(lock);
-  return row_group_count;
+  return blocks.size();
 }
 
 idx_t ArrowStreamWriter::FileSize() const {

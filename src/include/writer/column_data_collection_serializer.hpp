@@ -23,18 +23,17 @@ class ColumnDataCollectionSerializer {
  public:
   ColumnDataCollectionSerializer(ClientProperties options, Allocator& allocator);
 
-  void Init(const ArrowSchema* schema_p, const vector<LogicalType>& logical_types);
+  void Init(const ArrowSchema* schema, const vector<LogicalType>& logical_types);
 
-  void SerializeSchema();
+  void SerializeSchema(const ArrowSchema* schema);
 
-  void SerializeFooter(const vector<ArrowIpcFileBlock>& blocks);
+  void SerializeFooter(const ArrowSchema* schema,
+                       const vector<ArrowIpcFileBlock>& blocks);
 
   idx_t Serialize(ArrowArray& array);
-  idx_t Serialize(DataChunk& chunk);
 
   idx_t Serialize(const ColumnDataCollection& buffer);
 
-  // Returns the position and sizes of the message for the IPC file footer.
   ArrowIpcFileBlock Flush(BufferedFileWriter& writer);
 
   nanoarrow::UniqueBuffer GetHeader();
@@ -44,11 +43,9 @@ class ColumnDataCollectionSerializer {
  private:
   ClientProperties options;
   Allocator& allocator;
-  const ArrowSchema* schema{};
   unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>> extension_types;
   nanoarrow::ipc::UniqueEncoder encoder;
   nanoarrow::UniqueArrayView chunk_view;
-  nanoarrow::UniqueArray chunk_arrow;
   nanoarrow::UniqueBuffer header;
   nanoarrow::UniqueBuffer body;
   ArrowError error{};

@@ -26,11 +26,6 @@ struct ArrowWriteBindData : public TableFunctionData {
   vector<LogicalType> sql_types;
   vector<string> column_names;
   vector<pair<string, string>> kv_metadata;
-  // Storage::ROW_GROUP_SIZE (122880), which seems to be the default
-  // for Parquet, is higher than the usual number used in IPC writers (65536).
-  // Using a value of 65536 results in fairly bad performance for the use
-  // case of "write it all then read it all" (at the expense of not being as
-  // useful for streaming).
   idx_t row_group_size = 122880;
   bool row_group_size_set = false;
   optional_idx row_groups_per_file;
@@ -63,7 +58,6 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
   for (auto& option : input.info.options) {
     const auto loption = StringUtil::Lower(option.first);
     if (option.second.size() != 1) {
-      // All Arrow write options require exactly one argument
       throw BinderException("%s requires exactly one argument",
                             StringUtil::Upper(loption));
     }
@@ -95,8 +89,6 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
       for (idx_t i = 0; i < values.size(); i++) {
         const auto& value = values[i];
         auto key = StructType::GetChildName(kv_struct_type, i);
-        // If the value is a blob, write the raw blob bytes
-        // otherwise, cast to string
         if (value.type().id() == LogicalTypeId::BLOB) {
           bind_data->kv_metadata.emplace_back(key, StringValue::Get(value));
         } else {
@@ -114,7 +106,6 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
           "order.");
     }
   } else {
-    // We always set a max row group size bytes so we don't use too much memory
     bind_data->row_group_size_bytes =
         bind_data->row_group_size * ArrowWriteBindData::BYTES_PER_ROW;
   }
@@ -146,13 +137,10 @@ void ArrowWriteSink(ExecutionContext& context, FunctionData& bind_data_p,
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
   auto& local_state = lstate.Cast<ArrowWriteLocalState>();
 
-  // append data to the local (buffered) chunk collection
   local_state.buffer.Append(local_state.append_state, input);
 
   if (local_state.buffer.Count() >= bind_data.row_group_size ||
       local_state.buffer.SizeInBytes() >= bind_data.row_group_size_bytes) {
-    // if the chunk collection exceeds a certain size (rows/bytes) we flush it to the
-    // Arrow file
     local_state.append_state.current_chunk_state.handles.clear();
     global_state.writer->Flush(local_state.buffer);
     local_state.buffer.InitializeAppend(local_state.append_state);
@@ -163,14 +151,12 @@ void ArrowWriteCombine(ExecutionContext& context, FunctionData& bind_data,
                        GlobalFunctionData& gstate, LocalFunctionData& lstate) {
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
   auto& local_state = lstate.Cast<ArrowWriteLocalState>();
-  // flush any data left in the local state to the file
   global_state.writer->Flush(local_state.buffer);
 }
 
 void ArrowWriteFinalize(ClientContext& context, FunctionData& bind_data,
                         GlobalFunctionData& gstate) {
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
-  // finalize: write any additional metadata to the file here
   global_state.writer->Finalize();
 }
 
@@ -223,8 +209,7 @@ struct ArrowWriteBatchData : public PreparedBatchData {
   unique_ptr<ColumnDataCollectionSerializer> serializer;
 };
 
-// This is called concurrently for large writes so it can't interact with the
-// writer except to read information needed to initialize.
+// Batch preparation runs concurrently and only reads the shared schema.
 unique_ptr<PreparedBatchData> ArrowWritePrepareBatch(
     ClientContext& context, FunctionData& bind_data, GlobalFunctionData& gstate,
     unique_ptr<ColumnDataCollection> collection) {
