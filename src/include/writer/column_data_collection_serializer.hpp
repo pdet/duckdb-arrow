@@ -13,6 +13,7 @@
 #include "duckdb/common/types/column/column_data_collection.hpp"
 #include "duckdb/function/table/arrow/arrow_duck_schema.hpp"
 #include "duckdb/main/client_properties.hpp"
+#include "ipc/codecs.hpp"
 #include "nanoarrow/nanoarrow_ipc.hpp"
 #include "nanoarrow_errors.hpp"
 
@@ -24,6 +25,7 @@ namespace ext_nanoarrow {
 class ColumnDataCollectionSerializer {
  public:
   ColumnDataCollectionSerializer(ClientProperties options, Allocator& allocator,
+                                 ArrowIpcCompressionOptions compression = {},
                                  bool track_body_size = false);
 
   void Init(const ArrowSchema* schema, const vector<LogicalType>& logical_types);
@@ -48,6 +50,7 @@ class ColumnDataCollectionSerializer {
  private:
   ClientProperties options;
   Allocator& allocator;
+  ArrowIpcCompressionOptions compression;
   bool track_body_size;
   int64_t uncompressed_body_size = 0;
   unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>> extension_types;
@@ -58,7 +61,7 @@ class ColumnDataCollectionSerializer {
   ArrowError error{};
 };
 
-// nanoarrow cannot encode dictionaries, which DuckDB produces for ENUM, or view layouts
+// The writer does not emit dictionary messages or support view layouts
 nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
                                              const vector<string>& names,
                                              ClientProperties& options);

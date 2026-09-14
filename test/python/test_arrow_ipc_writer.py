@@ -112,7 +112,48 @@ class TestArrowIPCBufferWriter(object):
         assert result_table.column("priority").to_pylist() == ["low", "high", "high", "low"]
 
 
+class TestArrowIPCFieldMetadata(object):
+    def test_field_metadata(self, connection, tmp_path):
+        path = str(tmp_path / "field_metadata.arrows")
+        connection.execute(
+            f"""COPY (SELECT 1 AS id, 'foo' AS label) TO '{path}'
+            (FORMAT ARROWS, KV_METADATA {{'file_owner': 'test_suite'}}, FIELD_METADATA {{'id': {{'measurement_unit': 'row_count'}}}})"""
+        )
+        with pa.OSFile(path, 'rb') as f:
+            schema = ipc.open_stream(f).schema
+        assert schema.metadata == {b'file_owner': b'test_suite'}
+        assert schema.field('id').metadata == {b'measurement_unit': b'row_count'}
+        assert schema.field('label').metadata is None
+
+
 class TestArrowIPCCompression(object):
+    @pytest.fixture
+    def compressible_table(self):
+        # Enough repetition for real compressed buffers, including nulls in each type.
+        return pa.table({
+            "f0": pa.array([1, 2, None, 4] * 256, pa.int32()),
+            "f1": ["foo", "bar", "baz", None] * 256,
+            "f2": [True, None, False, True] * 256,
+        })
+
+    @pytest.mark.parametrize("compression", ["zstd", "lz4"])
+    def test_duckdb_writes_pyarrow_reads(self, connection, compression, compressible_table, tmp_path):
+        connection.register("input_table", compressible_table)
+        path = str(tmp_path / f"test_{compression}.arrows")
+        connection.execute(f"COPY input_table TO '{path}' (FORMAT ARROWS, COMPRESSION '{compression}')")
+        with pa.OSFile(path, 'rb') as source, ipc.open_stream(source) as reader:
+            assert reader.read_all().equals(compressible_table)
+
+    @pytest.mark.parametrize("compression", ["zstd", "lz4"])
+    def test_to_arrow_ipc_compressed_buffers(self, connection, compression, compressible_table):
+        connection.register("input_table", compressible_table)
+        buffers = connection.execute(
+            f"FROM to_arrow_ipc((FROM input_table), compression := '{compression}')"
+        ).fetchall()
+        assert [header for _, header in buffers] == [True] + [False] * (len(buffers) - 1)
+        with ipc.open_stream(pa.py_buffer(b"".join(message for message, _ in buffers))) as reader:
+            assert reader.read_all().equals(compressible_table)
+
     @pytest.mark.parametrize("compression", ["zstd", "lz4"])
     def test_pyarrow_writes_duckdb_reads(self, connection, compression, tmp_path):
         arrow_table = pa.table(

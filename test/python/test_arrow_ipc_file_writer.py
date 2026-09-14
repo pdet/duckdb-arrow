@@ -10,13 +10,47 @@ import pytest
 def assert_size_metadata(payload):
     schema = ipc.open_file(payload).schema
     assert schema.equals(ipc.open_stream(payload[8:]).schema, check_metadata=True)
-    total = sum(
-        message.body.size
-        for message in ipc.MessageReader.open_stream(payload[8:])
-        if message.type == "record batch"
-    )
-    for key in [b"total_compressed_size", b"total_uncompressed_size"]:
-        assert schema.metadata[key] == str(total).encode()
+
+    def field(metadata, table, index):
+        vtable = table - struct.unpack_from("<i", metadata, table)[0]
+        entry = 4 + 2 * index
+        if entry >= struct.unpack_from("<H", metadata, vtable)[0]:
+            return 0
+        offset = struct.unpack_from("<H", metadata, vtable + entry)[0]
+        return table + offset if offset else 0
+
+    compressed_size = uncompressed_size = 0
+    for message in ipc.MessageReader.open_stream(payload[8:]):
+        if message.type != "record batch":
+            continue
+        compressed_size += message.body.size
+        metadata = message.metadata
+        root = struct.unpack_from("<I", metadata)[0]
+        header = field(metadata, root, 2)
+        batch = header + struct.unpack_from("<I", metadata, header)[0]
+        compression = field(metadata, batch, 3)
+        if not compression:
+            uncompressed_size += message.body.size
+            continue
+        compression += struct.unpack_from("<I", metadata, compression)[0]
+        codec_field = field(metadata, compression, 0)
+        codec = "zstd" if codec_field and metadata[codec_field] == 1 else "lz4"
+        buffers = field(metadata, batch, 2)
+        buffers += struct.unpack_from("<I", metadata, buffers)[0]
+        for i in range(struct.unpack_from("<I", metadata, buffers)[0]):
+            offset, length = struct.unpack_from("<qq", metadata, buffers + 4 + 16 * i)
+            if length == 0:
+                continue
+            size = struct.unpack_from("<q", message.body, offset)[0]
+            if size == -1:
+                size = length - 8
+            else:
+                data = message.body.slice(offset + 8, length - 8)
+                assert pa.decompress(data, decompressed_size=size, codec=codec).size == size
+            uncompressed_size += (size + 7) // 8 * 8
+    assert schema.metadata[b"total_compressed_size"] == str(compressed_size).encode()
+    assert schema.metadata[b"total_uncompressed_size"] == str(uncompressed_size).encode()
+    return compressed_size, uncompressed_size
 
 
 @pytest.fixture
@@ -67,14 +101,15 @@ def test_buffer_output_remains_a_stream(connection, tmp_path):
 
 
 @pytest.mark.parametrize("output", ["copy", "buffer"])
-def test_prepared_output_keeps_bound_settings(connection, tmp_path, output):
+@pytest.mark.parametrize("compression", ["uncompressed", "zstd"])
+def test_prepared_output_keeps_bound_settings(connection, tmp_path, output, compression):
     path = tmp_path / "prepared.arrow"
     source = "SELECT 'abcdefghijklmno'::BLOB AS b"
     connection.execute("SET arrow_output_version='1.3'")
     query = (
-        f"COPY ({source}) TO '{path}'"
+        f"COPY ({source}) TO '{path}' (COMPRESSION '{compression}')"
         if output == "copy"
-        else f"FROM to_arrow_ipc(({source}))"
+        else f"FROM to_arrow_ipc(({source}), compression := '{compression}')"
     )
     connection.execute(f"PREPARE prepared_ipc AS {query}")
     connection.execute("SET arrow_output_version='1.4'")
@@ -91,7 +126,8 @@ def test_prepared_output_keeps_bound_settings(connection, tmp_path, output):
 
 @pytest.mark.parametrize("preserve_order", [True, False])
 @pytest.mark.parametrize("size_metadata", [True, False])
-def test_file_footer_random_access(connection, tmp_path, preserve_order, source_row_count, size_metadata):
+@pytest.mark.parametrize("compression", ["uncompressed", "zstd", "lz4"])
+def test_file_footer_random_access(connection, tmp_path, preserve_order, source_row_count, size_metadata, compression):
     path = tmp_path / "batches.arrow"
     connection.execute("SET threads=4")
     connection.execute(f"SET preserve_insertion_order={str(preserve_order).lower()}")
@@ -100,8 +136,10 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order, source_
         COPY (
             SELECT i, CASE WHEN i % 7 = 0 THEN NULL ELSE i::VARCHAR END AS s
             FROM source
-        ) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048, SIZE_METADATA {size_metadata},
-                      KV_METADATA {{'source': 'file-format-test'}})
+        ) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048, COMPRESSION '{compression}',
+                      SIZE_METADATA {size_metadata},
+                      KV_METADATA {{'source': 'file-format-test'}},
+                      FIELD_METADATA {{'i': {{'unit': 'count'}}}})
         """
     )
 
@@ -112,9 +150,12 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order, source_
     assert file_reader.schema.equals(stream_reader.schema, check_metadata=True)
     assert file_reader.schema.metadata[b"source"] == b"file-format-test"
     if size_metadata:
-        assert_size_metadata(payload)
+        compressed_size, uncompressed_size = assert_size_metadata(payload)
+        if compression != "uncompressed":
+            assert compressed_size < uncompressed_size
     else:
         assert file_reader.schema.metadata == {b"source": b"file-format-test"}
+    assert file_reader.schema.field("i").metadata[b"unit"] == b"count"
     batches = list(stream_reader)
     assert file_reader.num_record_batches == len(batches) > 1
     for i in reversed(range(len(batches))):
@@ -144,18 +185,22 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order, source_
 
 
 @pytest.mark.parametrize("rows", [0, 1])
-def test_small_file_with_size_metadata(connection, tmp_path, rows):
+@pytest.mark.parametrize("compression", ["uncompressed", "zstd", "lz4"])
+def test_small_file_with_size_metadata(connection, tmp_path, rows, compression):
     path = tmp_path / "small.arrow"
-    connection.execute(f"COPY (SELECT 42 AS x WHERE {bool(rows)}) TO '{path}' (SIZE_METADATA)")
-    assert_size_metadata(path.read_bytes())
+    connection.execute(f"COPY (SELECT 42 AS x WHERE {bool(rows)}) TO '{path}' (SIZE_METADATA, COMPRESSION '{compression}')")
+    compressed_size, uncompressed_size = assert_size_metadata(path.read_bytes())
     reader = ipc.open_file(path)
     assert reader.num_record_batches == rows
     assert reader.schema == pa.schema([("x", pa.int32())])
     assert reader.read_all().to_pydict() == {"x": [42] * rows}
+    if rows and compression != "uncompressed":
+        assert compressed_size > uncompressed_size
 
 
 @pytest.mark.parametrize("preserve_order", [True, False])
-def test_nested_columns_across_batches(connection, tmp_path, preserve_order, source_row_count):
+@pytest.mark.parametrize("compression", ["uncompressed", "zstd"])
+def test_nested_columns_across_batches(connection, tmp_path, preserve_order, source_row_count, compression):
     path = tmp_path / "nested.arrow"
     connection.execute("SET threads=4")
     connection.execute(f"SET preserve_insertion_order={str(preserve_order).lower()}")
@@ -172,19 +217,22 @@ def test_nested_columns_across_batches(connection, tmp_path, preserve_order, sou
     """
     expected = connection.execute(source).to_arrow_table().sort_by("i")
     connection.execute(
-        f"COPY ({source}) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048)"
+        f"COPY ({source}) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048, "
+        f"SIZE_METADATA, COMPRESSION '{compression}')"
     )
+    assert_size_metadata(path.read_bytes())
     reader = ipc.open_file(path)
     assert reader.num_record_batches > 1
     result = reader.read_all()
     result.validate(full=True)
     if not preserve_order:
         result = result.sort_by("i")
-    assert result.equals(expected, check_metadata=True)
+    assert result.replace_schema_metadata(None).equals(expected, check_metadata=True)
 
 
 @pytest.mark.parametrize("format_name", ["arrow", "arrows"])
-def test_rotated_files_are_complete(connection, tmp_path, source_row_count, format_name):
+@pytest.mark.parametrize("compression", ["uncompressed", "zstd"])
+def test_rotated_files_are_complete(connection, tmp_path, source_row_count, format_name, compression):
     path = tmp_path / "parts"
     connection.execute("SET threads=4")
     connection.execute("SET preserve_insertion_order=false")
@@ -192,7 +240,7 @@ def test_rotated_files_are_complete(connection, tmp_path, source_row_count, form
         f"""
         COPY source TO '{path}'
         (FORMAT {format_name}, ROW_GROUP_SIZE 2048, ROW_GROUPS_PER_FILE 3,
-         SIZE_METADATA {format_name == 'arrow'})
+         SIZE_METADATA {format_name == 'arrow'}, COMPRESSION '{compression}')
         """
     )
     files = list(path.glob(f"*.{format_name}"))

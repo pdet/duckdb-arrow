@@ -15,19 +15,14 @@ namespace {
 constexpr char kTotalCompressedSize[] = "total_compressed_size";
 constexpr char kTotalUncompressedSize[] = "total_uncompressed_size";
 
-void AddSchemaMetadata(ArrowSchema* schema, const vector<pair<string, string>>& metadata,
-                       bool replace = false) {
-  if (metadata.empty()) {
-    return;
-  }
+void SetSchemaMetadata(ArrowSchema* schema,
+                       const vector<pair<string, string>>& metadata) {
   nanoarrow::UniqueBuffer packed;
   NANOARROW_THROW_NOT_OK(ArrowMetadataBuilderInit(packed.get(), schema->metadata));
   for (const auto& item : metadata) {
-    ArrowStringView key{item.first.data(), NumericCast<int64_t>(item.first.size())};
-    ArrowStringView value{item.second.data(), NumericCast<int64_t>(item.second.size())};
-    NANOARROW_THROW_NOT_OK(replace
-                               ? ArrowMetadataBuilderSet(packed.get(), key, value)
-                               : ArrowMetadataBuilderAppend(packed.get(), key, value));
+    ArrowStringView key{item.first.data(), static_cast<int64_t>(item.first.size())};
+    ArrowStringView value{item.second.data(), static_cast<int64_t>(item.second.size())};
+    NANOARROW_THROW_NOT_OK(ArrowMetadataBuilderSet(packed.get(), key, value));
   }
   NANOARROW_THROW_NOT_OK(
       ArrowSchemaSetMetadata(schema, reinterpret_cast<char*>(packed->data)));
@@ -40,31 +35,36 @@ ArrowStreamWriter::ArrowStreamWriter(const ClientProperties& options_p, FileSyst
                                      const vector<LogicalType>& logical_types,
                                      const ArrowSchema& schema_p,
                                      const vector<pair<string, string>>& metadata,
+                                     const vector<ArrowFieldMetadata>& field_metadata,
+                                     const ArrowIpcCompressionOptions& compression,
                                      bool file_format, bool size_metadata)
     : options(options_p),
       allocator(BufferAllocator::Get(*options.client_context)),
-      serializer(options, allocator, size_metadata),
+      compression(compression),
       logical_types(logical_types),
       file_format(file_format),
       size_metadata(size_metadata) {
-  InitSchema(schema_p, metadata);
+  InitSchema(schema_p, metadata, field_metadata);
   InitOutputFile(fs, file_path);
 }
 
 void ArrowStreamWriter::InitSchema(const ArrowSchema& schema_p,
-                                   const vector<pair<string, string>>& metadata) {
+                                   const vector<pair<string, string>>& metadata,
+                                   const vector<ArrowFieldMetadata>& field_metadata) {
   // Copy into a nanoarrow owned schema so the metadata set below is freed with it
   NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(&schema_p, schema.get()));
-
-  AddSchemaMetadata(schema.get(), metadata);
+  if (!metadata.empty()) {
+    SetSchemaMetadata(schema.get(), metadata);
+  }
+  for (const auto& field : field_metadata) {
+    SetSchemaMetadata(schema->children[field.column_index], field.metadata);
+  }
   if (size_metadata) {
     // Reserve space for the longest totals before writing any record batches
     const auto max_size = std::to_string(std::numeric_limits<int64_t>::max());
-    AddSchemaMetadata(schema.get(), {{kTotalCompressedSize, max_size},
+    SetSchemaMetadata(schema.get(), {{kTotalCompressedSize, max_size},
                                      {kTotalUncompressedSize, max_size}});
   }
-
-  serializer.Init(schema.get(), logical_types);
 }
 
 void ArrowStreamWriter::InitOutputFile(FileSystem& fs, const string& file_path) {
@@ -82,35 +82,21 @@ void ArrowStreamWriter::InitOutputFile(FileSystem& fs, const string& file_path) 
 }
 
 void ArrowStreamWriter::WriteSchema() {
-  serializer.SerializeSchema(schema.get());
-  schema_message_size = serializer.Flush(*writer).metadata_length;
+  auto serializer = NewSerializer();
+  serializer->SerializeSchema(schema.get());
+  schema_message_size = serializer->Flush(*writer).metadata_length;
   file_size = writer->GetTotalWritten();
 }
 
 unique_ptr<ColumnDataCollectionSerializer> ArrowStreamWriter::NewSerializer() const {
-  auto serializer =
-      make_uniq<ColumnDataCollectionSerializer>(options, allocator, size_metadata);
+  auto serializer = make_uniq<ColumnDataCollectionSerializer>(options, allocator,
+                                                              compression, size_metadata);
   serializer->Init(schema.get(), logical_types);
   return serializer;
 }
 
-// Encoding under the lock bounds memory to one Arrow array and one body at a time
-void ArrowStreamWriter::Flush(ColumnDataCollection& buffer) {
-  if (buffer.Count() == 0) {
-    return;
-  }
-  lock_guard<mutex> guard(lock);
-  serializer.Serialize(buffer);
-  buffer.Reset();
-  FlushInternal(serializer);
-}
-
-// DuckDB flushes prepared batches one at a time in order
 void ArrowStreamWriter::Flush(ColumnDataCollectionSerializer& serializer) {
-  FlushInternal(serializer);
-}
-
-void ArrowStreamWriter::FlushInternal(ColumnDataCollectionSerializer& serializer) {
+  lock_guard<mutex> guard(lock);
   auto block = serializer.Flush(*writer);
   if (file_format) {
     blocks.push_back(block);
@@ -125,6 +111,7 @@ void ArrowStreamWriter::FlushInternal(ColumnDataCollectionSerializer& serializer
 
 void ArrowStreamWriter::Finalize() {
   uint8_t end_of_stream[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
+  lock_guard<mutex> guard(lock);
   writer->WriteData(end_of_stream, sizeof(end_of_stream));
   if (file_format) {
     WriteFooter();
@@ -134,16 +121,17 @@ void ArrowStreamWriter::Finalize() {
 }
 
 void ArrowStreamWriter::WriteFooter() {
+  auto serializer = NewSerializer();
   nanoarrow::UniqueSchema footer_schema;
   NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(schema.get(), footer_schema.get()));
   if (size_metadata) {
-    AddSchemaMetadata(footer_schema.get(),
-                      {{kTotalCompressedSize, std::to_string(total_compressed_size)},
-                       {kTotalUncompressedSize, std::to_string(total_uncompressed_size)}},
-                      true);
+    SetSchemaMetadata(
+        footer_schema.get(),
+        {{kTotalCompressedSize, std::to_string(total_compressed_size)},
+         {kTotalUncompressedSize, std::to_string(total_uncompressed_size)}});
     // Update the opening schema to match the footer without changing its reserved size
-    serializer.SerializeSchema(footer_schema.get(), schema_message_size);
-    auto opening_schema = serializer.GetHeader();
+    serializer->SerializeSchema(footer_schema.get(), schema_message_size);
+    auto opening_schema = serializer->GetHeader();
     writer->Flush();
     const auto end_offset = writer->GetTotalWritten();
     writer->handle->Write(QueryContext(), opening_schema->data,
@@ -151,8 +139,8 @@ void ArrowStreamWriter::WriteFooter() {
                           kArrowIPCFileHeaderSize);
     writer->handle->Seek(end_offset);
   }
-  serializer.SerializeFooter(std::move(footer_schema), blocks);
-  auto footer = serializer.GetHeader();
+  serializer->SerializeFooter(std::move(footer_schema), blocks);
+  auto footer = serializer->GetHeader();
   auto footer_size = NumericCast<int32_t>(footer->size_bytes);
   writer->WriteData(footer->data, footer->size_bytes);
   writer->Write<int32_t>(BSwapIfBE(footer_size));

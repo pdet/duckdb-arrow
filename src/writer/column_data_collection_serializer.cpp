@@ -77,11 +77,12 @@ nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
   return schema;
 }
 
-ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(ClientProperties options,
-                                                               Allocator& allocator,
-                                                               bool track_body_size)
+ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(
+    ClientProperties options, Allocator& allocator,
+    ArrowIpcCompressionOptions compression, bool track_body_size)
     : options(std::move(options)),
       allocator(allocator),
+      compression(compression),
       track_body_size(track_body_size) {}
 
 void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
@@ -94,6 +95,8 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
   InitArrowDuckBuffer(header.get(), allocator);
   InitArrowDuckBuffer(body.get(), allocator);
   NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
+  SetArrowIpcEncoderCompression(*encoder.get(), compression,
+                                track_body_size ? &uncompressed_body_size : nullptr);
   THROW_NOT_OK(InternalException, &error,
                ArrowArrayViewInitFromSchema(chunk_view.get(), schema, &error));
 
@@ -105,7 +108,7 @@ void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema,
                                                      idx_t reserved_size) {
   header->size_bytes = 0;
   body->size_bytes = 0;
-  THROW_NOT_OK(InternalException, &error,
+  THROW_NOT_OK(NotImplementedException, &error,
                ArrowIpcEncoderEncodeSchema(encoder.get(), schema, &error));
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
@@ -145,10 +148,11 @@ idx_t ColumnDataCollectionSerializer::Serialize(ArrowAppender& appender) {
 
   THROW_NOT_OK(duckdb::InternalException, &error,
                ArrowArrayViewSetArray(chunk_view.get(), array.get(), &error));
+  uncompressed_body_size = 0;
   THROW_NOT_OK(InternalException, &error,
                ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(),
                                                       body.get(), &error));
-  if (track_body_size) {
+  if (track_body_size && compression.type == NANOARROW_IPC_COMPRESSION_TYPE_NONE) {
     uncompressed_body_size = body->size_bytes;
   }
   NANOARROW_THROW_NOT_OK(
@@ -157,6 +161,9 @@ idx_t ColumnDataCollectionSerializer::Serialize(ArrowAppender& appender) {
   return 1;
 }
 idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buffer) {
+  if (buffer.Count() == 0) {
+    return 0;
+  }
   ArrowAppender appender(buffer.Types(), buffer.Count(), options, extension_types);
   for (auto& chunk : buffer.Chunks()) {
     appender.Append(chunk, 0, chunk.size(), chunk.size());

@@ -6,13 +6,16 @@ set(TARGET_NAME nanoarrow)
 
 set(NANOARROW_IPC ON)
 set(NANOARROW_NAMESPACE "DuckDBExt${TARGET_NAME}")
+# nanoarrow main with IPC body compression (#935), move to a release tag once one ships it
 fetchcontent_declare(nanoarrow
-                     URL "https://github.com/apache/arrow-nanoarrow/archive/9fad80292360d0f3978264c11ba865ccc94020d8.zip"
-                     URL_HASH SHA256=7dae6a078981463c7cbf9d430c27056812cdac0963e368f3f1ea6736c5f8280f
+                     URL "https://github.com/apache/arrow-nanoarrow/archive/665794510011c07d4a6932b248608c2c02113796.zip"
+                     URL_HASH SHA256=a81178c68929c74e97cff6b02f9a9f77fc656966ad7dbc4ae858cb45496d6b6f
 )
-# nanoarrow builds its own LZ4 decompressor but must be told where liblz4 lives
-# In CI the library comes from vcpkg (see vcpkg.json), otherwise a system copy is found
-# The extension links liblz4 transitively through nanoarrow_ipc (needs CMake 3.24 or newer)
+# nanoarrow compresses and decompresses itself with liblz4 and libzstd, from vcpkg in CI
+set(NANOARROW_IPC_WITH_ZSTD ON)
+# DuckDB's bundled zstd is namespaced C++ that nanoarrow's C sources cannot link against
+find_path(ZSTD_INCLUDE_DIR zstd.h REQUIRED)
+# nanoarrow looks lz4 up through pkgconfig unless these variables are set
 find_path(LZ4_INCLUDE_DIR lz4frame.h REQUIRED)
 find_library(LZ4_LIBRARY NAMES lz4 liblz4 REQUIRED)
 get_filename_component(LZ4_LIBRARY_DIR "${LZ4_LIBRARY}" DIRECTORY)
@@ -20,7 +23,17 @@ set(NANOARROW_IPC_WITH_LZ4 ON)
 set(LZ4_INCLUDE_DIRS "${LZ4_INCLUDE_DIR}")
 set(LZ4_LIBRARY_DIRS "${LZ4_LIBRARY_DIR}")
 set(LZ4_LIBRARIES "${LZ4_LIBRARY}")
+# Both libraries link into the extension transitively through nanoarrow_ipc (CMake 3.24)
 fetchcontent_makeavailable(nanoarrow)
+# DuckDB puts its namespaced zstd.h on every target, nanoarrow must see the real one first
+foreach(nanoarrow_ipc_target nanoarrow_ipc_static nanoarrow_ipc_shared)
+  if(TARGET ${nanoarrow_ipc_target})
+    # The imported zstd target exports the same directory, this keeps it out of isystem
+    set_target_properties(${nanoarrow_ipc_target} PROPERTIES NO_SYSTEM_FROM_IMPORTED ON)
+    target_include_directories(${nanoarrow_ipc_target} BEFORE
+                               PRIVATE "${ZSTD_INCLUDE_DIR}")
+  endif()
+endforeach()
 
 set(EXTENSION_NAME ${TARGET_NAME}_extension)
 set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
@@ -37,6 +50,7 @@ set(EXTENSION_SOURCES
     src/ipc/stream_reader/base_stream_reader.cpp
     src/ipc/stream_reader/ipc_file_stream_reader.cpp
     src/ipc/stream_reader/ipc_buffer_stream_reader.cpp
+    src/scanner/arrow_kv_metadata.cpp
     src/scanner/read_arrow.cpp
     src/scanner/scan_arrow_ipc.cpp
     src/nanoarrow_extension.cpp

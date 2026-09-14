@@ -1,8 +1,10 @@
 #include "writer/to_arrow_ipc.hpp"
 
+#include "ipc/codecs.hpp"
 #include "writer/column_data_collection_serializer.hpp"
 
 #include "duckdb/common/arrow/arrow_appender.hpp"
+#include "duckdb/common/exception/binder_exception.hpp"
 #include "duckdb/execution/physical_operator.hpp"
 #include "duckdb/function/function.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -16,6 +18,7 @@ namespace ext_nanoarrow {
 struct ToArrowIpcFunctionData : public TableFunctionData {
   ToArrowIpcFunctionData() = default;
   ClientProperties options;
+  ArrowIpcCompressionOptions compression;
   nanoarrow::UniqueSchema schema;
   vector<LogicalType> logical_types;
   const idx_t chunk_size = ToArrowIPCFunction::DEFAULT_CHUNK_SIZE * STANDARD_VECTOR_SIZE;
@@ -40,7 +43,7 @@ unique_ptr<LocalTableFunctionState> ToArrowIPCFunction::InitLocal(
   auto local_state = make_uniq<ToArrowIpcLocalState>();
   auto& data = input.bind_data->Cast<ToArrowIpcFunctionData>();
   local_state->serializer = make_uniq<ColumnDataCollectionSerializer>(
-      data.options, BufferAllocator::Get(context.client));
+      data.options, BufferAllocator::Get(context.client), data.compression);
   local_state->serializer->Init(data.schema.get(), data.logical_types);
   return std::move(local_state);
 }
@@ -55,6 +58,13 @@ unique_ptr<FunctionData> ToArrowIPCFunction::Bind(ClientContext& context,
                                                   vector<LogicalType>& return_types,
                                                   vector<string>& names) {
   auto result = make_uniq<ToArrowIpcFunctionData>();
+  for (auto& kv : input.named_parameters) {
+    if (kv.second.IsNull()) {
+      throw BinderException("Cannot use NULL as function argument");
+    }
+    result->compression.TrySetOption(kv.first, kv.second);
+  }
+  result->compression.Validate();
 
   return_types.emplace_back(LogicalType::BLOB);
   names.emplace_back("ipc");
@@ -168,6 +178,8 @@ TableFunction ToArrowIPCFunction::GetFunction() {
                     InitLocal);
   fun.in_out_function = Function;
   fun.in_out_function_final = FunctionFinal;
+  fun.named_parameters["compression"] = LogicalType::VARCHAR;
+  fun.named_parameters["compression_level"] = LogicalType::BIGINT;
   return fun;
 }
 
