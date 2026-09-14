@@ -8,28 +8,34 @@
 
 #pragma once
 #include "duckdb/common/atomic.hpp"
+#include "duckdb/common/mutex.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "writer/column_data_collection_serializer.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
 
+struct ArrowFieldMetadata {
+  idx_t column_index;
+  vector<pair<string, string>> metadata;
+};
+
 struct ArrowStreamWriter {
   ArrowStreamWriter(const ClientProperties& options, FileSystem& fs,
                     const string& file_path, const vector<LogicalType>& logical_types,
                     const ArrowSchema& schema,
-                    const vector<pair<string, string>>& metadata, bool file_format);
+                    const vector<pair<string, string>>& metadata,
+                    const vector<ArrowFieldMetadata>& field_metadata,
+                    const ArrowIpcCompressionOptions& compression, bool file_format);
 
-  void InitSchema(const ArrowSchema& schema,
-                  const vector<pair<string, string>>& metadata);
+  void InitSchema(const ArrowSchema& schema, const vector<pair<string, string>>& metadata,
+                  const vector<ArrowFieldMetadata>& field_metadata);
 
   void InitOutputFile(FileSystem& fs, const string& file_path);
 
   void WriteSchema();
 
   unique_ptr<ColumnDataCollectionSerializer> NewSerializer() const;
-
-  void Flush(ColumnDataCollection& buffer);
 
   void Flush(ColumnDataCollectionSerializer& serializer);
 
@@ -40,12 +46,11 @@ struct ArrowStreamWriter {
   idx_t FileSize() const;
 
  private:
-  void FlushInternal(ColumnDataCollectionSerializer& serializer);
   void WriteFooter();
 
   ClientProperties options;
   Allocator& allocator;
-  ColumnDataCollectionSerializer serializer;
+  ArrowIpcCompressionOptions compression;
   vector<LogicalType> logical_types;
   bool file_format;
   mutex lock;

@@ -8,6 +8,7 @@
 
 #include "nanoarrow/nanoarrow.hpp"
 
+#include "table_function/arrow_kv_metadata.hpp"
 #include "table_function/read_arrow.hpp"
 #include "table_function/scan_arrow_ipc.hpp"
 #include "write_arrow_stream.hpp"
@@ -31,6 +32,7 @@ struct NanoarrowVersion {
 void LoadInternal(ExtensionLoader& loader) {
   NanoarrowVersion::Register(loader);
   ext_nanoarrow::RegisterReadArrowStream(loader);
+  ext_nanoarrow::RegisterArrowKvMetadata(loader);
   ext_nanoarrow::RegisterArrowStreamCopyFunction(loader);
 
   ext_nanoarrow::ScanArrowIPC::RegisterReadArrowStream(loader);

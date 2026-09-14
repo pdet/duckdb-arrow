@@ -8,44 +8,51 @@ namespace duckdb {
 
 namespace ext_nanoarrow {
 
+namespace {
+
+void SetSchemaMetadata(ArrowSchema* schema,
+                       const vector<pair<string, string>>& metadata) {
+  nanoarrow::UniqueBuffer packed;
+  NANOARROW_THROW_NOT_OK(ArrowMetadataBuilderInit(packed.get(), schema->metadata));
+  for (const auto& item : metadata) {
+    ArrowStringView key{item.first.data(), static_cast<int64_t>(item.first.size())};
+    ArrowStringView value{item.second.data(), static_cast<int64_t>(item.second.size())};
+    NANOARROW_THROW_NOT_OK(ArrowMetadataBuilderSet(packed.get(), key, value));
+  }
+  NANOARROW_THROW_NOT_OK(
+      ArrowSchemaSetMetadata(schema, reinterpret_cast<char*>(packed->data)));
+}
+
+}  // namespace
+
 ArrowStreamWriter::ArrowStreamWriter(const ClientProperties& options_p, FileSystem& fs,
                                      const string& file_path,
                                      const vector<LogicalType>& logical_types,
                                      const ArrowSchema& schema_p,
                                      const vector<pair<string, string>>& metadata,
+                                     const vector<ArrowFieldMetadata>& field_metadata,
+                                     const ArrowIpcCompressionOptions& compression,
                                      bool file_format)
     : options(options_p),
       allocator(BufferAllocator::Get(*options.client_context)),
-      serializer(options, allocator),
+      compression(compression),
       logical_types(logical_types),
       file_format(file_format) {
-  InitSchema(schema_p, metadata);
+  InitSchema(schema_p, metadata, field_metadata);
   InitOutputFile(fs, file_path);
 }
 
 void ArrowStreamWriter::InitSchema(const ArrowSchema& schema_p,
-                                   const vector<pair<string, string>>& metadata) {
+                                   const vector<pair<string, string>>& metadata,
+                                   const vector<ArrowFieldMetadata>& field_metadata) {
   // Copy into a nanoarrow owned schema so the metadata set below is freed with it
   NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(&schema_p, schema.get()));
-
   if (!metadata.empty()) {
-    nanoarrow::UniqueBuffer metadata_packed;
-    NANOARROW_THROW_NOT_OK(
-        ArrowMetadataBuilderInit(metadata_packed.get(), schema->metadata));
-    ArrowStringView key{};
-    ArrowStringView value{};
-    for (const auto& item : metadata) {
-      key = {item.first.data(), static_cast<int64_t>(item.first.size())};
-      value = {item.second.data(), static_cast<int64_t>(item.second.size())};
-      NANOARROW_THROW_NOT_OK(
-          ArrowMetadataBuilderAppend(metadata_packed.get(), key, value));
-    }
-
-    NANOARROW_THROW_NOT_OK(ArrowSchemaSetMetadata(
-        schema.get(), reinterpret_cast<char*>(metadata_packed->data)));
+    SetSchemaMetadata(schema.get(), metadata);
   }
-
-  serializer.Init(schema.get(), logical_types);
+  for (const auto& field : field_metadata) {
+    SetSchemaMetadata(schema->children[field.column_index], field.metadata);
+  }
 }
 
 void ArrowStreamWriter::InitOutputFile(FileSystem& fs, const string& file_path) {
@@ -58,34 +65,21 @@ void ArrowStreamWriter::InitOutputFile(FileSystem& fs, const string& file_path) 
 }
 
 void ArrowStreamWriter::WriteSchema() {
-  serializer.SerializeSchema(schema.get());
-  serializer.Flush(*writer);
+  auto serializer = NewSerializer();
+  serializer->SerializeSchema(schema.get());
+  serializer->Flush(*writer);
   file_size = writer->GetTotalWritten();
 }
 
 unique_ptr<ColumnDataCollectionSerializer> ArrowStreamWriter::NewSerializer() const {
-  auto serializer = make_uniq<ColumnDataCollectionSerializer>(options, allocator);
+  auto serializer =
+      make_uniq<ColumnDataCollectionSerializer>(options, allocator, compression);
   serializer->Init(schema.get(), logical_types);
   return serializer;
 }
 
-// Encoding under the lock bounds memory to one Arrow array and one body at a time
-void ArrowStreamWriter::Flush(ColumnDataCollection& buffer) {
-  if (buffer.Count() == 0) {
-    return;
-  }
-  lock_guard<mutex> guard(lock);
-  serializer.Serialize(buffer);
-  buffer.Reset();
-  FlushInternal(serializer);
-}
-
-// DuckDB flushes prepared batches one at a time in order
 void ArrowStreamWriter::Flush(ColumnDataCollectionSerializer& serializer) {
-  FlushInternal(serializer);
-}
-
-void ArrowStreamWriter::FlushInternal(ColumnDataCollectionSerializer& serializer) {
+  lock_guard<mutex> guard(lock);
   auto block = serializer.Flush(*writer);
   if (file_format) {
     blocks.push_back(block);
@@ -96,6 +90,7 @@ void ArrowStreamWriter::FlushInternal(ColumnDataCollectionSerializer& serializer
 
 void ArrowStreamWriter::Finalize() {
   uint8_t end_of_stream[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
+  lock_guard<mutex> guard(lock);
   writer->WriteData(end_of_stream, sizeof(end_of_stream));
   if (file_format) {
     WriteFooter();
@@ -105,8 +100,9 @@ void ArrowStreamWriter::Finalize() {
 }
 
 void ArrowStreamWriter::WriteFooter() {
-  serializer.SerializeFooter(schema.get(), blocks);
-  auto footer = serializer.GetHeader();
+  auto serializer = NewSerializer();
+  serializer->SerializeFooter(schema.get(), blocks);
+  auto footer = serializer->GetHeader();
   auto footer_size = NumericCast<int32_t>(footer->size_bytes);
   writer->WriteData(footer->data, footer->size_bytes);
   writer->Write<int32_t>(BSwapIfBE(footer_size));

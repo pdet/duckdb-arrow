@@ -75,9 +75,10 @@ nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
   return schema;
 }
 
-ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(ClientProperties options,
-                                                               Allocator& allocator)
-    : options(std::move(options)), allocator(allocator) {}
+ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(
+    ClientProperties options, Allocator& allocator,
+    ArrowIpcCompressionOptions compression)
+    : options(std::move(options)), allocator(allocator), compression(compression) {}
 
 void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
                                           const vector<LogicalType>& logical_types) {
@@ -89,6 +90,7 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
   InitArrowDuckBuffer(header.get(), allocator);
   InitArrowDuckBuffer(body.get(), allocator);
   NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
+  SetArrowIpcEncoderCompression(*encoder.get(), compression);
   THROW_NOT_OK(InternalException, &error,
                ArrowArrayViewInitFromSchema(chunk_view.get(), schema, &error));
 
@@ -99,7 +101,7 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
 void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema) {
   header->size_bytes = 0;
   body->size_bytes = 0;
-  THROW_NOT_OK(InternalException, &error,
+  THROW_NOT_OK(NotImplementedException, &error,
                ArrowIpcEncoderEncodeSchema(encoder.get(), schema, &error));
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
@@ -137,6 +139,9 @@ idx_t ColumnDataCollectionSerializer::Serialize(ArrowAppender& appender) {
   return 1;
 }
 idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buffer) {
+  if (buffer.Count() == 0) {
+    return 0;
+  }
   ArrowAppender appender(buffer.Types(), buffer.Count(), options, extension_types);
   for (auto& chunk : buffer.Chunks()) {
     appender.Append(chunk, 0, chunk.size(), chunk.size());

@@ -52,14 +52,15 @@ def test_buffer_output_remains_a_stream(connection, tmp_path):
 
 
 @pytest.mark.parametrize("output", ["copy", "buffer"])
-def test_prepared_output_keeps_bound_settings(connection, tmp_path, output):
+@pytest.mark.parametrize("compression", ["uncompressed", "zstd"])
+def test_prepared_output_keeps_bound_settings(connection, tmp_path, output, compression):
     path = tmp_path / "prepared.arrow"
     source = "SELECT 'abcdefghijklmno'::BLOB AS b"
     connection.execute("SET arrow_output_version='1.3'")
     query = (
-        f"COPY ({source}) TO '{path}'"
+        f"COPY ({source}) TO '{path}' (COMPRESSION '{compression}')"
         if output == "copy"
-        else f"FROM to_arrow_ipc(({source}))"
+        else f"FROM to_arrow_ipc(({source}), compression := '{compression}')"
     )
     connection.execute(f"PREPARE prepared_ipc AS {query}")
     connection.execute("SET arrow_output_version='1.4'")
@@ -75,7 +76,8 @@ def test_prepared_output_keeps_bound_settings(connection, tmp_path, output):
 
 
 @pytest.mark.parametrize("preserve_order", [True, False])
-def test_file_footer_random_access(connection, tmp_path, preserve_order, source_row_count):
+@pytest.mark.parametrize("compression", ["uncompressed", "zstd", "lz4"])
+def test_file_footer_random_access(connection, tmp_path, preserve_order, source_row_count, compression):
     path = tmp_path / "batches.arrow"
     connection.execute("SET threads=4")
     connection.execute(f"SET preserve_insertion_order={str(preserve_order).lower()}")
@@ -84,8 +86,9 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order, source_
         COPY (
             SELECT i, CASE WHEN i % 7 = 0 THEN NULL ELSE i::VARCHAR END AS s
             FROM source
-        ) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048,
-                      KV_METADATA {{'source': 'file-format-test'}})
+        ) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048, COMPRESSION '{compression}',
+                      KV_METADATA {{'source': 'file-format-test'}},
+                      FIELD_METADATA {{'i': {{'unit': 'count'}}}})
         """
     )
 
@@ -95,6 +98,7 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order, source_
     stream_reader = ipc.open_stream(payload[8:])
     assert file_reader.schema.equals(stream_reader.schema, check_metadata=True)
     assert file_reader.schema.metadata[b"source"] == b"file-format-test"
+    assert file_reader.schema.field("i").metadata[b"unit"] == b"count"
     batches = list(stream_reader)
     assert file_reader.num_record_batches == len(batches) > 1
     for i in reversed(range(len(batches))):
@@ -123,13 +127,15 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order, source_
         assert message.metadata_version == pa.MetadataVersion.V5
 
 
-def test_file_footer_without_batches(connection, tmp_path):
+@pytest.mark.parametrize("compression", ["uncompressed", "zstd", "lz4"])
+def test_file_footer_without_batches(connection, tmp_path, compression):
     path = tmp_path / "empty.arrow"
-    connection.execute(f"COPY (SELECT 42 AS x WHERE false) TO '{path}'")
+    connection.execute(f"COPY (SELECT 42 AS x WHERE false) TO '{path}' (COMPRESSION '{compression}')")
     reader = ipc.open_file(path)
     assert reader.num_record_batches == 0
     assert reader.schema == pa.schema([("x", pa.int32())])
     assert reader.read_all().num_rows == 0
+    assert reader.schema.equals(ipc.open_stream(path.read_bytes()[8:]).schema, check_metadata=True)
 
 
 @pytest.mark.parametrize("preserve_order", [True, False])

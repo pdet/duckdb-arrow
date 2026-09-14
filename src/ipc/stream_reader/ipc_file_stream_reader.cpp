@@ -36,7 +36,7 @@ void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder& decoder,
   // compiled with a compiler that supports C11 atomics, i.e., not gcc 4.8 or
   // MSVC)
   nanoarrow::UniqueArray array;
-  THROW_NOT_OK(InternalException, error,
+  THROW_NOT_OK(IOException, error,
                ArrowIpcDecoderDecodeArray(decoder.get(), body_view, -1, array.get(),
                                           NANOARROW_VALIDATION_LEVEL_FULL, error));
   ArrowArrayMove(array.get(), out);
@@ -54,22 +54,14 @@ bool IPCFileStreamReader::DecodeHeader(const idx_t message_header_size) {
   // an attempt to read a very large message_header_size can be cancelled. If this
   // is not the case, we might want to implement our own buffering.
   std::memcpy(message_header.get(), &message_prefix, sizeof(message_prefix));
-  ReadData(message_header.get() + sizeof(message_prefix), message_prefix.metadata_size);
+  ReadData(message_header.get() + sizeof(message_prefix),
+           message_header_size - sizeof(message_prefix));
 
-  ArrowErrorCode decode_header_status = ArrowIpcDecoderDecodeHeader(
-      decoder.get(),
-      AllocatedDataView(message_header.get(),
-                        static_cast<int64_t>(message_header.GetSize())),
-      &error);
-  if (decode_header_status == ENODATA) {
-    finished = true;
-    return true;
-  }
-  THROW_NOT_OK(IOException, &error, decode_header_status);
-  return false;
+  return DecodeHeaderBuffer(AllocatedDataView(message_header.get(), message_header_size));
 }
 
 void IPCFileStreamReader::DecodeBody() {
+  message_body.reset();
   if (decoder->body_size_bytes > 0) {
     EnsureInputStreamAligned();
     message_body =
@@ -100,8 +92,10 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
   }
 
   // If there is no more data to be read, we're done!
+  idx_t message_start = file_reader.CurrentOffset();
   try {
     EnsureInputStreamAligned();
+    message_start = file_reader.CurrentOffset();
     file_reader.ReadData(reinterpret_cast<data_ptr_t>(&message_prefix),
                          sizeof(message_prefix));
 
@@ -120,12 +114,19 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
       throw IOException(std::string("Expected continuation token (0xFFFFFFFF) but got " +
                                     std::to_string(message_prefix.continuation_token)));
     }
-
-    // Decode the message
-    return DecodeMessage();
   } catch (SerializationException& e) {
+    // Only a stream that stops at a message boundary may omit the end of stream marker
+    if (message_start < file_reader.FileSize()) {
+      throw IOException("Arrow IPC stream is truncated, it ends inside a message prefix");
+    }
     finished = true;
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+  }
+
+  try {
+    return DecodeMessage();
+  } catch (SerializationException& e) {
+    throw IOException("Arrow IPC stream is truncated, it ends inside a message");
   }
 }
 

@@ -43,7 +43,7 @@ SELECT (SELECT count(*) > 1 FROM glob('__TEST_DIR__/rotate/*.arrow')), count(*),
 ----
 true	100000	0
 
-# ENUM columns become Arrow dictionaries, which nanoarrow cannot encode
+# ENUM output requires dictionary messages
 statement ok
 CREATE TYPE mood AS ENUM ('happy', 'sad');
 
@@ -97,8 +97,8 @@ Arrow view type "vz" in column "b"
 statement ok
 RESET arrow_output_version;
 
-# nanoarrow encodes metadata as C strings, so a NUL byte is rejected instead of truncated
+# NUL bytes in metadata values are rejected
 statement error
 COPY (SELECT 1 AS x) TO '__TEST_DIR__/nul.arrow' (KV_METADATA {'k': 'ab\x00cd'::BLOB});
 ----
-Binder Error: KV_METADATA entry "k" contains a NUL byte
+Metadata value for key "k" must not contain NUL bytes
