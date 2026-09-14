@@ -1,6 +1,9 @@
 #include "writer/column_data_collection_serializer.hpp"
 
 #include <utility>
+
+#include "duckdb/common/numeric_utils.hpp"
+
 namespace duckdb {
 
 namespace ext_nanoarrow {
@@ -69,6 +72,23 @@ void ColumnDataCollectionSerializer::SerializeSchema() {
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
 }
 
+void ColumnDataCollectionSerializer::SerializeFooter(
+    const vector<ArrowIpcFileBlock>& blocks) {
+  header->size_bytes = 0;
+  body->size_bytes = 0;
+  nanoarrow::ipc::UniqueFooter footer;
+  NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(schema, &footer->schema));
+  if (!blocks.empty()) {
+    NANOARROW_THROW_NOT_OK(ArrowBufferAppend(
+        &footer->record_batch_blocks, blocks.data(),
+        NumericCast<int64_t>(blocks.size() * sizeof(ArrowIpcFileBlock))));
+  }
+  THROW_NOT_OK(InternalException, &error,
+               ArrowIpcEncoderEncodeFooter(encoder.get(), footer.get(), &error));
+  NANOARROW_THROW_NOT_OK(
+      ArrowIpcEncoderFinalizeBuffer(encoder.get(), false, header.get()));
+}
+
 idx_t ColumnDataCollectionSerializer::Serialize(ArrowArray& array) {
   header->size_bytes = 0;
   body->size_bytes = 0;
@@ -120,9 +140,12 @@ idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buff
   return Serialize(chunk);
 }
 
-void ColumnDataCollectionSerializer::Flush(BufferedFileWriter& writer) {
+ArrowIpcFileBlock ColumnDataCollectionSerializer::Flush(BufferedFileWriter& writer) {
+  ArrowIpcFileBlock block{NumericCast<int64_t>(writer.GetTotalWritten()),
+                          NumericCast<int32_t>(header->size_bytes), body->size_bytes};
   writer.WriteData(header->data, header->size_bytes);
   writer.WriteData(body->data, body->size_bytes);
+  return block;
 }
 nanoarrow::UniqueBuffer ColumnDataCollectionSerializer::GetHeader() {
   auto result_header = std::move(header);

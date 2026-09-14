@@ -1,0 +1,74 @@
+# name: test/sql/write_arrow_file.test
+# description: COPY Arrow IPC files with magic, a footer, and independent rotated files
+# group: [sql]
+
+require nanoarrow
+
+statement ok
+CREATE TABLE test AS SELECT i, (i % 7)::VARCHAR AS s FROM range(100000) t(i);
+
+statement ok
+COPY test TO '__TEST_DIR__/test.arrow';
+
+query II
+SELECT content[1:8] = 'ARROW1\x00\x00'::BLOB, content[-6:] = 'ARROW1'::BLOB FROM read_blob('__TEST_DIR__/test.arrow');
+----
+true	true
+
+query I
+SELECT count(*) FROM (FROM test EXCEPT ALL FROM read_arrow('__TEST_DIR__/test.arrow'));
+----
+0
+
+statement ok
+COPY test TO '__TEST_DIR__/test.arrows';
+
+query I
+SELECT content[1:6] = 'ARROW1'::BLOB FROM read_blob('__TEST_DIR__/test.arrows');
+----
+true
+
+# Both COPY format aliases write the file format, regardless of filename extension.
+statement ok
+COPY test TO '__TEST_DIR__/explicit.arrows' (FORMAT ARROW);
+
+query I
+SELECT content[-6:] = 'ARROW1'::BLOB FROM read_blob('__TEST_DIR__/explicit.arrows');
+----
+true
+
+statement ok
+COPY test TO '__TEST_DIR__/explicit.arrow' (FORMAT ARROWS);
+
+query I
+SELECT content[1:6] = 'ARROW1'::BLOB FROM read_blob('__TEST_DIR__/explicit.arrow');
+----
+true
+
+# Empty output still has a schema and a footer, with no record batches.
+statement ok
+COPY (FROM test WHERE false) TO '__TEST_DIR__/empty.arrow';
+
+query II
+SELECT content[1:6] = 'ARROW1'::BLOB, content[-6:] = 'ARROW1'::BLOB FROM read_blob('__TEST_DIR__/empty.arrow');
+----
+true	true
+
+query I
+SELECT count(*) FROM read_arrow('__TEST_DIR__/empty.arrow');
+----
+0
+
+statement ok
+SET threads=4;
+
+statement ok
+SET preserve_insertion_order=false;
+
+statement ok
+COPY test TO '__TEST_DIR__/rotate' (FORMAT ARROW, ROW_GROUP_SIZE 4096, ROW_GROUPS_PER_FILE 5);
+
+query III
+SELECT (SELECT count(*) > 1 FROM glob('__TEST_DIR__/rotate/*.arrow')), count(*), (SELECT count(*) FROM (FROM test EXCEPT ALL FROM read_arrow('__TEST_DIR__/rotate/*.arrow'))) FROM read_arrow('__TEST_DIR__/rotate/*.arrow');
+----
+true	100000	0

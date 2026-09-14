@@ -27,12 +27,15 @@ class ColumnDataCollectionSerializer {
 
   void SerializeSchema();
 
+  void SerializeFooter(const vector<ArrowIpcFileBlock>& blocks);
+
   idx_t Serialize(ArrowArray& array);
   idx_t Serialize(DataChunk& chunk);
 
   idx_t Serialize(const ColumnDataCollection& buffer);
 
-  void Flush(BufferedFileWriter& writer);
+  // Returns the position and sizes of the message for the IPC file footer.
+  ArrowIpcFileBlock Flush(BufferedFileWriter& writer);
 
   nanoarrow::UniqueBuffer GetHeader();
 

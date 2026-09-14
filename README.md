@@ -51,14 +51,14 @@ In the remainder of this section, we cover the supported parameters and usages f
 ### IPC Files
 
 #### Write
-Writing an Arrow IPC file is done using the COPY statement Below is a simple example of how you can use DuckDB to create such a file.
+Writing Arrow IPC output is done using the COPY statement. Below is a simple example of how you can use DuckDB to create an IPC file.
 
 ```sql
-COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrows";
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrow";
 ```
 
-Both `.arrows` and `.arrow` will be automatically recognized by DuckDB as Arrow IPC streams.
-However, if you wish to use a different extension, you can manually specify the format using:
+`COPY` writes the Arrow IPC file format, including a footer for random access with readers such as `pyarrow.ipc.open_file`. `ARROW` and `ARROWS` are aliases, and both `.arrow` and `.arrows` filenames select this writer. The `to_arrow_ipc` buffer function produces IPC stream messages instead.
+For a different filename extension, specify either format explicitly:
 
 ```sql
 COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.ipc" (FORMAT ARROWS);
@@ -76,12 +76,12 @@ If `row_group_size_bytes` and either `chunk_size` or `row_group_size` are used, 
 #### Read
 You can consume the file using the `read_arrow` scanner. For example, to read the file we just created, you could run:
 ```sql
-FROM read_arrow('test.arrows');
+FROM read_arrow('test.arrow');
 ```
 
 Similar to the copy function, the extension also registers `.arrows` and `.arrow` as valid extensions for the Arrow IPC format. This means that a replacement scan can be applied if that is the file extension, so the following would also be a valid query:
 ```sql
-FROM 'test.arrows';
+FROM 'test.arrow';
 ```
 
 Files and streams whose record batch bodies are compressed with `zstd` or `lz4` (the two codecs allowed by the Arrow IPC format) are read transparently.
@@ -90,17 +90,17 @@ Besides single-file reading, our extension also fully supports multi-file readin
 
 If we were to create a second test file using:
 ```sql
-COPY (SELECT 42 as foofy, 'string' as stringy) TO "test_2.arrows" (FORMAT ARROWS);
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "test_2.arrow" (FORMAT ARROWS);
 ```
 
 We can then run a query that reads both files using a glob pattern or a list of file paths:
 
 ```sql
 -- Glob
-FROM read_arrow('*.arrows')
+FROM read_arrow('*.arrow')
 
 -- List
-FROM read_arrow(['test.arrows','test_2.arrows'])
+FROM read_arrow(['test.arrow','test_2.arrow'])
 ```
 
 When reading multiple files, the following parameters are also supported:
@@ -108,7 +108,7 @@ When reading multiple files, the following parameters are also supported:
 * `filename`: If set to `True`, this will add a column with the name of the file that generated each row.
 * `hive_partitioning`: Enables reading data from a Hive-partitioned dataset and applies partition filtering.
 > [!NOTE]
-> [Arrow IPC files (.arrow)](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams (.arrows)](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are distinct but related formats. This extension can read both but only writes Arrow IPC Streams.
+> [Arrow IPC files](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are both standard Arrow formats. This extension reads both, writes IPC files through `COPY`, and produces IPC stream messages through `to_arrow_ipc`. Existing files containing IPC streams remain readable regardless of their filename extension.
 ### IPC Stream Buffers
 Similar to the old core Arrow extension, this extension also allows direct production and consumption of the Arrow IPC streaming format from in-memory buffers in both Python and Node.js.
 In this section, we will demonstrate how to use the Python API, but you can find many tests that serve as examples for both [Node.js](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/nodejs) and [Python](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/python).
