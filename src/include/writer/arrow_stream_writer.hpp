@@ -26,7 +26,8 @@ struct ArrowStreamWriter {
                     const vector<LogicalType>& logical_types,
                     const vector<string>& column_names,
                     const vector<pair<string, string>>& metadata,
-                    const vector<ArrowFieldMetadata>& field_metadata);
+                    const vector<ArrowFieldMetadata>& field_metadata,
+                    const ArrowIpcCompressionOptions& compression);
 
   void InitSchema(const vector<LogicalType>& logical_types,
                   const vector<string>& column_names,
@@ -52,6 +53,7 @@ struct ArrowStreamWriter {
  private:
   ClientProperties options;
   Allocator& allocator;
+  ArrowIpcCompressionOptions compression;
   string file_name;
   vector<LogicalType> logical_types;
   nanoarrow::UniqueSchema schema;

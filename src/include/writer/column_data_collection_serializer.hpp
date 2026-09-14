@@ -13,6 +13,7 @@
 #include "duckdb/common/types/column/column_data_collection.hpp"
 #include "duckdb/function/table/arrow/arrow_duck_schema.hpp"
 #include "duckdb/main/client_properties.hpp"
+#include "ipc/codecs.hpp"
 #include "nanoarrow/nanoarrow_ipc.hpp"
 #include "nanoarrow_errors.hpp"
 
@@ -21,7 +22,8 @@ namespace ext_nanoarrow {
 
 class ColumnDataCollectionSerializer {
  public:
-  ColumnDataCollectionSerializer(ClientProperties options, Allocator& allocator);
+  ColumnDataCollectionSerializer(ClientProperties options, Allocator& allocator,
+                                 ArrowIpcCompressionOptions compression = {});
 
   //! Prepares the serializer for arrays matching schema; no reference to it is kept
   void Init(const ArrowSchema* schema, const vector<LogicalType>& logical_types);
@@ -29,6 +31,7 @@ class ColumnDataCollectionSerializer {
   //! Encodes the IPC schema message for schema into the header buffer
   void SerializeSchema(const ArrowSchema* schema);
 
+  //! Copies the array buffers, so the array only needs to live through this call
   idx_t Serialize(ArrowArray& array);
   idx_t Serialize(DataChunk& chunk);
 
@@ -43,10 +46,10 @@ class ColumnDataCollectionSerializer {
  private:
   ClientProperties options;
   Allocator& allocator;
+  ArrowIpcCompressionOptions compression;
   unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>> extension_types;
   nanoarrow::ipc::UniqueEncoder encoder;
   nanoarrow::UniqueArrayView chunk_view;
-  nanoarrow::UniqueArray chunk_arrow;
   nanoarrow::UniqueBuffer header;
   nanoarrow::UniqueBuffer body;
   ArrowError error{};

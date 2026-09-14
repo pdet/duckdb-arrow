@@ -26,9 +26,11 @@ ArrowStreamWriter::ArrowStreamWriter(ClientContext& context, FileSystem& fs,
                                      const vector<LogicalType>& logical_types,
                                      const vector<string>& column_names,
                                      const vector<pair<string, string>>& metadata,
-                                     const vector<ArrowFieldMetadata>& field_metadata)
+                                     const vector<ArrowFieldMetadata>& field_metadata,
+                                     const ArrowIpcCompressionOptions& compression)
     : options(context.GetClientProperties()),
       allocator(BufferAllocator::Get(context)),
+      compression(compression),
       file_name(file_path),
       logical_types(logical_types) {
   InitSchema(logical_types, column_names, metadata, field_metadata);
@@ -70,7 +72,8 @@ void ArrowStreamWriter::WriteSchema() {
 }
 
 unique_ptr<ColumnDataCollectionSerializer> ArrowStreamWriter::NewSerializer() const {
-  auto serializer = make_uniq<ColumnDataCollectionSerializer>(options, allocator);
+  auto serializer =
+      make_uniq<ColumnDataCollectionSerializer>(options, allocator, compression);
   serializer->Init(schema.get(), logical_types);
   return serializer;
 }

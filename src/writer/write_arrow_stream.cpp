@@ -38,6 +38,7 @@ struct ArrowWriteBindData : public TableFunctionData {
   optional_idx row_groups_per_file;
   static constexpr const idx_t BYTES_PER_ROW = 1024;
   idx_t row_group_size_bytes{};
+  ArrowIpcCompressionOptions compression;
 };
 
 struct ArrowWriteGlobalState : public GlobalFunctionData {
@@ -134,6 +135,9 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
                             StringUtil::Upper(loption));
     }
 
+    if (bind_data->compression.TrySetOption(loption, option.second[0])) {
+      continue;
+    }
     if (loption == "row_group_size" || loption == "chunk_size") {
       if (bind_data->row_group_size_set) {
         throw BinderException(
@@ -159,6 +163,8 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
           ReadFieldMetadata(option.second[0], bind_data->column_names);
     }
   }
+  // Checked after the loop since the options can be given in any order
+  bind_data->compression.Validate();
 
   if (row_group_size_bytes_set) {
     if (Settings::Get<PreserveInsertionOrderSetting>(context)) {
@@ -185,7 +191,7 @@ unique_ptr<GlobalFunctionData> ArrowWriteInitializeGlobal(ClientContext& context
   auto& fs = FileSystem::GetFileSystem(context);
   global_state->writer = make_uniq<ArrowStreamWriter>(
       context, fs, file_path, arrow_bind.sql_types, arrow_bind.column_names,
-      arrow_bind.kv_metadata, arrow_bind.field_metadata);
+      arrow_bind.kv_metadata, arrow_bind.field_metadata, arrow_bind.compression);
   global_state->writer->WriteSchema();
   return std::move(global_state);
 }
