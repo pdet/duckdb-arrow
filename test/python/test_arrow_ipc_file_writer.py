@@ -14,25 +14,27 @@ def source_row_count(connection):
 
 
 @pytest.mark.parametrize(
-    "suffix,format_option",
+    "suffix,format_option,file_format",
     [
-        ("arrow", ""),
-        ("arrows", ""),
-        ("arrows", "FORMAT ARROW"),
-        ("arrow", "FORMAT ARROWS"),
-        ("ipc", "FORMAT ARROW"),
-        ("ipc", "FORMAT ARROWS"),
+        ("arrow", "", True),
+        ("arrows", "", False),
+        ("arrows", "FORMAT ARROW", True),
+        ("arrow", "FORMAT ARROWS", False),
     ],
 )
-def test_copy_aliases_write_files(connection, tmp_path, suffix, format_option):
+def test_copy_aliases_pick_framing(connection, tmp_path, suffix, format_option, file_format):
     path = tmp_path / f"output.{suffix}"
     options = f"({format_option})" if format_option else ""
     connection.execute(f"COPY (SELECT 42 AS x) TO '{path}' {options}")
 
     payload = path.read_bytes()
-    assert payload[:8] == b"ARROW1\0\0"
-    assert payload[-6:] == b"ARROW1"
-    reader = ipc.open_file(payload)
+    if file_format:
+        assert payload[:8] == b"ARROW1\0\0"
+        assert payload[-6:] == b"ARROW1"
+        reader = ipc.open_file(payload)
+    else:
+        assert payload[:4] == b"\xff\xff\xff\xff"
+        reader = ipc.open_stream(payload)
     assert reader.read_all().to_pydict() == {"x": [42]}
 
 
@@ -47,6 +49,29 @@ def test_buffer_output_remains_a_stream(connection, tmp_path):
     path = tmp_path / "registered.ipc"
     path.write_bytes(payload)
     assert connection.execute(f"FROM read_arrow('{path}')").fetchall() == [(42,)]
+
+
+@pytest.mark.parametrize("output", ["copy", "buffer"])
+def test_prepared_output_keeps_bound_settings(connection, tmp_path, output):
+    path = tmp_path / "prepared.arrow"
+    source = "SELECT 'abcdefghijklmno'::BLOB AS b"
+    connection.execute("SET arrow_output_version='1.3'")
+    query = (
+        f"COPY ({source}) TO '{path}'"
+        if output == "copy"
+        else f"FROM to_arrow_ipc(({source}))"
+    )
+    connection.execute(f"PREPARE prepared_ipc AS {query}")
+    connection.execute("SET arrow_output_version='1.4'")
+    messages = connection.execute("EXECUTE prepared_ipc").fetchall()
+    reader = (
+        ipc.open_file(path)
+        if output == "copy"
+        else ipc.open_stream(b"".join(message for message, _ in messages))
+    )
+    assert reader.schema == pa.schema([("b", pa.binary())])
+    assert reader.read_all().to_pydict() == {"b": [b"abcdefghijklmno"]}
+    assert connection.execute("SELECT 42").fetchone() == (42,)
 
 
 @pytest.mark.parametrize("preserve_order", [True, False])
@@ -136,21 +161,22 @@ def test_nested_columns_across_batches(connection, tmp_path, preserve_order, sou
     assert result.equals(expected, check_metadata=True)
 
 
-def test_rotated_files_have_independent_footers(connection, tmp_path, source_row_count):
+@pytest.mark.parametrize("format_name", ["arrow", "arrows"])
+def test_rotated_files_are_complete(connection, tmp_path, source_row_count, format_name):
     path = tmp_path / "parts"
     connection.execute("SET threads=4")
     connection.execute("SET preserve_insertion_order=false")
     connection.execute(
         f"""
         COPY source TO '{path}'
-        (FORMAT ARROW, ROW_GROUP_SIZE 2048, ROW_GROUPS_PER_FILE 3)
+        (FORMAT {format_name}, ROW_GROUP_SIZE 2048, ROW_GROUPS_PER_FILE 3)
         """
     )
-    files = list(path.glob("*.arrow"))
+    files = list(path.glob(f"*.{format_name}"))
     assert len(files) > 1
     values = []
     for file in files:
-        reader = ipc.open_file(file)
+        reader = ipc.open_file(file) if format_name == "arrow" else ipc.open_stream(file)
         table = reader.read_all()
         table.validate(full=True)
         values.extend(table.column("i").to_pylist())

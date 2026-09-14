@@ -15,6 +15,7 @@ namespace ext_nanoarrow {
 
 struct ToArrowIpcFunctionData : public TableFunctionData {
   ToArrowIpcFunctionData() = default;
+  ClientProperties options;
   nanoarrow::UniqueSchema schema;
   vector<LogicalType> logical_types;
   const idx_t chunk_size = ToArrowIPCFunction::DEFAULT_CHUNK_SIZE * STANDARD_VECTOR_SIZE;
@@ -37,10 +38,9 @@ unique_ptr<LocalTableFunctionState> ToArrowIPCFunction::InitLocal(
     ExecutionContext& context, TableFunctionInitInput& input,
     GlobalTableFunctionState* global_state) {
   auto local_state = make_uniq<ToArrowIpcLocalState>();
-  auto properties = context.client.GetClientProperties();
-  local_state->serializer = make_uniq<ColumnDataCollectionSerializer>(
-      properties, BufferAllocator::Get(context.client));
   auto& data = input.bind_data->Cast<ToArrowIpcFunctionData>();
+  local_state->serializer = make_uniq<ColumnDataCollectionSerializer>(
+      data.options, BufferAllocator::Get(context.client));
   local_state->serializer->Init(data.schema.get(), data.logical_types);
   return std::move(local_state);
 }
@@ -55,17 +55,17 @@ unique_ptr<FunctionData> ToArrowIPCFunction::Bind(ClientContext& context,
                                                   vector<LogicalType>& return_types,
                                                   vector<string>& names) {
   auto result = make_uniq<ToArrowIpcFunctionData>();
-  CheckEncodableTypes(input.input_table_types, input.input_table_names);
 
   return_types.emplace_back(LogicalType::BLOB);
   names.emplace_back("ipc");
   return_types.emplace_back(LogicalType::BOOLEAN);
   names.emplace_back("header");
 
-  auto properties = context.GetClientProperties();
+  result->options = context.GetClientProperties();
   result->logical_types = input.input_table_types;
   ArrowConverter::ToArrowSchema(result->schema.get(), input.input_table_types,
-                                input.input_table_names, properties);
+                                input.input_table_names, result->options);
+  CheckEncodableSchema(*result->schema.get());
   return std::move(result);
 }
 
@@ -132,7 +132,7 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
   } else {
     if (!local_state.appender) {
       local_state.appender = make_uniq<ArrowAppender>(
-          input.GetTypes(), data.chunk_size, context.client.GetClientProperties(),
+          input.GetTypes(), data.chunk_size, data.options,
           ArrowTypeExtensionData::GetExtensionTypes(context.client, input.GetTypes()));
     }
 

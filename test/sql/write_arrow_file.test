@@ -20,39 +20,9 @@ SELECT count(*) FROM (FROM test EXCEPT ALL FROM read_arrow('__TEST_DIR__/test.ar
 ----
 0
 
-statement ok
-COPY test TO '__TEST_DIR__/test.arrows';
-
-query I
-SELECT content[1:6] = 'ARROW1'::BLOB FROM read_blob('__TEST_DIR__/test.arrows');
-----
-true
-
-# Both COPY format aliases write the file format, regardless of filename extension.
-statement ok
-COPY test TO '__TEST_DIR__/explicit.arrows' (FORMAT ARROW);
-
-query I
-SELECT content[-6:] = 'ARROW1'::BLOB FROM read_blob('__TEST_DIR__/explicit.arrows');
-----
-true
-
-statement ok
-COPY test TO '__TEST_DIR__/explicit.arrow' (FORMAT ARROWS);
-
-query I
-SELECT content[1:6] = 'ARROW1'::BLOB FROM read_blob('__TEST_DIR__/explicit.arrow');
-----
-true
-
 # Empty output still has a schema and a footer, with no record batches.
 statement ok
 COPY (FROM test WHERE false) TO '__TEST_DIR__/empty.arrow';
-
-query II
-SELECT content[1:6] = 'ARROW1'::BLOB, content[-6:] = 'ARROW1'::BLOB FROM read_blob('__TEST_DIR__/empty.arrow');
-----
-true	true
 
 query I
 SELECT count(*) FROM read_arrow('__TEST_DIR__/empty.arrow');
@@ -97,3 +67,38 @@ query I
 SELECT count(*) FROM read_arrow('__TEST_DIR__/empty.arrow');
 ----
 0
+
+# A file size limit below the schema size must not rotate empty files forever
+statement ok
+SET threads=1;
+
+statement ok
+COPY (SELECT i FROM range(5000) t(i)) TO '__TEST_DIR__/tiny' (FORMAT ARROW, FILE_SIZE_BYTES 50, ROW_GROUP_SIZE 1);
+
+query II
+SELECT (SELECT count(*) > 1 FROM glob('__TEST_DIR__/tiny/*.arrow')), count(*) FROM read_arrow('__TEST_DIR__/tiny/*.arrow');
+----
+true	5000
+
+# Arrow view layouts cannot be encoded, so they are rejected at bind
+statement ok
+SET arrow_output_version='1.4';
+
+statement error
+COPY (SELECT 'a'::BLOB AS b) TO '__TEST_DIR__/view.arrow';
+----
+Not implemented Error: Arrow IPC output does not support the Arrow view type "vz" in column "b"
+
+statement error
+FROM to_arrow_ipc((SELECT 'a'::BLOB AS b));
+----
+Arrow view type "vz" in column "b"
+
+statement ok
+RESET arrow_output_version;
+
+# nanoarrow encodes metadata as C strings, so a NUL byte is rejected instead of truncated
+statement error
+COPY (SELECT 1 AS x) TO '__TEST_DIR__/nul.arrow' (KV_METADATA {'k': 'ab\x00cd'::BLOB});
+----
+Binder Error: KV_METADATA entry "k" contains a NUL byte

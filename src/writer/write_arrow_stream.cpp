@@ -23,9 +23,11 @@ namespace ext_nanoarrow {
 namespace {
 
 struct ArrowWriteBindData : public TableFunctionData {
+  ClientProperties options;
   vector<LogicalType> sql_types;
   vector<string> column_names;
   vector<pair<string, string>> kv_metadata;
+  bool file_format = true;
   idx_t row_group_size = 122880;
   bool row_group_size_set = false;
   optional_idx row_groups_per_file;
@@ -52,8 +54,13 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
                                         const vector<string>& names,
                                         const vector<LogicalType>& sql_types) {
   D_ASSERT(names.size() == sql_types.size());
-  CheckEncodableTypes(sql_types, names);
   auto bind_data = make_uniq<ArrowWriteBindData>();
+  bind_data->options = context.GetClientProperties();
+  nanoarrow::UniqueSchema schema;
+  ArrowConverter::ToArrowSchema(schema.get(), sql_types, names, bind_data->options);
+  CheckEncodableSchema(*schema.get());
+  // Arrow recommends .arrow for the file format and .arrows for the stream
+  bind_data->file_format = StringUtil::Lower(input.info.format) != "arrows";
   bool row_group_size_bytes_set = false;
 
   for (auto& option : input.info.options) {
@@ -95,6 +102,15 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
         } else {
           bind_data->kv_metadata.emplace_back(key, value.ToString());
         }
+        // nanoarrow encodes metadata as C strings, so a NUL byte would truncate it
+        auto& entry = bind_data->kv_metadata.back();
+        if (entry.first.find('\0') != string::npos ||
+            entry.second.find('\0') != string::npos) {
+          throw BinderException(
+              "KV_METADATA entry \"%s\" contains a NUL byte, which nanoarrow cannot "
+              "encode",
+              key);
+        }
       }
     }
   }
@@ -124,9 +140,9 @@ unique_ptr<GlobalFunctionData> ArrowWriteInitializeGlobal(ClientContext& context
   auto& arrow_bind = bind_data.Cast<ArrowWriteBindData>();
 
   auto& fs = FileSystem::GetFileSystem(context);
-  global_state->writer =
-      make_uniq<ArrowStreamWriter>(context, fs, file_path, arrow_bind.sql_types,
-                                   arrow_bind.column_names, arrow_bind.kv_metadata);
+  global_state->writer = make_uniq<ArrowStreamWriter>(
+      arrow_bind.options, fs, file_path, arrow_bind.sql_types, arrow_bind.column_names,
+      arrow_bind.kv_metadata, arrow_bind.file_format);
   global_state->writer->WriteSchema();
   return std::move(global_state);
 }
@@ -193,6 +209,10 @@ bool ArrowWriteRotateNextFile(GlobalFunctionData& gstate, FunctionData& bind_dat
                               const optional_idx& file_size_bytes) {
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
   auto& bind_data = bind_data_p.Cast<ArrowWriteBindData>();
+  // A file with no row groups would rotate forever
+  if (global_state.writer->NumberOfRowGroups() == 0) {
+    return false;
+  }
   if (file_size_bytes.IsValid() &&
       global_state.writer->FileSize() > file_size_bytes.GetIndex()) {
     return true;

@@ -4,7 +4,6 @@
 
 #include "duckdb/common/arrow/arrow_appender.hpp"
 #include "duckdb/common/numeric_utils.hpp"
-#include "duckdb/common/type_visitor.hpp"
 
 namespace duckdb {
 
@@ -38,14 +37,36 @@ inline void InitArrowDuckBuffer(ArrowBuffer* buffer, Allocator& duck_allocator) 
   buffer->allocator.private_data = &duck_allocator;
 }
 
-void CheckEncodableTypes(const vector<LogicalType>& types, const vector<string>& names) {
-  for (idx_t i = 0; i < types.size(); i++) {
-    if (TypeVisitor::Contains(types[i], LogicalTypeId::ENUM)) {
+static void CheckEncodableField(const ArrowSchema& field, const char* column) {
+  if (field.dictionary) {
+    throw NotImplementedException(
+        "Arrow IPC output does not support ENUM values in column \"%s\", cast it to "
+        "VARCHAR",
+        column);
+  }
+  ArrowSchemaView view;
+  ArrowError error{};
+  THROW_NOT_OK(InternalException, &error, ArrowSchemaViewInit(&view, &field, &error));
+  switch (view.type) {
+    case NANOARROW_TYPE_STRING_VIEW:
+    case NANOARROW_TYPE_BINARY_VIEW:
+    case NANOARROW_TYPE_LIST_VIEW:
+    case NANOARROW_TYPE_LARGE_LIST_VIEW:
       throw NotImplementedException(
-          "Arrow IPC output does not support ENUM values in column \"%s\", cast it to "
-          "VARCHAR",
-          names[i]);
-    }
+          "Arrow IPC output does not support the Arrow view type \"%s\" in column "
+          "\"%s\", reset arrow_output_version or the arrow view settings",
+          field.format, column);
+    default:
+      break;
+  }
+  for (int64_t i = 0; i < field.n_children; i++) {
+    CheckEncodableField(*field.children[i], column);
+  }
+}
+
+void CheckEncodableSchema(const ArrowSchema& schema) {
+  for (int64_t i = 0; i < schema.n_children; i++) {
+    CheckEncodableField(*schema.children[i], schema.children[i]->name);
   }
 }
 
@@ -85,11 +106,9 @@ void ColumnDataCollectionSerializer::SerializeFooter(
   body->size_bytes = 0;
   nanoarrow::ipc::UniqueFooter footer;
   NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(schema, &footer->schema));
-  if (!blocks.empty()) {
-    NANOARROW_THROW_NOT_OK(ArrowBufferAppend(
-        &footer->record_batch_blocks, blocks.data(),
-        NumericCast<int64_t>(blocks.size() * sizeof(ArrowIpcFileBlock))));
-  }
+  NANOARROW_THROW_NOT_OK(
+      ArrowBufferAppend(&footer->record_batch_blocks, blocks.data(),
+                        NumericCast<int64_t>(blocks.size() * sizeof(ArrowIpcFileBlock))));
   THROW_NOT_OK(InternalException, &error,
                ArrowIpcEncoderEncodeFooter(encoder.get(), footer.get(), &error));
   NANOARROW_THROW_NOT_OK(
@@ -111,11 +130,6 @@ idx_t ColumnDataCollectionSerializer::Serialize(ArrowArray& array) {
   return 1;
 }
 idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buffer) {
-  header->size_bytes = 0;
-  body->size_bytes = 0;
-  if (buffer.Count() == 0) {
-    return 0;
-  }
   ArrowAppender appender(buffer.Types(), buffer.Count(), options, extension_types);
   for (auto& chunk : buffer.Chunks()) {
     appender.Append(chunk, 0, chunk.size(), chunk.size());
@@ -128,12 +142,8 @@ idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buff
 ArrowIpcFileBlock ColumnDataCollectionSerializer::Flush(BufferedFileWriter& writer) {
   ArrowIpcFileBlock block{NumericCast<int64_t>(writer.GetTotalWritten()),
                           NumericCast<int32_t>(header->size_bytes), body->size_bytes};
-  if (header->size_bytes != 0) {
-    writer.WriteData(header->data, header->size_bytes);
-  }
-  if (body->size_bytes != 0) {
-    writer.WriteData(body->data, body->size_bytes);
-  }
+  writer.WriteData(header->data, header->size_bytes);
+  writer.WriteData(body->data, body->size_bytes);
   return block;
 }
 nanoarrow::UniqueBuffer ColumnDataCollectionSerializer::GetHeader() {

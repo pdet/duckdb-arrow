@@ -51,8 +51,8 @@ class ColumnDataCollectionSerializer {
   ArrowError error{};
 };
 
-// nanoarrow cannot encode the dictionary arrays DuckDB produces for ENUM
-void CheckEncodableTypes(const vector<LogicalType>& types, const vector<string>& names);
+// nanoarrow cannot encode dictionaries, which DuckDB produces for ENUM, or view layouts
+void CheckEncodableSchema(const ArrowSchema& schema);
 
 }  // namespace ext_nanoarrow
 }  // namespace duckdb

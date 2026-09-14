@@ -57,8 +57,8 @@ Writing Arrow IPC output is done using the COPY statement. Below is a simple exa
 COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrow";
 ```
 
-`COPY` writes the Arrow IPC file format, including a footer for random access with readers such as `pyarrow.ipc.open_file`. `ARROW` and `ARROWS` are aliases, and both `.arrow` and `.arrows` filenames select this writer. The `to_arrow_ipc` buffer function produces IPC stream messages instead.
-For a different filename extension, specify either format explicitly:
+`COPY` follows the Arrow file extension convention. `.arrow` files and `FORMAT ARROW` produce the Arrow IPC file format, including a footer for random access with readers such as `pyarrow.ipc.open_file`. `.arrows` files and `FORMAT ARROWS` produce the Arrow IPC streaming format, which the `to_arrow_ipc` buffer function also emits as messages.
+For a different filename extension, specify the format explicitly:
 
 ```sql
 COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.ipc" (FORMAT ARROWS);
@@ -90,7 +90,7 @@ Besides single-file reading, our extension also fully supports multi-file readin
 
 If we were to create a second test file using:
 ```sql
-COPY (SELECT 42 as foofy, 'string' as stringy) TO "test_2.arrow" (FORMAT ARROWS);
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "test_2.arrow" (FORMAT ARROW);
 ```
 
 We can then run a query that reads both files using a glob pattern or a list of file paths:
@@ -108,7 +108,7 @@ When reading multiple files, the following parameters are also supported:
 * `filename`: If set to `True`, this will add a column with the name of the file that generated each row.
 * `hive_partitioning`: Enables reading data from a Hive-partitioned dataset and applies partition filtering.
 > [!NOTE]
-> [Arrow IPC files](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are both standard Arrow formats. This extension reads both, writes IPC files through `COPY`, and produces IPC stream messages through `to_arrow_ipc`. Existing files containing IPC streams remain readable regardless of their filename extension.
+> [Arrow IPC files](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are both standard Arrow formats. This extension reads both regardless of filename extension, and `COPY` writes a file for `.arrow` or `FORMAT ARROW` and a stream for `.arrows` or `FORMAT ARROWS`.
 ### IPC Stream Buffers
 Similar to the old core Arrow extension, this extension also allows direct production and consumption of the Arrow IPC streaming format from in-memory buffers in both Python and Node.js.
 In this section, we will demonstrate how to use the Python API, but you can find many tests that serve as examples for both [Node.js](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/nodejs) and [Python](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/python).
