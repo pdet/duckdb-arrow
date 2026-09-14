@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
+#include "duckdb/common/mutex.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "writer/column_data_collection_serializer.hpp"
 
@@ -19,6 +20,7 @@ struct ArrowFieldMetadata {
   vector<pair<string, string>> metadata;
 };
 
+//! Arrow IPC stream shared by threads; encoding is per thread, the lock guards the file
 struct ArrowStreamWriter {
   ArrowStreamWriter(ClientContext& context, FileSystem& fs, const string& file_path,
                     const vector<LogicalType>& logical_types,
@@ -35,13 +37,13 @@ struct ArrowStreamWriter {
 
   void WriteSchema();
 
-  unique_ptr<ColumnDataCollectionSerializer> NewSerializer();
+  //! Creates a per-thread serializer (own ArrowIpcEncoder) that may outlive this writer
+  unique_ptr<ColumnDataCollectionSerializer> NewSerializer() const;
 
-  void Flush(ColumnDataCollection& buffer);
-
+  //! Appends the encoded row group held by serializer to the file
   void Flush(ColumnDataCollectionSerializer& serializer);
 
-  void Finalize() const;
+  void Finalize();
 
   idx_t NumberOfRowGroups() const;
 
@@ -50,12 +52,13 @@ struct ArrowStreamWriter {
  private:
   ClientProperties options;
   Allocator& allocator;
-  ColumnDataCollectionSerializer serializer;
   string file_name;
   vector<LogicalType> logical_types;
+  nanoarrow::UniqueSchema schema;
+  //! Guards writer and row_group_count only; encoding happens outside of it
+  mutable mutex lock;
   unique_ptr<BufferedFileWriter> writer;
   idx_t row_group_count{0};
-  nanoarrow::UniqueSchema schema;
 };
 
 }  // namespace ext_nanoarrow
