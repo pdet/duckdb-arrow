@@ -23,13 +23,14 @@ namespace ext_nanoarrow {
 
 class ColumnDataCollectionSerializer {
  public:
-  ColumnDataCollectionSerializer(ClientProperties options, Allocator& allocator);
+  ColumnDataCollectionSerializer(ClientProperties options, Allocator& allocator,
+                                 bool track_body_size = false);
 
   void Init(const ArrowSchema* schema, const vector<LogicalType>& logical_types);
 
-  void SerializeSchema(const ArrowSchema* schema);
+  void SerializeSchema(const ArrowSchema* schema, idx_t reserved_size = 0);
 
-  void SerializeFooter(const ArrowSchema* schema,
+  void SerializeFooter(nanoarrow::UniqueSchema schema,
                        const vector<ArrowIpcFileBlock>& blocks);
 
   idx_t Serialize(ArrowAppender& appender);
@@ -38,6 +39,8 @@ class ColumnDataCollectionSerializer {
 
   ArrowIpcFileBlock Flush(BufferedFileWriter& writer);
 
+  int64_t UncompressedBodySize() const { return uncompressed_body_size; }
+
   nanoarrow::UniqueBuffer GetHeader();
 
   nanoarrow::UniqueBuffer GetBody();
@@ -45,6 +48,8 @@ class ColumnDataCollectionSerializer {
  private:
   ClientProperties options;
   Allocator& allocator;
+  bool track_body_size;
+  int64_t uncompressed_body_size = 0;
   unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>> extension_types;
   nanoarrow::ipc::UniqueEncoder encoder;
   nanoarrow::UniqueArrayView chunk_view;

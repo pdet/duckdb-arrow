@@ -1,8 +1,22 @@
+import os
 import struct
 
+import duckdb
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
+
+
+def assert_size_metadata(payload):
+    schema = ipc.open_file(payload).schema
+    assert schema.equals(ipc.open_stream(payload[8:]).schema, check_metadata=True)
+    total = sum(
+        message.body.size
+        for message in ipc.MessageReader.open_stream(payload[8:])
+        if message.type == "record batch"
+    )
+    for key in [b"total_compressed_size", b"total_uncompressed_size"]:
+        assert schema.metadata[key] == str(total).encode()
 
 
 @pytest.fixture
@@ -35,6 +49,7 @@ def test_copy_aliases_pick_framing(connection, tmp_path, suffix, format_option, 
     else:
         assert payload[:4] == b"\xff\xff\xff\xff"
         reader = ipc.open_stream(payload)
+    assert not reader.schema.metadata
     assert reader.read_all().to_pydict() == {"x": [42]}
 
 
@@ -75,7 +90,8 @@ def test_prepared_output_keeps_bound_settings(connection, tmp_path, output):
 
 
 @pytest.mark.parametrize("preserve_order", [True, False])
-def test_file_footer_random_access(connection, tmp_path, preserve_order, source_row_count):
+@pytest.mark.parametrize("size_metadata", [True, False])
+def test_file_footer_random_access(connection, tmp_path, preserve_order, source_row_count, size_metadata):
     path = tmp_path / "batches.arrow"
     connection.execute("SET threads=4")
     connection.execute(f"SET preserve_insertion_order={str(preserve_order).lower()}")
@@ -84,7 +100,7 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order, source_
         COPY (
             SELECT i, CASE WHEN i % 7 = 0 THEN NULL ELSE i::VARCHAR END AS s
             FROM source
-        ) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048,
+        ) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048, SIZE_METADATA {size_metadata},
                       KV_METADATA {{'source': 'file-format-test'}})
         """
     )
@@ -95,6 +111,10 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order, source_
     stream_reader = ipc.open_stream(payload[8:])
     assert file_reader.schema.equals(stream_reader.schema, check_metadata=True)
     assert file_reader.schema.metadata[b"source"] == b"file-format-test"
+    if size_metadata:
+        assert_size_metadata(payload)
+    else:
+        assert file_reader.schema.metadata == {b"source": b"file-format-test"}
     batches = list(stream_reader)
     assert file_reader.num_record_batches == len(batches) > 1
     for i in reversed(range(len(batches))):
@@ -123,13 +143,15 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order, source_
         assert message.metadata_version == pa.MetadataVersion.V5
 
 
-def test_file_footer_without_batches(connection, tmp_path):
-    path = tmp_path / "empty.arrow"
-    connection.execute(f"COPY (SELECT 42 AS x WHERE false) TO '{path}'")
+@pytest.mark.parametrize("rows", [0, 1])
+def test_small_file_with_size_metadata(connection, tmp_path, rows):
+    path = tmp_path / "small.arrow"
+    connection.execute(f"COPY (SELECT 42 AS x WHERE {bool(rows)}) TO '{path}' (SIZE_METADATA)")
+    assert_size_metadata(path.read_bytes())
     reader = ipc.open_file(path)
-    assert reader.num_record_batches == 0
+    assert reader.num_record_batches == rows
     assert reader.schema == pa.schema([("x", pa.int32())])
-    assert reader.read_all().num_rows == 0
+    assert reader.read_all().to_pydict() == {"x": [42] * rows}
 
 
 @pytest.mark.parametrize("preserve_order", [True, False])
@@ -169,15 +191,32 @@ def test_rotated_files_are_complete(connection, tmp_path, source_row_count, form
     connection.execute(
         f"""
         COPY source TO '{path}'
-        (FORMAT {format_name}, ROW_GROUP_SIZE 2048, ROW_GROUPS_PER_FILE 3)
+        (FORMAT {format_name}, ROW_GROUP_SIZE 2048, ROW_GROUPS_PER_FILE 3,
+         SIZE_METADATA {format_name == 'arrow'})
         """
     )
     files = list(path.glob(f"*.{format_name}"))
     assert len(files) > 1
     values = []
     for file in files:
+        if format_name == "arrow":
+            assert_size_metadata(file.read_bytes())
         reader = ipc.open_file(file) if format_name == "arrow" else ipc.open_stream(file)
         table = reader.read_all()
         table.validate(full=True)
         values.extend(table.column("i").to_pylist())
     assert sorted(values) == list(range(source_row_count))
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="Named pipes require POSIX")
+def test_size_metadata_requires_seekable_output(connection, tmp_path):
+    path = tmp_path / "output.arrow"
+    os.mkfifo(path)
+    read_fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        with pytest.raises(duckdb.IOException, match="SIZE_METADATA requires a seekable local output"):
+            connection.execute(
+                f"COPY (SELECT 42 AS i) TO '{path}' (SIZE_METADATA, USE_TMP_FILE false)"
+            )
+    finally:
+        os.close(read_fd)

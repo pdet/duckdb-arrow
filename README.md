@@ -70,6 +70,13 @@ The Copy function of the Copy To Arrow File operation accepts the following para
 * `row_group_size_bytes`: The size of row groups in bytes.
 * `row_groups_per_file`: The maximum number of row groups per file. If this option is set, multiple files can be generated in a single `COPY` call. This means the specified path will create a directory, and the `row_group_size` parameter will also be used to determine the partition sizes.
 * `kv_metadata`: Key-value metadata to be added to the file schema.
+* `size_metadata`: Disabled by default. Adds `total_compressed_size` and `total_uncompressed_size` to schema metadata as decimal byte counts summed over all record batch bodies, including buffer padding. Excludes message headers, the schema, and file framing. Both totals are equal for uncompressed output, which is the only write mode currently supported. Requires `FORMAT ARROW` or the `.arrow` extension and a seekable local output so the opening schema can be updated to match the footer.
+
+```sql
+COPY (SELECT * FROM range(10000)) TO 'sizes.arrow' (SIZE_METADATA);
+```
+
+The totals are available through `pyarrow.ipc.open_file('sizes.arrow').schema.metadata`.
 
 If `row_group_size_bytes` and either `chunk_size` or `row_group_size` are used, the row groups will be defined by the smallest of these parameters.
 

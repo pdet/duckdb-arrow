@@ -1,8 +1,10 @@
 #include "writer/column_data_collection_serializer.hpp"
 
+#include <cstring>
 #include <utility>
 
 #include "duckdb/common/arrow/arrow_appender.hpp"
+#include "duckdb/common/bswap.hpp"
 #include "duckdb/common/numeric_utils.hpp"
 
 namespace duckdb {
@@ -76,8 +78,11 @@ nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
 }
 
 ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(ClientProperties options,
-                                                               Allocator& allocator)
-    : options(std::move(options)), allocator(allocator) {}
+                                                               Allocator& allocator,
+                                                               bool track_body_size)
+    : options(std::move(options)),
+      allocator(allocator),
+      track_body_size(track_body_size) {}
 
 void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
                                           const vector<LogicalType>& logical_types) {
@@ -96,21 +101,33 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
       ArrowTypeExtensionData::GetExtensionTypes(*options.client_context, logical_types);
 }
 
-void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema) {
+void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema,
+                                                     idx_t reserved_size) {
   header->size_bytes = 0;
   body->size_bytes = 0;
   THROW_NOT_OK(InternalException, &error,
                ArrowIpcEncoderEncodeSchema(encoder.get(), schema, &error));
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
+  if (reserved_size) {
+    if (reserved_size < static_cast<idx_t>(header->size_bytes) ||
+        reserved_size % 8 != 0) {
+      throw InternalException("Arrow IPC schema does not fit in its reserved message");
+    }
+    // Include padding in the message length to keep record batch offsets unchanged
+    auto length = BSwapIfBE(NumericCast<int32_t>(reserved_size - 8));
+    NANOARROW_THROW_NOT_OK(ArrowBufferAppendFill(
+        header.get(), 0, NumericCast<int64_t>(reserved_size) - header->size_bytes));
+    std::memcpy(header->data + sizeof(int32_t), &length, sizeof(length));
+  }
 }
 
 void ColumnDataCollectionSerializer::SerializeFooter(
-    const ArrowSchema* schema, const vector<ArrowIpcFileBlock>& blocks) {
+    nanoarrow::UniqueSchema schema, const vector<ArrowIpcFileBlock>& blocks) {
   header->size_bytes = 0;
   body->size_bytes = 0;
   nanoarrow::ipc::UniqueFooter footer;
-  NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(schema, &footer->schema));
+  ArrowSchemaMove(schema.get(), &footer->schema);
   NANOARROW_THROW_NOT_OK(
       ArrowBufferAppend(&footer->record_batch_blocks, blocks.data(),
                         NumericCast<int64_t>(blocks.size() * sizeof(ArrowIpcFileBlock))));
@@ -131,6 +148,9 @@ idx_t ColumnDataCollectionSerializer::Serialize(ArrowAppender& appender) {
   THROW_NOT_OK(InternalException, &error,
                ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(),
                                                       body.get(), &error));
+  if (track_body_size) {
+    uncompressed_body_size = body->size_bytes;
+  }
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
 

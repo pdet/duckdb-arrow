@@ -1,0 +1,43 @@
+# name: test/sql/size_metadata.test
+# description: SIZE_METADATA option validation
+# group: [sql]
+
+require nanoarrow
+
+statement error
+COPY (SELECT 1 AS i) TO '__TEST_DIR__/sizes.arrows' (SIZE_METADATA);
+----
+SIZE_METADATA requires the Arrow IPC file format
+
+statement error
+COPY (SELECT 1 AS i) TO '__TEST_DIR__/sizes.arrow' (FORMAT ARROWS, SIZE_METADATA true);
+----
+SIZE_METADATA requires the Arrow IPC file format
+
+statement error
+COPY (SELECT 1 AS i) TO '__TEST_DIR__/sizes.arrow' (SIZE_METADATA, KV_METADATA {'total_compressed_size': '1'});
+----
+KV_METADATA key "total_compressed_size" is written by SIZE_METADATA
+
+statement error
+COPY (SELECT 1 AS i) TO '__TEST_DIR__/sizes.arrow' (KV_METADATA {'total_uncompressed_size': '1'}, SIZE_METADATA);
+----
+KV_METADATA key "total_uncompressed_size" is written by SIZE_METADATA
+
+statement error
+COPY (SELECT 1 AS i) TO '__TEST_DIR__/sizes.arrow' (SIZE_METADATA (true, false));
+----
+SIZE_METADATA accepts at most one argument
+
+statement error
+COPY (SELECT 1 AS i) TO 's3://unused/sizes.arrow' (SIZE_METADATA);
+----
+SIZE_METADATA requires a seekable local output
+
+statement ok
+COPY (SELECT 1 AS i) TO '__TEST_DIR__/sizes.arrows' (SIZE_METADATA false, KV_METADATA {'total_compressed_size': 'custom'});
+
+query I
+FROM read_arrow('__TEST_DIR__/sizes.arrows');
+----
+1
