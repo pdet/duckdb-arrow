@@ -14,17 +14,25 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 
+//! Key/value metadata for one field of the written schema
+struct ArrowFieldMetadata {
+  idx_t column_index;
+  vector<pair<string, string>> metadata;
+};
+
 //! Arrow IPC stream shared by threads; encoding is per thread, the lock guards the file
 struct ArrowStreamWriter {
   ArrowStreamWriter(ClientContext& context, FileSystem& fs, const string& file_path,
                     const vector<LogicalType>& logical_types,
                     const vector<string>& column_names,
                     const vector<pair<string, string>>& metadata,
+                    const vector<ArrowFieldMetadata>& field_metadata,
                     const ArrowIpcCompressionOptions& compression);
 
   void InitSchema(const vector<LogicalType>& logical_types,
                   const vector<string>& column_names,
-                  const vector<pair<string, string>>& metadata);
+                  const vector<pair<string, string>>& metadata,
+                  const vector<ArrowFieldMetadata>& field_metadata);
 
   void InitOutputFile(FileSystem& fs, const string& file_path);
 

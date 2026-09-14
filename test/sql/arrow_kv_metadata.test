@@ -1,0 +1,48 @@
+# name: test/sql/arrow_kv_metadata.test
+# description: Read the key value metadata of Arrow IPC schemas and fields
+# group: [sql]
+
+require nanoarrow
+
+statement ok
+COPY (SELECT 42 AS id) TO '__TEST_DIR__/kv_1.arrows' (FORMAT ARROWS, KV_METADATA {'file_owner': 'test_suite'}, FIELD_METADATA {'id': {'measurement_unit': 'row_count'}})
+
+statement ok
+COPY (SELECT 42 AS id) TO '__TEST_DIR__/kv_2.arrows' (FORMAT ARROWS, FIELD_METADATA {'id': {'measurement_unit': 'row_count'}})
+
+query II
+SELECT count(DISTINCT file_name), count(*) FROM arrow_kv_metadata('__TEST_DIR__/kv_*.arrows')
+----
+2	3
+
+statement ok
+SET arrow_lossless_conversion = true
+
+statement ok
+COPY (SELECT gen_random_uuid() AS uid, {'h': 1::HUGEINT} AS s) TO '__TEST_DIR__/types.arrows' (FORMAT ARROWS, FIELD_METADATA {'uid': {'role': 'key'}})
+
+# The metadata DuckDB attaches to fields, nested ones included, is reported next to the added keys
+query III
+SELECT field_path, key, value FROM arrow_kv_metadata('__TEST_DIR__/types.arrows') WHERE key IN ('ARROW:extension:name', 'role') ORDER BY field_path, key
+----
+[s, h]	ARROW:extension:name	arrow.opaque
+[uid]	ARROW:extension:name	arrow.uuid
+[uid]	role	key
+
+# Dictionary value children keep the field path in the fixture made by scripts/generate_metadata_test_data.py
+query III
+SELECT field_path, key, value FROM arrow_kv_metadata('data/metadata_dictionary.arrows') WHERE field_path IS NOT NULL ORDER BY field_path, key
+----
+[encoded]	role	code
+[encoded, child]	unit	count
+[items, item]	unit	count
+[nested, encoded]	role	code
+[nested, encoded, child]	unit	count
+
+# Keys and values come back as raw bytes with invalid utf8 and repeated keys intact
+query II
+SELECT hex(key), hex(value) FROM arrow_kv_metadata('data/metadata_dictionary.arrows') WHERE field_path IS NULL ORDER BY key, value
+----
+726570656174	6F6E65
+726570656174	74776F
+FF	FE

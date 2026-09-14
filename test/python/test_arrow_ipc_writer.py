@@ -112,6 +112,20 @@ class TestArrowIPCBufferWriter(object):
         assert result_table.column("priority").to_pylist() == ["low", "high", "high", "low"]
 
 
+class TestArrowIPCFieldMetadata(object):
+    def test_field_metadata(self, connection, tmp_path):
+        path = str(tmp_path / "field_metadata.arrows")
+        connection.execute(
+            f"""COPY (SELECT 1 AS id, 'foo' AS label) TO '{path}'
+            (FORMAT ARROWS, KV_METADATA {{'file_owner': 'test_suite'}}, FIELD_METADATA {{'id': {{'measurement_unit': 'row_count'}}}})"""
+        )
+        with pa.OSFile(path, 'rb') as f:
+            schema = ipc.open_stream(f).schema
+        assert schema.metadata == {b'file_owner': b'test_suite'}
+        assert schema.field('id').metadata == {b'measurement_unit': b'row_count'}
+        assert schema.field('label').metadata is None
+
+
 class TestArrowIPCCompression(object):
     @pytest.fixture
     def compressible_table(self):

@@ -14,6 +14,7 @@
 
 #include "nanoarrow_errors.hpp"
 #include "table_function/read_arrow.hpp"
+#include "utf8proc_wrapper.hpp"
 #include "writer/arrow_stream_writer.hpp"
 
 namespace duckdb {
@@ -26,6 +27,7 @@ struct ArrowWriteBindData : public TableFunctionData {
   vector<LogicalType> sql_types;
   vector<string> column_names;
   vector<pair<string, string>> kv_metadata;
+  vector<ArrowFieldMetadata> field_metadata;
   // Storage::ROW_GROUP_SIZE (122880), which seems to be the default
   // for Parquet, is higher than the usual number used in IPC writers (65536).
   // Using a value of 65536 results in fairly bad performance for the use
@@ -65,12 +67,64 @@ struct ArrowWriteLocalState : public LocalFunctionData {
   unique_ptr<ColumnDataCollectionSerializer> serializer;
 };
 
+// Reads the entries of a STRUCT option value as key/value pairs, blobs as raw bytes
+vector<pair<string, string>> ReadMetadataPairs(const Value& kv_struct,
+                                               const string& what) {
+  auto& kv_struct_type = kv_struct.type();
+  if (kv_struct.IsNull() || kv_struct_type.id() != LogicalTypeId::STRUCT) {
+    throw BinderException("Expected %s to be a STRUCT", what);
+  }
+  vector<pair<string, string>> result;
+  auto& values = StructValue::GetChildren(kv_struct);
+  for (idx_t i = 0; i < values.size(); i++) {
+    const auto& value = values[i];
+    auto key = StructType::GetChildName(kv_struct_type, i);
+    if (value.IsNull()) {
+      throw BinderException("Metadata value for key \"%s\" must not be NULL", key);
+    }
+    auto bytes = value.type().id() == LogicalTypeId::BLOB ? StringValue::Get(value)
+                                                          : value.ToString();
+    if (!Utf8Proc::IsValid(bytes.data(), bytes.size())) {
+      throw BinderException("Metadata value for key \"%s\" is not valid UTF-8", key);
+    }
+    if (bytes.find('\0') != string::npos) {
+      throw BinderException("Metadata value for key \"%s\" must not contain NUL bytes",
+                            key);
+    }
+    result.emplace_back(key, std::move(bytes));
+  }
+  return result;
+}
+
+// Reads a STRUCT of column name to STRUCT of key/value pairs
+vector<ArrowFieldMetadata> ReadFieldMetadata(const Value& columns,
+                                             vector<string>& names) {
+  if (columns.IsNull() || columns.type().id() != LogicalTypeId::STRUCT) {
+    throw BinderException("Expected field_metadata argument to be a STRUCT");
+  }
+  vector<ArrowFieldMetadata> result;
+  auto& values = StructValue::GetChildren(columns);
+  for (idx_t i = 0; i < values.size(); i++) {
+    auto column = StructType::GetChildName(columns.type(), i);
+    auto column_index = StringUtil::CIFind(names, column);
+    if (column_index == DConstants::INVALID_INDEX) {
+      throw BinderException(
+          "Column \"%s\" in field_metadata is not among the written columns", column);
+    }
+    auto what = StringUtil::Format("field_metadata entry for column \"%s\"", column);
+    result.push_back({column_index, ReadMetadataPairs(values[i], what)});
+  }
+  return result;
+}
+
 unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
                                         CopyFunctionBindInput& input,
                                         const vector<string>& names,
                                         const vector<LogicalType>& sql_types) {
   D_ASSERT(names.size() == sql_types.size());
   auto bind_data = make_uniq<ArrowWriteBindData>();
+  bind_data->sql_types = sql_types;
+  bind_data->column_names = names;
   bool row_group_size_bytes_set = false;
 
   for (auto& option : input.info.options) {
@@ -102,23 +156,11 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
     } else if (loption == "row_groups_per_file") {
       bind_data->row_groups_per_file = option.second[0].GetValue<uint64_t>();
     } else if (loption == "kv_metadata") {
-      auto& kv_struct = option.second[0];
-      auto& kv_struct_type = kv_struct.type();
-      if (kv_struct_type.id() != LogicalTypeId::STRUCT) {
-        throw BinderException("Expected kv_metadata argument to be a STRUCT");
-      }
-      auto values = StructValue::GetChildren(kv_struct);
-      for (idx_t i = 0; i < values.size(); i++) {
-        const auto& value = values[i];
-        auto key = StructType::GetChildName(kv_struct_type, i);
-        // If the value is a blob, write the raw blob bytes
-        // otherwise, cast to string
-        if (value.type().id() == LogicalTypeId::BLOB) {
-          bind_data->kv_metadata.emplace_back(key, StringValue::Get(value));
-        } else {
-          bind_data->kv_metadata.emplace_back(key, value.ToString());
-        }
-      }
+      bind_data->kv_metadata =
+          ReadMetadataPairs(option.second[0], "kv_metadata argument");
+    } else if (loption == "field_metadata") {
+      bind_data->field_metadata =
+          ReadFieldMetadata(option.second[0], bind_data->column_names);
     }
   }
   // Checked after the loop since the options can be given in any order
@@ -137,9 +179,6 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
         bind_data->row_group_size * ArrowWriteBindData::BYTES_PER_ROW;
   }
 
-  bind_data->sql_types = sql_types;
-  bind_data->column_names = names;
-
   return std::move(bind_data);
 }
 
@@ -152,7 +191,7 @@ unique_ptr<GlobalFunctionData> ArrowWriteInitializeGlobal(ClientContext& context
   auto& fs = FileSystem::GetFileSystem(context);
   global_state->writer = make_uniq<ArrowStreamWriter>(
       context, fs, file_path, arrow_bind.sql_types, arrow_bind.column_names,
-      arrow_bind.kv_metadata, arrow_bind.compression);
+      arrow_bind.kv_metadata, arrow_bind.field_metadata, arrow_bind.compression);
   global_state->writer->WriteSchema();
   return std::move(global_state);
 }

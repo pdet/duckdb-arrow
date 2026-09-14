@@ -70,6 +70,7 @@ The Copy function of the Copy To Arrow File operation accepts the following para
 * `row_group_size_bytes`: The size of row groups in bytes.
 * `row_groups_per_file`: The maximum number of row groups per file. If this option is set, multiple files can be generated in a single `COPY` call. This means the specified path will create a directory, and the `row_group_size` parameter will also be used to determine the partition sizes.
 * `kv_metadata`: Key-value metadata to be added to the file schema.
+* `field_metadata`: Key-value metadata to be added to individual fields of the file schema, as a struct of column name to struct of metadata, e.g. `FIELD_METADATA {'id': {'unit': 'count'}}`. The keys are merged with the metadata DuckDB attaches to the field, so `ARROW:extension:name` and `ARROW:extension:metadata` can be set to tag a field with an extension type. For both options, values must be valid UTF-8 without NUL bytes and not `NULL`.
 * `compression`: The codec used to compress the record batch bodies: `uncompressed` (the default), `zstd` or `lz4`.
 * `compression_level`: The compression level for the selected codec. For `zstd` this ranges from -131072 to 22 (default: 3, negative levels favour speed), for `lz4` from -65536 to 12 (default: 0, i.e. the fast mode; 3 and above use LZ4HC, negative levels select an acceleration). Requires `compression`.
 
@@ -115,6 +116,11 @@ When reading multiple files, the following parameters are also supported:
 * `union_by_name`: If the schemas of the files differ, setting `union_by_name` allows DuckDB to construct the schema by aligning columns with the same name.
 * `filename`: If set to `True`, this will add a column with the name of the file that generated each row.
 * `hive_partitioning`: Enables reading data from a Hive-partitioned dataset and applies partition filtering.
+
+The key-value metadata of the schema and of its fields can be read with `arrow_kv_metadata`, which accepts the same file paths, globs and lists as `read_arrow`. The `field_path` column lists the field names from the top-level column down to the field and is `NULL` for schema-level entries:
+```sql
+SELECT field_path, key, value FROM arrow_kv_metadata('test.arrows');
+```
 > [!NOTE]
 > [Arrow IPC files (.arrow)](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams (.arrows)](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are distinct but related formats. This extension can read both but only writes Arrow IPC Streams.
 ### IPC Stream Buffers
