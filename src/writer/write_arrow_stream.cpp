@@ -78,10 +78,6 @@ vector<pair<string, string>> ReadMetadataPairs(const Value& kv_struct,
   for (idx_t i = 0; i < values.size(); i++) {
     const auto& value = values[i];
     auto key = StructType::GetChildName(kv_struct_type, i);
-    if (StringUtil::StartsWith(key, "ARROW:")) {
-      throw BinderException(
-          "Metadata key \"%s\" is reserved, keys must not start with \"ARROW:\"", key);
-    }
     if (value.IsNull()) {
       throw BinderException("Metadata value for key \"%s\" must not be NULL", key);
     }
