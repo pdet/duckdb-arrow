@@ -72,3 +72,28 @@ query III
 SELECT (SELECT count(*) > 1 FROM glob('__TEST_DIR__/rotate/*.arrow')), count(*), (SELECT count(*) FROM (FROM test EXCEPT ALL FROM read_arrow('__TEST_DIR__/rotate/*.arrow'))) FROM read_arrow('__TEST_DIR__/rotate/*.arrow');
 ----
 true	100000	0
+
+# ENUM columns become Arrow dictionaries, which nanoarrow cannot encode
+statement ok
+CREATE TYPE mood AS ENUM ('happy', 'sad');
+
+statement error
+COPY (SELECT 'happy'::mood AS m WHERE false) TO '__TEST_DIR__/enum.arrow';
+----
+Not implemented Error: Arrow IPC output does not support ENUM values in column "m"
+
+statement error
+COPY (SELECT [{'m': 'happy'::mood}] AS nested) TO '__TEST_DIR__/enum.arrow';
+----
+column "nested"
+
+statement error
+FROM to_arrow_ipc((SELECT 'happy'::mood AS m));
+----
+Not implemented Error: Arrow IPC output does not support ENUM values in column "m"
+
+# The bind error leaves the database usable
+query I
+SELECT count(*) FROM read_arrow('__TEST_DIR__/empty.arrow');
+----
+0

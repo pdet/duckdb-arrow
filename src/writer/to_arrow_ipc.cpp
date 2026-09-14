@@ -55,6 +55,7 @@ unique_ptr<FunctionData> ToArrowIPCFunction::Bind(ClientContext& context,
                                                   vector<LogicalType>& return_types,
                                                   vector<string>& names) {
   auto result = make_uniq<ToArrowIpcFunctionData>();
+  CheckEncodableTypes(input.input_table_types, input.input_table_names);
 
   return_types.emplace_back(LogicalType::BLOB);
   names.emplace_back("ipc");

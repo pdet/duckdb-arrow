@@ -52,6 +52,7 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
                                         const vector<string>& names,
                                         const vector<LogicalType>& sql_types) {
   D_ASSERT(names.size() == sql_types.size());
+  CheckEncodableTypes(sql_types, names);
   auto bind_data = make_uniq<ArrowWriteBindData>();
   bool row_group_size_bytes_set = false;
 

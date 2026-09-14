@@ -24,7 +24,10 @@ ArrowStreamWriter::ArrowStreamWriter(ClientContext& context, FileSystem& fs,
 void ArrowStreamWriter::InitSchema(const vector<LogicalType>& logical_types,
                                    const vector<string>& column_names,
                                    const vector<pair<string, string>>& metadata) {
-  ArrowConverter::ToArrowSchema(schema.get(), logical_types, column_names, options);
+  // Copy into a nanoarrow owned schema so the metadata set below is freed with it
+  nanoarrow::UniqueSchema duck_schema;
+  ArrowConverter::ToArrowSchema(duck_schema.get(), logical_types, column_names, options);
+  NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(duck_schema.get(), schema.get()));
 
   if (!metadata.empty()) {
     nanoarrow::UniqueBuffer metadata_packed;
@@ -65,6 +68,7 @@ unique_ptr<ColumnDataCollectionSerializer> ArrowStreamWriter::NewSerializer() co
   return serializer;
 }
 
+// Encoding under the lock bounds memory to one Arrow array and one body at a time
 void ArrowStreamWriter::Flush(ColumnDataCollection& buffer) {
   if (buffer.Count() == 0) {
     return;

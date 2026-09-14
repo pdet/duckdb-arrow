@@ -4,6 +4,7 @@
 
 #include "duckdb/common/arrow/arrow_appender.hpp"
 #include "duckdb/common/numeric_utils.hpp"
+#include "duckdb/common/type_visitor.hpp"
 
 namespace duckdb {
 
@@ -35,6 +36,17 @@ inline void InitArrowDuckBuffer(ArrowBuffer* buffer, Allocator& duck_allocator) 
   };
 
   buffer->allocator.private_data = &duck_allocator;
+}
+
+void CheckEncodableTypes(const vector<LogicalType>& types, const vector<string>& names) {
+  for (idx_t i = 0; i < types.size(); i++) {
+    if (TypeVisitor::Contains(types[i], LogicalTypeId::ENUM)) {
+      throw NotImplementedException(
+          "Arrow IPC output does not support ENUM values in column \"%s\", cast it to "
+          "VARCHAR",
+          names[i]);
+    }
+  }
 }
 
 ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(ClientProperties options,
