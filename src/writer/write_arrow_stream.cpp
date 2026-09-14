@@ -4,7 +4,6 @@
 #include "duckdb/common/multi_file/multi_file_function.hpp"
 #include "file_scanner/arrow_multi_file_info.hpp"
 
-#include "duckdb/common/arrow/arrow_converter.hpp"
 #include "duckdb/common/serializer/buffered_file_writer.hpp"
 #include "duckdb/function/copy_function.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
@@ -25,7 +24,7 @@ namespace {
 struct ArrowWriteBindData : public TableFunctionData {
   ClientProperties options;
   vector<LogicalType> sql_types;
-  vector<string> column_names;
+  nanoarrow::UniqueSchema schema;
   vector<pair<string, string>> kv_metadata;
   bool file_format = true;
   idx_t row_group_size = 122880;
@@ -56,9 +55,7 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
   D_ASSERT(names.size() == sql_types.size());
   auto bind_data = make_uniq<ArrowWriteBindData>();
   bind_data->options = context.GetClientProperties();
-  nanoarrow::UniqueSchema schema;
-  ArrowConverter::ToArrowSchema(schema.get(), sql_types, names, bind_data->options);
-  CheckEncodableSchema(*schema.get());
+  bind_data->schema = CreateArrowIpcSchema(sql_types, names, bind_data->options);
   // Arrow recommends .arrow for the file format and .arrows for the stream
   bind_data->file_format = StringUtil::Lower(input.info.format) != "arrows";
   bool row_group_size_bytes_set = false;
@@ -128,7 +125,6 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
   }
 
   bind_data->sql_types = sql_types;
-  bind_data->column_names = names;
 
   return std::move(bind_data);
 }
@@ -141,7 +137,7 @@ unique_ptr<GlobalFunctionData> ArrowWriteInitializeGlobal(ClientContext& context
 
   auto& fs = FileSystem::GetFileSystem(context);
   global_state->writer = make_uniq<ArrowStreamWriter>(
-      arrow_bind.options, fs, file_path, arrow_bind.sql_types, arrow_bind.column_names,
+      arrow_bind.options, fs, file_path, arrow_bind.sql_types, *arrow_bind.schema.get(),
       arrow_bind.kv_metadata, arrow_bind.file_format);
   global_state->writer->WriteSchema();
   return std::move(global_state);

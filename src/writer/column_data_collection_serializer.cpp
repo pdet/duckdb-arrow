@@ -64,10 +64,15 @@ static void CheckEncodableField(const ArrowSchema& field, const char* column) {
   }
 }
 
-void CheckEncodableSchema(const ArrowSchema& schema) {
-  for (int64_t i = 0; i < schema.n_children; i++) {
-    CheckEncodableField(*schema.children[i], schema.children[i]->name);
+nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
+                                             const vector<string>& names,
+                                             ClientProperties& options) {
+  nanoarrow::UniqueSchema schema;
+  ArrowConverter::ToArrowSchema(schema.get(), types, names, options);
+  for (int64_t i = 0; i < schema->n_children; i++) {
+    CheckEncodableField(*schema->children[i], schema->children[i]->name);
   }
+  return schema;
 }
 
 ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(ClientProperties options,
@@ -115,12 +120,14 @@ void ColumnDataCollectionSerializer::SerializeFooter(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), false, header.get()));
 }
 
-idx_t ColumnDataCollectionSerializer::Serialize(ArrowArray& array) {
+idx_t ColumnDataCollectionSerializer::Serialize(ArrowAppender& appender) {
+  ArrowArray finalized = appender.Finalize();
+  nanoarrow::UniqueArray array(&finalized);
   header->size_bytes = 0;
   body->size_bytes = 0;
 
   THROW_NOT_OK(duckdb::InternalException, &error,
-               ArrowArrayViewSetArray(chunk_view.get(), &array, &error));
+               ArrowArrayViewSetArray(chunk_view.get(), array.get(), &error));
   THROW_NOT_OK(InternalException, &error,
                ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(),
                                                       body.get(), &error));
@@ -134,9 +141,7 @@ idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buff
   for (auto& chunk : buffer.Chunks()) {
     appender.Append(chunk, 0, chunk.size(), chunk.size());
   }
-  ArrowArray finalized = appender.Finalize();
-  nanoarrow::UniqueArray array(&finalized);
-  return Serialize(*array.get());
+  return Serialize(appender);
 }
 
 ArrowIpcFileBlock ColumnDataCollectionSerializer::Flush(BufferedFileWriter& writer) {

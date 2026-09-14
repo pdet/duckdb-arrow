@@ -17,11 +17,10 @@ namespace ext_nanoarrow {
 struct ArrowStreamWriter {
   ArrowStreamWriter(const ClientProperties& options, FileSystem& fs,
                     const string& file_path, const vector<LogicalType>& logical_types,
-                    const vector<string>& column_names,
+                    const ArrowSchema& schema,
                     const vector<pair<string, string>>& metadata, bool file_format);
 
-  void InitSchema(const vector<LogicalType>& logical_types,
-                  const vector<string>& column_names,
+  void InitSchema(const ArrowSchema& schema,
                   const vector<pair<string, string>>& metadata);
 
   void InitOutputFile(FileSystem& fs, const string& file_path);

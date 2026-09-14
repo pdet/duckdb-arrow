@@ -17,6 +17,8 @@
 #include "nanoarrow_errors.hpp"
 
 namespace duckdb {
+class ArrowAppender;
+
 namespace ext_nanoarrow {
 
 class ColumnDataCollectionSerializer {
@@ -30,7 +32,7 @@ class ColumnDataCollectionSerializer {
   void SerializeFooter(const ArrowSchema* schema,
                        const vector<ArrowIpcFileBlock>& blocks);
 
-  idx_t Serialize(ArrowArray& array);
+  idx_t Serialize(ArrowAppender& appender);
 
   idx_t Serialize(const ColumnDataCollection& buffer);
 
@@ -52,7 +54,9 @@ class ColumnDataCollectionSerializer {
 };
 
 // nanoarrow cannot encode dictionaries, which DuckDB produces for ENUM, or view layouts
-void CheckEncodableSchema(const ArrowSchema& schema);
+nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
+                                             const vector<string>& names,
+                                             ClientProperties& options);
 
 }  // namespace ext_nanoarrow
 }  // namespace duckdb

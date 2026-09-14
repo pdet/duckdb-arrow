@@ -11,7 +11,7 @@ namespace ext_nanoarrow {
 ArrowStreamWriter::ArrowStreamWriter(const ClientProperties& options_p, FileSystem& fs,
                                      const string& file_path,
                                      const vector<LogicalType>& logical_types,
-                                     const vector<string>& column_names,
+                                     const ArrowSchema& schema_p,
                                      const vector<pair<string, string>>& metadata,
                                      bool file_format)
     : options(options_p),
@@ -19,17 +19,14 @@ ArrowStreamWriter::ArrowStreamWriter(const ClientProperties& options_p, FileSyst
       serializer(options, allocator),
       logical_types(logical_types),
       file_format(file_format) {
-  InitSchema(logical_types, column_names, metadata);
+  InitSchema(schema_p, metadata);
   InitOutputFile(fs, file_path);
 }
 
-void ArrowStreamWriter::InitSchema(const vector<LogicalType>& logical_types,
-                                   const vector<string>& column_names,
+void ArrowStreamWriter::InitSchema(const ArrowSchema& schema_p,
                                    const vector<pair<string, string>>& metadata) {
   // Copy into a nanoarrow owned schema so the metadata set below is freed with it
-  nanoarrow::UniqueSchema duck_schema;
-  ArrowConverter::ToArrowSchema(duck_schema.get(), logical_types, column_names, options);
-  NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(duck_schema.get(), schema.get()));
+  NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(&schema_p, schema.get()));
 
   if (!metadata.empty()) {
     nanoarrow::UniqueBuffer metadata_packed;

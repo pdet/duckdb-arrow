@@ -63,28 +63,18 @@ unique_ptr<FunctionData> ToArrowIPCFunction::Bind(ClientContext& context,
 
   result->options = context.GetClientProperties();
   result->logical_types = input.input_table_types;
-  ArrowConverter::ToArrowSchema(result->schema.get(), input.input_table_types,
-                                input.input_table_names, result->options);
-  CheckEncodableSchema(*result->schema.get());
+  result->schema = CreateArrowIpcSchema(input.input_table_types, input.input_table_names,
+                                        result->options);
   return std::move(result);
 }
 
 void SerializeArray(const ToArrowIpcLocalState& local_state,
                     nanoarrow::UniqueBuffer& arrow_serialized_ipc_buffer) {
-  ArrowArray finalized = local_state.appender->Finalize();
-  nanoarrow::UniqueArray arr(&finalized);
-  local_state.serializer->Serialize(*arr.get());
+  local_state.serializer->Serialize(*local_state.appender);
   arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
   auto body = local_state.serializer->GetBody();
-  idx_t ipc_buffer_size = arrow_serialized_ipc_buffer->size_bytes;
-  arrow_serialized_ipc_buffer->data = arrow_serialized_ipc_buffer->allocator.reallocate(
-      &arrow_serialized_ipc_buffer->allocator, arrow_serialized_ipc_buffer->data,
-      static_cast<int64_t>(ipc_buffer_size),
-      static_cast<int64_t>(ipc_buffer_size + body->size_bytes));
-  arrow_serialized_ipc_buffer->size_bytes += body->size_bytes;
-  arrow_serialized_ipc_buffer->capacity_bytes += body->size_bytes;
-  memcpy(arrow_serialized_ipc_buffer->data + ipc_buffer_size, body->data,
-         body->size_bytes);
+  NANOARROW_THROW_NOT_OK(
+      ArrowBufferAppend(arrow_serialized_ipc_buffer.get(), body->data, body->size_bytes));
 }
 
 void InsertMessageToChunk(nanoarrow::UniqueBuffer& arrow_serialized_ipc_buffer,
