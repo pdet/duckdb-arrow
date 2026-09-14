@@ -42,12 +42,12 @@ bool ArrowIpcCompressionOptions::TrySetOption(const string& name, const Value& v
 }
 
 void ArrowIpcCompressionOptions::Validate() const {
-  if (!level_set) {
-    return;
-  }
   if (type == NANOARROW_IPC_COMPRESSION_TYPE_NONE) {
-    throw BinderException(
-        "COMPRESSION_LEVEL requires COMPRESSION to be set to 'zstd' or 'lz4'");
+    if (level_set) {
+      throw BinderException(
+          "COMPRESSION_LEVEL requires COMPRESSION to be set to 'zstd' or 'lz4'");
+    }
+    return;
   }
 
   // nanoarrow checks the level too but only once the encoder exists, binding is earlier
@@ -88,15 +88,15 @@ struct CountingCompressor {
 void SetArrowIpcEncoderCompression(ArrowIpcEncoder& encoder,
                                    const ArrowIpcCompressionOptions& options,
                                    int64_t* uncompressed_size) {
-  // Installs nanoarrow's serial compressor, ArrowIpcEncoderSetCompressor takes others
-  ArrowError error{};
-  THROW_NOT_OK(InternalException, &error,
-               ArrowIpcEncoderSetCompression(&encoder, options.type,
-                                             static_cast<int>(options.level), &error));
   if (!uncompressed_size || options.type == NANOARROW_IPC_COMPRESSION_TYPE_NONE) {
+    ArrowError error{};
+    THROW_NOT_OK(InternalException, &error,
+                 ArrowIpcEncoderSetCompression(&encoder, options.type,
+                                               static_cast<int>(options.level), &error));
     return;
   }
 
+  options.Validate();
   auto state = make_uniq<CountingCompressor>(*uncompressed_size);
   NANOARROW_THROW_NOT_OK(ArrowIpcSerialCompressor(&state->inner, options.type,
                                                   static_cast<int>(options.level)));

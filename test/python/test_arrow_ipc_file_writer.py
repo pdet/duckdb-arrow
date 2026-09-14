@@ -198,6 +198,52 @@ def test_small_file_with_size_metadata(connection, tmp_path, rows, compression):
         assert compressed_size > uncompressed_size
 
 
+@pytest.mark.parametrize("compression", ["uncompressed", "zstd", "lz4"])
+def test_size_metadata_matches_uncompressed_file(connection, tmp_path, compression):
+    connection.execute("SET threads=1")
+    connection.execute(
+        """
+        CREATE TABLE sizes AS
+        SELECT i::INTEGER AS id, repeat('x', 128) AS text,
+               from_hex(md5(i::VARCHAR)) AS payload,
+               CASE WHEN i % 3 = 0 THEN NULL ELSE i % 2 = 0 END AS flag,
+               ''::VARCHAR AS empty, NULL::VARCHAR AS missing
+        FROM range(4099) t(i)
+        """
+    )
+    reference_path = tmp_path / "uncompressed.arrow"
+    path = tmp_path / "sizes.arrow"
+    connection.execute(f"COPY sizes TO '{reference_path}' (ROW_GROUP_SIZE 2048)")
+    connection.execute(
+        f"COPY sizes TO '{path}' "
+        f"(ROW_GROUP_SIZE 2048, COMPRESSION '{compression}', SIZE_METADATA)"
+    )
+
+    expected_size = sum(
+        message.body.size
+        for message in ipc.MessageReader.open_stream(reference_path.read_bytes()[8:])
+        if message.type == "record batch"
+    )
+    compressed_size, uncompressed_size = assert_size_metadata(path.read_bytes())
+    assert uncompressed_size == expected_size
+    if compression == "uncompressed":
+        assert compressed_size == expected_size
+    else:
+        assert compressed_size < expected_size
+
+    reference = ipc.open_file(reference_path)
+    reader = ipc.open_file(path)
+    assert reader.num_record_batches == reference.num_record_batches == 3
+    assert reader.read_all().equals(reference.read_all(), check_metadata=False)
+    metadata = dict(connection.execute(
+        "SELECT key, value FROM arrow_kv_metadata(?) WHERE field_path IS NULL", [str(path)]
+    ).fetchall())
+    assert metadata == {
+        b"total_compressed_size": str(compressed_size).encode(),
+        b"total_uncompressed_size": str(expected_size).encode(),
+    }
+
+
 @pytest.mark.parametrize("preserve_order", [True, False])
 @pytest.mark.parametrize("compression", ["uncompressed", "zstd"])
 def test_nested_columns_across_batches(connection, tmp_path, preserve_order, source_row_count, compression):
