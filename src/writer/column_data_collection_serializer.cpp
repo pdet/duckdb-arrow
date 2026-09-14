@@ -44,12 +44,12 @@ ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(
     ArrowIpcCompressionOptions compression)
     : options(std::move(options)), allocator(allocator), compression(compression) {}
 
-void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema_p,
+void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
                                           const vector<LogicalType>& logical_types) {
   // Dictionaries need DictionaryBatch messages that this serializer never emits
   nanoarrow::ipc::UniqueDictionaryEncodings dictionaries;
   NANOARROW_THROW_NOT_OK(
-      ArrowIpcDictionaryEncodingsAppendSchema(dictionaries.get(), schema_p));
+      ArrowIpcDictionaryEncodingsAppendSchema(dictionaries.get(), schema));
   if (dictionaries->encodings.size_bytes != 0) {
     throw NotImplementedException(
         "Writing dictionary-encoded Arrow IPC is not supported");
@@ -64,16 +64,15 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema_p,
   InitArrowDuckBuffer(body.get(), allocator);
   NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
   SetArrowIpcEncoderCompression(*encoder.get(), compression);
+  // The view copies the type info it needs, so the schema need not outlive this call
   THROW_NOT_OK(InternalException, &error,
-               ArrowArrayViewInitFromSchema(chunk_view.get(), schema_p, &error));
-
-  schema = schema_p;
+               ArrowArrayViewInitFromSchema(chunk_view.get(), schema, &error));
 
   extension_types =
       ArrowTypeExtensionData::GetExtensionTypes(*options.client_context, logical_types);
 }
 
-void ColumnDataCollectionSerializer::SerializeSchema() {
+void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema) {
   header->size_bytes = 0;
   body->size_bytes = 0;
   // Fails for types nanoarrow cannot write yet, such as string views

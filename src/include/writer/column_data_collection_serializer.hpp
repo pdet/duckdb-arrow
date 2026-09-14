@@ -25,9 +25,11 @@ class ColumnDataCollectionSerializer {
   ColumnDataCollectionSerializer(ClientProperties options, Allocator& allocator,
                                  ArrowIpcCompressionOptions compression = {});
 
-  void Init(const ArrowSchema* schema_p, const vector<LogicalType>& logical_types);
+  //! Prepares the serializer for arrays matching schema; no reference to it is kept
+  void Init(const ArrowSchema* schema, const vector<LogicalType>& logical_types);
 
-  void SerializeSchema();
+  //! Encodes the IPC schema message for schema into the header buffer
+  void SerializeSchema(const ArrowSchema* schema);
 
   //! Copies the array buffers, so the array only needs to live through this call
   idx_t Serialize(ArrowArray& array);
@@ -45,7 +47,6 @@ class ColumnDataCollectionSerializer {
   ClientProperties options;
   Allocator& allocator;
   ArrowIpcCompressionOptions compression;
-  const ArrowSchema* schema{};
   unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>> extension_types;
   nanoarrow::ipc::UniqueEncoder encoder;
   nanoarrow::UniqueArrayView chunk_view;
