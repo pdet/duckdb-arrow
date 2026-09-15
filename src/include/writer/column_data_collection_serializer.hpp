@@ -27,6 +27,8 @@ class ColumnDataCollectionSerializer {
   ColumnDataCollectionSerializer(ClientProperties options, Allocator& allocator,
                                  ArrowIpcCompressionOptions compression = {},
                                  bool track_body_size = false);
+  // The encoder keeps a reference to uncompressed_body_size so this object cannot move
+  ColumnDataCollectionSerializer(ColumnDataCollectionSerializer&&) = delete;
 
   void Init(const ArrowSchema* schema, const vector<LogicalType>& logical_types);
 

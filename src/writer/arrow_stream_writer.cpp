@@ -71,8 +71,10 @@ void ArrowStreamWriter::InitOutputFile(FileSystem& fs, const string& file_path) 
   writer = make_uniq<BufferedFileWriter>(
       fs, file_path.c_str(),
       FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW);
-  if (size_metadata && (!writer->handle->OnDiskFile() || !writer->handle->CanSeek() ||
-                        writer->handle->IsPipe())) {
+  // WriteFooter patches offset 8 of a new regular file, fsspec needs OnDiskFile first
+  if (size_metadata && (!writer->handle->OnDiskFile() ||
+                        writer->handle->GetType() != FileType::FILE_TYPE_REGULAR ||
+                        writer->handle->GetFileSize() != 0)) {
     throw IOException(
         "SIZE_METADATA requires a seekable local output to update the schema");
   }
