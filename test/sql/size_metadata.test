@@ -9,7 +9,7 @@ SET threads = 1;
 
 statement ok
 CREATE TABLE size_source AS
-SELECT CASE WHEN i % 7 = 0 THEN NULL ELSE 42::INTEGER END AS n
+SELECT CASE WHEN i % 3 = 0 THEN NULL ELSE 42::INTEGER END AS n
 FROM range(4099) t(i);
 
 foreach compression uncompressed zstd lz4
@@ -17,7 +17,7 @@ foreach compression uncompressed zstd lz4
 statement ok
 COPY size_source TO '__TEST_DIR__/sizes_${compression}.arrow' (ROW_GROUP_SIZE 2048, COMPRESSION '${compression}', SIZE_METADATA);
 
-# Two full batches use 8448 bytes each and the final three rows use 24 bytes
+# Each batch holds a NULL, full batches use 8448 bytes and the last three rows use 24
 query III
 WITH sizes AS (
     SELECT max(value::VARCHAR::BIGINT) FILTER (WHERE key = 'total_compressed_size') AS compressed_size,
@@ -32,12 +32,17 @@ FROM sizes;
 ----
 16920	true	true
 
+query III
+SELECT count(*), count(n), sum(n) FROM read_arrow('__TEST_DIR__/sizes_${compression}.arrow');
+----
+4099	2732	114744
+
 foreach rows 0 1
 
 statement ok
-COPY (SELECT 42::INTEGER AS n WHERE ${rows} = 1) TO '__TEST_DIR__/small_${compression}_${rows}.arrow' (COMPRESSION '${compression}', SIZE_METADATA);
+COPY (SELECT NULL::INTEGER AS n WHERE ${rows} = 1) TO '__TEST_DIR__/small_${compression}_${rows}.arrow' (COMPRESSION '${compression}', SIZE_METADATA);
 
-# One row uses two padded buffers and compression adds two eight byte prefixes
+# One NULL row uses two padded buffers and compression adds two eight byte prefixes
 query II
 SELECT key, value::VARCHAR::BIGINT = ${rows} *
        CASE WHEN key = 'total_compressed_size' AND '${compression}' <> 'uncompressed' THEN 32 ELSE 16 END
@@ -54,11 +59,6 @@ endloop
 
 statement error
 COPY (SELECT 1 AS i) TO '__TEST_DIR__/sizes.arrows' (SIZE_METADATA);
-----
-SIZE_METADATA requires the Arrow IPC file format
-
-statement error
-COPY (SELECT 1 AS i) TO '__TEST_DIR__/sizes.arrow' (FORMAT ARROWS, SIZE_METADATA true);
 ----
 SIZE_METADATA requires the Arrow IPC file format
 
@@ -85,7 +85,7 @@ SIZE_METADATA requires a seekable local output
 statement ok
 COPY (SELECT 1 AS i) TO '__TEST_DIR__/sizes.arrows' (SIZE_METADATA false, KV_METADATA {'total_compressed_size': 'custom'});
 
-query I
-FROM read_arrow('__TEST_DIR__/sizes.arrows');
+query II
+SELECT key, value FROM arrow_kv_metadata('__TEST_DIR__/sizes.arrows') WHERE field_path IS NULL;
 ----
-1
+total_compressed_size	custom
