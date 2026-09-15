@@ -51,14 +51,14 @@ In the remainder of this section, we cover the supported parameters and usages f
 ### IPC Files
 
 #### Write
-Writing an Arrow IPC file is done using the COPY statement Below is a simple example of how you can use DuckDB to create such a file.
+Writing Arrow IPC output is done using the COPY statement. Below is a simple example of how you can use DuckDB to create an IPC file.
 
 ```sql
-COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrows";
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrow";
 ```
 
-Both `.arrows` and `.arrow` will be automatically recognized by DuckDB as Arrow IPC streams.
-However, if you wish to use a different extension, you can manually specify the format using:
+`COPY` follows the Arrow file extension convention. `.arrow` files and `FORMAT ARROW` produce the Arrow IPC file format, including a footer for random access with readers such as `pyarrow.ipc.open_file`. `.arrows` files and `FORMAT ARROWS` produce the Arrow IPC streaming format, which the `to_arrow_ipc` buffer function also emits as messages.
+For a different filename extension, specify the format explicitly:
 
 ```sql
 COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.ipc" (FORMAT ARROWS);
@@ -70,43 +70,66 @@ The Copy function of the Copy To Arrow File operation accepts the following para
 * `row_group_size_bytes`: The size of row groups in bytes.
 * `row_groups_per_file`: The maximum number of row groups per file. If this option is set, multiple files can be generated in a single `COPY` call. This means the specified path will create a directory, and the `row_group_size` parameter will also be used to determine the partition sizes.
 * `kv_metadata`: Key-value metadata to be added to the file schema.
+* `field_metadata`: Key-value metadata to be added to individual fields of the file schema, as a struct of column name to struct of metadata, e.g. `FIELD_METADATA {'id': {'unit': 'count'}}`. The keys are merged with the metadata DuckDB attaches to the field, so `ARROW:extension:name` and `ARROW:extension:metadata` can be set to tag a field with an extension type. For both options, values must be valid UTF-8 without NUL bytes and not `NULL`.
+* `compression`: The codec used to compress the record batch bodies: `uncompressed` (the default), `zstd` or `lz4`.
+* `compression_level`: The compression level for the selected codec. For `zstd` this ranges from -131072 to 22 (default: 3, negative levels favour speed), for `lz4` from -65536 to 12 (default: 0, i.e. the fast mode; 3 and above use LZ4HC, negative levels select an acceleration). Requires `compression`.
+* `size_metadata`: Disabled by default. Adds `total_compressed_size` and `total_uncompressed_size` to schema metadata as decimal byte counts summed over the record batch bodies of each output file, including buffer padding. Excludes message headers, the schema, and file framing. The compressed total includes compression prefixes and padding as stored on disk. The uncompressed total counts the original buffers with padding. Both totals are equal for uncompressed output. Requires `FORMAT ARROW` or the `.arrow` extension and a seekable local output so the opening schema can be updated to match the footer.
+
+```sql
+COPY (SELECT * FROM range(10000)) TO 'sizes.arrow' (SIZE_METADATA);
+```
+
+The totals can be read with `SELECT key, value FROM arrow_kv_metadata('sizes.arrow') WHERE field_path IS NULL` or through `pyarrow.ipc.open_file('sizes.arrow').schema.metadata`.
 
 If `row_group_size_bytes` and either `chunk_size` or `row_group_size` are used, the row groups will be defined by the smallest of these parameters.
+
+For example, to write a zstd-compressed stream:
+
+```sql
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrows" (COMPRESSION 'zstd');
+```
 
 #### Read
 You can consume the file using the `read_arrow` scanner. For example, to read the file we just created, you could run:
 ```sql
-FROM read_arrow('test.arrows');
+FROM read_arrow('test.arrow');
 ```
 
 Similar to the copy function, the extension also registers `.arrows` and `.arrow` as valid extensions for the Arrow IPC format. This means that a replacement scan can be applied if that is the file extension, so the following would also be a valid query:
 ```sql
-FROM 'test.arrows';
+FROM 'test.arrow';
 ```
+
+Files and streams whose record batch bodies are compressed with `zstd` or `lz4` (the two codecs allowed by the Arrow IPC format) are read transparently.
 
 Besides single-file reading, our extension also fully supports multi-file reading, including all valid multi-file options.
 
 If we were to create a second test file using:
 ```sql
-COPY (SELECT 42 as foofy, 'string' as stringy) TO "test_2.arrows" (FORMAT ARROWS);
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "test_2.arrow" (FORMAT ARROW);
 ```
 
 We can then run a query that reads both files using a glob pattern or a list of file paths:
 
 ```sql
 -- Glob
-FROM read_arrow('*.arrows')
+FROM read_arrow('*.arrow')
 
 -- List
-FROM read_arrow(['test.arrows','test_2.arrows'])
+FROM read_arrow(['test.arrow','test_2.arrow'])
 ```
 
 When reading multiple files, the following parameters are also supported:
 * `union_by_name`: If the schemas of the files differ, setting `union_by_name` allows DuckDB to construct the schema by aligning columns with the same name.
 * `filename`: If set to `True`, this will add a column with the name of the file that generated each row.
 * `hive_partitioning`: Enables reading data from a Hive-partitioned dataset and applies partition filtering.
+
+The key-value metadata of the schema and of its fields can be read with `arrow_kv_metadata`, which accepts the same file paths, globs and lists as `read_arrow`. The `field_path` column lists the field names from the top-level column down to the field and is `NULL` for schema-level entries:
+```sql
+SELECT field_path, key, value FROM arrow_kv_metadata('test.arrows');
+```
 > [!NOTE]
-> [Arrow IPC files (.arrow)](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams (.arrows)](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are distinct but related formats. This extension can read both but only writes Arrow IPC Streams.
+> [Arrow IPC files](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are both standard Arrow formats. This extension reads both regardless of filename extension, and `COPY` writes a file for `.arrow` or `FORMAT ARROW` and a stream for `.arrows` or `FORMAT ARROWS`.
 ### IPC Stream Buffers
 Similar to the old core Arrow extension, this extension also allows direct production and consumption of the Arrow IPC streaming format from in-memory buffers in both Python and Node.js.
 In this section, we will demonstrate how to use the Python API, but you can find many tests that serve as examples for both [Node.js](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/nodejs) and [Python](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/python).
@@ -127,7 +150,7 @@ We can then obtain our buffers by simply issuing a `to_arrow_ipc` call, like thi
 ```python
 buffers = connection.execute("FROM to_arrow_ipc((FROM T))").fetchall()
 ```
-In this case, our buffers will contain two tuples: the first is the header of our message, and the second is the data. To convert this into an Arrow table, we simply concatenate the tuples and use the `ipc.RecordBatchStreamReader`. For example, you can read them as follows:
+In this case, our buffers will contain two tuples: the first is the header of our message, and the second is the data. The record batch bodies can be compressed with the same `compression` and `compression_level` options as `COPY`, given as named parameters, e.g. `to_arrow_ipc((FROM T), compression := 'zstd')`. To convert this into an Arrow table, we simply concatenate the tuples and use the `ipc.RecordBatchStreamReader`. For example, you can read them as follows:
 
 
 ```python

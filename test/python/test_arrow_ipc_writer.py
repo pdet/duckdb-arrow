@@ -38,3 +38,133 @@ class TestArrowIPCBufferWriter(object):
             batches.extend(stream_reader)
         arrow_table = pa.Table.from_batches(batches, schema=schema)
         tables_match(connection.execute("FROM arrow_table").fetchall())
+
+    def test_round_trip_multiple_batches(self, connection):
+        # Big enough to be split over several IPC record batches, so the
+        # serializer runs more than once for a single query. A batch holds
+        # 120 * STANDARD_VECTOR_SIZE rows, so keep this comfortably above that
+        # for any vector size the build might use.
+        source = """
+            SELECT i,
+                   i::VARCHAR AS s,
+                   i % 7 = 0 AS f,
+                   CASE WHEN i % 11 = 0 THEN NULL ELSE i * 2 END AS n
+            FROM range(1200000) t(i)
+        """
+        buffers = connection.execute(f"FROM to_arrow_ipc(({source}))").fetchall()
+        assert len(buffers) > 2, "expected more than one data message"
+        assert [header for _, header in buffers] == [True] + [False] * (len(buffers) - 1)
+
+        schema_message = buffers[0][0]
+        batches = []
+        for payload, _ in buffers[1:]:
+            with pa.BufferReader(pa.py_buffer(schema_message + payload)) as reader:
+                stream_reader = ipc.RecordBatchStreamReader(reader)
+                schema = stream_reader.schema
+                batches.extend(stream_reader)
+
+        arrow_table = pa.Table.from_batches(batches, schema=schema)
+        assert connection.execute(
+            f"""
+            SELECT (SELECT count(*) FROM arrow_table),
+                   (SELECT count(*) FROM (({source}) EXCEPT ALL FROM arrow_table)),
+                   (SELECT count(*) FROM (FROM arrow_table EXCEPT ALL ({source})))
+            """
+        ).fetchone() == (1200000, 0, 0)
+
+    def test_dictionary_round_trip(self, connection):
+        connection.execute(
+            """
+            CREATE TABLE dict_t AS
+            SELECT CASE WHEN i % 2 = 0 THEN 'even' ELSE 'odd' END AS cat, i
+            FROM range(6) t(i)
+            """
+        )
+        buffers = connection.execute("FROM to_arrow_ipc((FROM dict_t))").fetchall()
+
+        arrow_buffers = [pa.py_buffer(buffers[0][0] + b[0]) for b in buffers[1:]]
+        batches = []
+        for buf in arrow_buffers:
+            with pa.BufferReader(buf) as reader:
+                stream_reader = ipc.RecordBatchStreamReader(reader)
+                batches.extend(stream_reader)
+
+        arrow_table = pa.Table.from_batches(batches, schema=stream_reader.schema)
+        result = connection.execute("FROM arrow_table").fetchall()
+        assert result == [("even", 0), ("odd", 1), ("even", 2), ("odd", 3), ("even", 4), ("odd", 5)]
+
+    def test_dictionary_to_arrow_ipc_from_pyarrow(self, connection):
+        indices = pa.array([0, 1, 1, 0])
+        dictionary = pa.array(["low", "high"])
+        dict_arr = pa.DictionaryArray.from_arrays(indices, dictionary)
+        arrow_table = pa.Table.from_arrays([dict_arr], names=["priority"])
+
+        buffers = connection.execute("FROM to_arrow_ipc((FROM arrow_table))").fetchall()
+        schema_msg = buffers[0][0]
+
+        batches = []
+        for payload, _ in buffers[1:]:
+            with pa.BufferReader(pa.py_buffer(schema_msg + payload)) as reader:
+                stream_reader = ipc.RecordBatchStreamReader(reader)
+                batches.extend(stream_reader)
+
+        result_table = pa.Table.from_batches(batches, schema=stream_reader.schema)
+        assert result_table.column("priority").to_pylist() == ["low", "high", "high", "low"]
+
+
+class TestArrowIPCFieldMetadata(object):
+    def test_field_metadata(self, connection, tmp_path):
+        path = str(tmp_path / "field_metadata.arrows")
+        connection.execute(
+            f"""COPY (SELECT 1 AS id, 'foo' AS label) TO '{path}'
+            (FORMAT ARROWS, KV_METADATA {{'file_owner': 'test_suite'}}, FIELD_METADATA {{'id': {{'measurement_unit': 'row_count'}}}})"""
+        )
+        with pa.OSFile(path, 'rb') as f:
+            schema = ipc.open_stream(f).schema
+        assert schema.metadata == {b'file_owner': b'test_suite'}
+        assert schema.field('id').metadata == {b'measurement_unit': b'row_count'}
+        assert schema.field('label').metadata is None
+
+
+class TestArrowIPCCompression(object):
+    @pytest.fixture
+    def compressible_table(self):
+        # Enough repetition for real compressed buffers, including nulls in each type.
+        return pa.table({
+            "f0": pa.array([1, 2, None, 4] * 256, pa.int32()),
+            "f1": ["foo", "bar", "baz", None] * 256,
+            "f2": [True, None, False, True] * 256,
+        })
+
+    @pytest.mark.parametrize("compression", ["zstd", "lz4"])
+    def test_duckdb_writes_pyarrow_reads(self, connection, compression, compressible_table, tmp_path):
+        connection.register("input_table", compressible_table)
+        path = str(tmp_path / f"test_{compression}.arrows")
+        connection.execute(f"COPY input_table TO '{path}' (FORMAT ARROWS, COMPRESSION '{compression}')")
+        with pa.OSFile(path, 'rb') as source, ipc.open_stream(source) as reader:
+            assert reader.read_all().equals(compressible_table)
+
+    @pytest.mark.parametrize("compression", ["zstd", "lz4"])
+    def test_to_arrow_ipc_compressed_buffers(self, connection, compression, compressible_table):
+        connection.register("input_table", compressible_table)
+        buffers = connection.execute(
+            f"FROM to_arrow_ipc((FROM input_table), compression := '{compression}')"
+        ).fetchall()
+        assert [header for _, header in buffers] == [True] + [False] * (len(buffers) - 1)
+        with ipc.open_stream(pa.py_buffer(b"".join(message for message, _ in buffers))) as reader:
+            assert reader.read_all().equals(compressible_table)
+
+    @pytest.mark.parametrize("compression", ["zstd", "lz4"])
+    def test_pyarrow_writes_duckdb_reads(self, connection, compression, tmp_path):
+        arrow_table = pa.table(
+            {
+                'f0': pa.array([1, 2, 3, 4], pa.int32()),
+                'f1': ['foo', 'bar', 'baz', None],
+                'f2': [True, None, False, True],
+            }
+        )
+        path = str(tmp_path / f"pyarrow_{compression}.arrows")
+        options = ipc.IpcWriteOptions(compression=compression)
+        with pa.OSFile(path, 'wb') as sink, ipc.new_stream(sink, arrow_table.schema, options=options) as writer:
+            writer.write_table(arrow_table)
+        tables_match(connection.execute(f"FROM read_arrow('{path}')").fetchall())

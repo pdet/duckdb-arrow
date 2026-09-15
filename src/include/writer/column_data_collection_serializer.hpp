@@ -13,26 +13,35 @@
 #include "duckdb/common/types/column/column_data_collection.hpp"
 #include "duckdb/function/table/arrow/arrow_duck_schema.hpp"
 #include "duckdb/main/client_properties.hpp"
+#include "ipc/codecs.hpp"
 #include "nanoarrow/nanoarrow_ipc.hpp"
 #include "nanoarrow_errors.hpp"
 
 namespace duckdb {
+class ArrowAppender;
+
 namespace ext_nanoarrow {
 
 class ColumnDataCollectionSerializer {
  public:
-  ColumnDataCollectionSerializer(ClientProperties options, Allocator& allocator);
+  ColumnDataCollectionSerializer(ClientProperties options, Allocator& allocator,
+                                 ArrowIpcCompressionOptions compression = {},
+                                 bool track_body_size = false);
 
-  void Init(const ArrowSchema* schema_p, const vector<LogicalType>& logical_types);
+  void Init(const ArrowSchema* schema, const vector<LogicalType>& logical_types);
 
-  void SerializeSchema();
+  void SerializeSchema(const ArrowSchema* schema, idx_t reserved_size = 0);
 
-  idx_t Serialize(ArrowArray& array);
-  idx_t Serialize(DataChunk& chunk);
+  void SerializeFooter(nanoarrow::UniqueSchema schema,
+                       const vector<ArrowIpcFileBlock>& blocks);
+
+  idx_t Serialize(ArrowAppender& appender);
 
   idx_t Serialize(const ColumnDataCollection& buffer);
 
-  void Flush(BufferedFileWriter& writer);
+  ArrowIpcFileBlock Flush(BufferedFileWriter& writer);
+
+  int64_t UncompressedBodySize() const { return uncompressed_body_size; }
 
   nanoarrow::UniqueBuffer GetHeader();
 
@@ -41,15 +50,21 @@ class ColumnDataCollectionSerializer {
  private:
   ClientProperties options;
   Allocator& allocator;
-  const ArrowSchema* schema{};
+  ArrowIpcCompressionOptions compression;
+  bool track_body_size;
+  int64_t uncompressed_body_size = 0;
   unordered_map<idx_t, const shared_ptr<ArrowTypeExtensionData>> extension_types;
   nanoarrow::ipc::UniqueEncoder encoder;
   nanoarrow::UniqueArrayView chunk_view;
-  nanoarrow::UniqueArray chunk_arrow;
   nanoarrow::UniqueBuffer header;
   nanoarrow::UniqueBuffer body;
   ArrowError error{};
 };
+
+// The writer does not emit dictionary messages or support view layouts
+nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
+                                             const vector<string>& names,
+                                             ClientProperties& options);
 
 }  // namespace ext_nanoarrow
 }  // namespace duckdb

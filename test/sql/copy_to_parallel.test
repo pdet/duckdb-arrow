@@ -1,0 +1,41 @@
+# name: test/sql/copy_to_parallel.test
+# description: COPY TO Arrow IPC from several threads writing the same files
+# group: [sql]
+
+require nanoarrow
+
+statement ok
+SET threads=4
+
+statement ok
+SET preserve_insertion_order=false
+
+# Big enough for a parallel scan, and small row groups make the threads append often
+statement ok
+CREATE TABLE big AS SELECT i, i::VARCHAR AS s FROM range(1000000) t(i)
+
+statement ok
+COPY big TO '__TEST_DIR__/parallel.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 4096)
+
+statement ok
+COPY big TO '__TEST_DIR__/rotate_bytes' (FORMAT ARROWS, ROW_GROUP_SIZE 4096, FILE_SIZE_BYTES '2MB', RETURN_FILES true)
+
+statement ok
+COPY big TO '__TEST_DIR__/rotate_groups' (FORMAT ARROWS, ROW_GROUP_SIZE 4096, ROW_GROUPS_PER_FILE 25)
+
+statement ok
+COPY (SELECT *, i % 3 AS p FROM big) TO '__TEST_DIR__/partitioned' (FORMAT ARROWS, ROW_GROUP_SIZE 4096, PARTITION_BY (p))
+
+query III
+SELECT (SELECT count(*) > 1 FROM glob('__TEST_DIR__/rotate_bytes/*')), (SELECT count(*) > 1 FROM glob('__TEST_DIR__/rotate_groups/*')), (SELECT count(*) FROM glob('__TEST_DIR__/partitioned/*/*'))
+----
+true	true	3
+
+foreach path parallel.arrows rotate_bytes/*.arrows rotate_groups/*.arrows partitioned/*/*.arrows
+
+query II
+SELECT count(*), (SELECT count(*) FROM (FROM big EXCEPT ALL FROM read_arrow('__TEST_DIR__/${path}', hive_partitioning=false))) FROM read_arrow('__TEST_DIR__/${path}', hive_partitioning=false)
+----
+1000000	0
+
+endloop

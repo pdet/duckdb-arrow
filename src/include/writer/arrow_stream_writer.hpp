@@ -7,46 +7,65 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
+#include "duckdb/common/atomic.hpp"
+#include "duckdb/common/mutex.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "writer/column_data_collection_serializer.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
 
-struct ArrowStreamWriter {
-  ArrowStreamWriter(ClientContext& context, FileSystem& fs, const string& file_path,
-                    const vector<LogicalType>& logical_types,
-                    const vector<string>& column_names,
-                    const vector<pair<string, string>>& metadata);
+struct ArrowFieldMetadata {
+  idx_t column_index;
+  vector<pair<string, string>> metadata;
+};
 
-  void InitSchema(const vector<LogicalType>& logical_types,
-                  const vector<string>& column_names,
-                  const vector<pair<string, string>>& metadata);
+struct ArrowStreamWriter {
+  ArrowStreamWriter(const ClientProperties& options, FileSystem& fs,
+                    const string& file_path, const vector<LogicalType>& logical_types,
+                    const ArrowSchema& schema,
+                    const vector<pair<string, string>>& metadata,
+                    const vector<ArrowFieldMetadata>& field_metadata,
+                    const ArrowIpcCompressionOptions& compression, bool file_format,
+                    bool size_metadata);
+
+  void InitSchema(const ArrowSchema& schema, const vector<pair<string, string>>& metadata,
+                  const vector<ArrowFieldMetadata>& field_metadata);
 
   void InitOutputFile(FileSystem& fs, const string& file_path);
 
   void WriteSchema();
 
-  unique_ptr<ColumnDataCollectionSerializer> NewSerializer();
-
-  void Flush(ColumnDataCollection& buffer);
+  unique_ptr<ColumnDataCollectionSerializer> NewSerializer() const;
 
   void Flush(ColumnDataCollectionSerializer& serializer);
 
-  void Finalize() const;
+  void Finalize();
 
   idx_t NumberOfRowGroups() const;
 
   idx_t FileSize() const;
 
+  static bool IsSizeMetadataKey(const string& key);
+
  private:
+  void WriteFooter();
+
   ClientProperties options;
   Allocator& allocator;
-  ColumnDataCollectionSerializer serializer;
-  string file_name;
+  ArrowIpcCompressionOptions compression;
   vector<LogicalType> logical_types;
+  bool file_format;
+  bool size_metadata;
+  mutex lock;
   unique_ptr<BufferedFileWriter> writer;
-  idx_t row_group_count{0};
+  vector<ArrowIpcFileBlock> blocks;
+  idx_t schema_message_size = 0;
+  int64_t total_compressed_size = 0;
+  int64_t total_uncompressed_size = 0;
+  // Rotation checks read these while another thread may be flushing
+  atomic<idx_t> row_group_count{0};
+  atomic<idx_t> file_size{0};
   nanoarrow::UniqueSchema schema;
 };
 

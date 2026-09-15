@@ -4,7 +4,6 @@
 #include "duckdb/common/multi_file/multi_file_function.hpp"
 #include "file_scanner/arrow_multi_file_info.hpp"
 
-#include "duckdb/common/arrow/arrow_converter.hpp"
 #include "duckdb/common/serializer/buffered_file_writer.hpp"
 #include "duckdb/function/copy_function.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
@@ -14,6 +13,7 @@
 
 #include "nanoarrow_errors.hpp"
 #include "table_function/read_arrow.hpp"
+#include "utf8proc_wrapper.hpp"
 #include "writer/arrow_stream_writer.hpp"
 
 namespace duckdb {
@@ -23,14 +23,14 @@ namespace ext_nanoarrow {
 namespace {
 
 struct ArrowWriteBindData : public TableFunctionData {
+  ClientProperties options;
   vector<LogicalType> sql_types;
-  vector<string> column_names;
+  nanoarrow::UniqueSchema schema;
   vector<pair<string, string>> kv_metadata;
-  // Storage::ROW_GROUP_SIZE (122880), which seems to be the default
-  // for Parquet, is higher than the usual number used in IPC writers (65536).
-  // Using a value of 65536 results in fairly bad performance for the use
-  // case of "write it all then read it all" (at the expense of not being as
-  // useful for streaming).
+  vector<ArrowFieldMetadata> field_metadata;
+  ArrowIpcCompressionOptions compression;
+  bool file_format = true;
+  bool size_metadata = false;
   idx_t row_group_size = 122880;
   bool row_group_size_set = false;
   optional_idx row_groups_per_file;
@@ -48,9 +48,75 @@ struct ArrowWriteLocalState : public LocalFunctionData {
     buffer.InitializeAppend(append_state);
   }
 
+  // Encodes the buffered rows on this thread and appends them to the shared file
+  void Flush(ArrowStreamWriter& writer) {
+    if (!serializer) {
+      serializer = writer.NewSerializer();
+    }
+    if (serializer->Serialize(buffer) > 0) {
+      writer.Flush(*serializer);
+    }
+    buffer.Reset();
+  }
+
   ColumnDataCollection buffer;
   ColumnDataAppendState append_state;
+  unique_ptr<ColumnDataCollectionSerializer> serializer;
 };
+
+// Reads the entries of a STRUCT option value as key/value pairs, blobs as raw bytes
+vector<pair<string, string>> ReadMetadataPairs(const Value& kv_struct,
+                                               const string& what) {
+  auto& kv_struct_type = kv_struct.type();
+  if (kv_struct.IsNull() || kv_struct_type.id() != LogicalTypeId::STRUCT) {
+    throw BinderException("Expected %s to be a STRUCT", what);
+  }
+  vector<pair<string, string>> result;
+  auto& values = StructValue::GetChildren(kv_struct);
+  for (idx_t i = 0; i < values.size(); i++) {
+    const auto& value = values[i];
+    auto key = StructType::GetChildName(kv_struct_type, i);
+    if (value.IsNull()) {
+      throw BinderException("Metadata value for key \"%s\" must not be NULL", key);
+    }
+    auto bytes = value.type().id() == LogicalTypeId::BLOB ? StringValue::Get(value)
+                                                          : value.ToString();
+    if (!Utf8Proc::IsValid(bytes.data(), bytes.size())) {
+      throw BinderException("Metadata value for key \"%s\" is not valid UTF-8", key);
+    }
+    if (bytes.find('\0') != string::npos) {
+      throw BinderException("Metadata value for key \"%s\" must not contain NUL bytes",
+                            key);
+    }
+    result.emplace_back(key, std::move(bytes));
+  }
+  return result;
+}
+
+// Reads a STRUCT of column name to STRUCT of key/value pairs
+vector<ArrowFieldMetadata> ReadFieldMetadata(const Value& columns,
+                                             const vector<string>& names) {
+  if (columns.IsNull() || columns.type().id() != LogicalTypeId::STRUCT) {
+    throw BinderException("Expected field_metadata argument to be a STRUCT");
+  }
+  vector<ArrowFieldMetadata> result;
+  auto& values = StructValue::GetChildren(columns);
+  for (idx_t i = 0; i < values.size(); i++) {
+    auto column = StructType::GetChildName(columns.type(), i);
+    idx_t column_index = 0;
+    while (column_index < names.size() &&
+           !StringUtil::CIEquals(names[column_index], column)) {
+      column_index++;
+    }
+    if (column_index == names.size()) {
+      throw BinderException(
+          "Column \"%s\" in field_metadata is not among the written columns", column);
+    }
+    auto what = StringUtil::Format("field_metadata entry for column \"%s\"", column);
+    result.push_back({column_index, ReadMetadataPairs(values[i], what)});
+  }
+  return result;
+}
 
 unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
                                         CopyFunctionBindInput& input,
@@ -58,16 +124,31 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
                                         const vector<LogicalType>& sql_types) {
   D_ASSERT(names.size() == sql_types.size());
   auto bind_data = make_uniq<ArrowWriteBindData>();
+  bind_data->options = context.GetClientProperties();
+  bind_data->schema = CreateArrowIpcSchema(sql_types, names, bind_data->options);
+  // Arrow recommends .arrow for the file format and .arrows for the stream
+  bind_data->file_format = StringUtil::Lower(input.info.format) != "arrows";
   bool row_group_size_bytes_set = false;
 
   for (auto& option : input.info.options) {
     const auto loption = StringUtil::Lower(option.first);
+    if (loption == "size_metadata") {
+      if (option.second.size() > 1) {
+        throw BinderException("SIZE_METADATA accepts at most one argument");
+      }
+      bind_data->size_metadata =
+          option.second.empty() ||
+          BooleanValue::Get(option.second[0].DefaultCastAs(LogicalType::BOOLEAN));
+      continue;
+    }
     if (option.second.size() != 1) {
-      // All Arrow write options require exactly one argument
       throw BinderException("%s requires exactly one argument",
                             StringUtil::Upper(loption));
     }
 
+    if (bind_data->compression.TrySetOption(loption, option.second[0])) {
+      continue;
+    }
     if (loption == "row_group_size" || loption == "chunk_size") {
       if (bind_data->row_group_size_set) {
         throw BinderException(
@@ -86,22 +167,28 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
     } else if (loption == "row_groups_per_file") {
       bind_data->row_groups_per_file = option.second[0].GetValue<uint64_t>();
     } else if (loption == "kv_metadata") {
-      auto& kv_struct = option.second[0];
-      auto& kv_struct_type = kv_struct.type();
-      if (kv_struct_type.id() != LogicalTypeId::STRUCT) {
-        throw BinderException("Expected kv_metadata argument to be a STRUCT");
-      }
-      auto values = StructValue::GetChildren(kv_struct);
-      for (idx_t i = 0; i < values.size(); i++) {
-        const auto& value = values[i];
-        auto key = StructType::GetChildName(kv_struct_type, i);
-        // If the value is a blob, write the raw blob bytes
-        // otherwise, cast to string
-        if (value.type().id() == LogicalTypeId::BLOB) {
-          bind_data->kv_metadata.emplace_back(key, StringValue::Get(value));
-        } else {
-          bind_data->kv_metadata.emplace_back(key, value.ToString());
-        }
+      bind_data->kv_metadata =
+          ReadMetadataPairs(option.second[0], "kv_metadata argument");
+    } else if (loption == "field_metadata") {
+      bind_data->field_metadata = ReadFieldMetadata(option.second[0], names);
+    }
+  }
+  bind_data->compression.Validate();
+
+  if (bind_data->size_metadata) {
+    if (!bind_data->file_format) {
+      throw BinderException(
+          "SIZE_METADATA requires the Arrow IPC file format, use FORMAT ARROW or the "
+          ".arrow extension");
+    }
+    if (FileSystem::IsRemoteFile(input.info.file_path)) {
+      throw BinderException(
+          "SIZE_METADATA requires a seekable local output to update the schema");
+    }
+    for (const auto& item : bind_data->kv_metadata) {
+      if (ArrowStreamWriter::IsSizeMetadataKey(item.first)) {
+        throw BinderException("KV_METADATA key \"%s\" is written by SIZE_METADATA",
+                              item.first);
       }
     }
   }
@@ -114,13 +201,11 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
           "order.");
     }
   } else {
-    // We always set a max row group size bytes so we don't use too much memory
     bind_data->row_group_size_bytes =
         bind_data->row_group_size * ArrowWriteBindData::BYTES_PER_ROW;
   }
 
   bind_data->sql_types = sql_types;
-  bind_data->column_names = names;
 
   return std::move(bind_data);
 }
@@ -132,9 +217,10 @@ unique_ptr<GlobalFunctionData> ArrowWriteInitializeGlobal(ClientContext& context
   auto& arrow_bind = bind_data.Cast<ArrowWriteBindData>();
 
   auto& fs = FileSystem::GetFileSystem(context);
-  global_state->writer =
-      make_uniq<ArrowStreamWriter>(context, fs, file_path, arrow_bind.sql_types,
-                                   arrow_bind.column_names, arrow_bind.kv_metadata);
+  global_state->writer = make_uniq<ArrowStreamWriter>(
+      arrow_bind.options, fs, file_path, arrow_bind.sql_types, *arrow_bind.schema.get(),
+      arrow_bind.kv_metadata, arrow_bind.field_metadata, arrow_bind.compression,
+      arrow_bind.file_format, arrow_bind.size_metadata);
   global_state->writer->WriteSchema();
   return std::move(global_state);
 }
@@ -146,15 +232,12 @@ void ArrowWriteSink(ExecutionContext& context, FunctionData& bind_data_p,
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
   auto& local_state = lstate.Cast<ArrowWriteLocalState>();
 
-  // append data to the local (buffered) chunk collection
   local_state.buffer.Append(local_state.append_state, input);
 
   if (local_state.buffer.Count() >= bind_data.row_group_size ||
       local_state.buffer.SizeInBytes() >= bind_data.row_group_size_bytes) {
-    // if the chunk collection exceeds a certain size (rows/bytes) we flush it to the
-    // Arrow file
     local_state.append_state.current_chunk_state.handles.clear();
-    global_state.writer->Flush(local_state.buffer);
+    local_state.Flush(*global_state.writer);
     local_state.buffer.InitializeAppend(local_state.append_state);
   }
 }
@@ -163,14 +246,12 @@ void ArrowWriteCombine(ExecutionContext& context, FunctionData& bind_data,
                        GlobalFunctionData& gstate, LocalFunctionData& lstate) {
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
   auto& local_state = lstate.Cast<ArrowWriteLocalState>();
-  // flush any data left in the local state to the file
-  global_state.writer->Flush(local_state.buffer);
+  local_state.Flush(*global_state.writer);
 }
 
 void ArrowWriteFinalize(ClientContext& context, FunctionData& bind_data,
                         GlobalFunctionData& gstate) {
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
-  // finalize: write any additional metadata to the file here
   global_state.writer->Finalize();
 }
 
@@ -206,6 +287,10 @@ bool ArrowWriteRotateNextFile(GlobalFunctionData& gstate, FunctionData& bind_dat
                               const optional_idx& file_size_bytes) {
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
   auto& bind_data = bind_data_p.Cast<ArrowWriteBindData>();
+  // A file with no row groups would rotate forever
+  if (global_state.writer->NumberOfRowGroups() == 0) {
+    return false;
+  }
   if (file_size_bytes.IsValid() &&
       global_state.writer->FileSize() > file_size_bytes.GetIndex()) {
     return true;
@@ -223,8 +308,7 @@ struct ArrowWriteBatchData : public PreparedBatchData {
   unique_ptr<ColumnDataCollectionSerializer> serializer;
 };
 
-// This is called concurrently for large writes so it can't interact with the
-// writer except to read information needed to initialize.
+// Batch preparation runs concurrently and only reads the shared schema.
 unique_ptr<PreparedBatchData> ArrowWritePrepareBatch(
     ClientContext& context, FunctionData& bind_data, GlobalFunctionData& gstate,
     unique_ptr<ColumnDataCollection> collection) {

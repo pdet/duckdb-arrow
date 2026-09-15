@@ -1,0 +1,104 @@
+# name: test/sql/write_arrow_file.test
+# description: COPY Arrow IPC files with magic, a footer, and independent rotated files
+# group: [sql]
+
+require nanoarrow
+
+statement ok
+CREATE TABLE test AS SELECT i, (i % 7)::VARCHAR AS s FROM range(100000) t(i);
+
+statement ok
+COPY test TO '__TEST_DIR__/test.arrow';
+
+query II
+SELECT content[1:8] = 'ARROW1\x00\x00'::BLOB, content[-6:] = 'ARROW1'::BLOB FROM read_blob('__TEST_DIR__/test.arrow');
+----
+true	true
+
+query I
+SELECT count(*) FROM (FROM test EXCEPT ALL FROM read_arrow('__TEST_DIR__/test.arrow'));
+----
+0
+
+# Empty output still has a schema and a footer, with no record batches.
+statement ok
+COPY (FROM test WHERE false) TO '__TEST_DIR__/empty.arrow';
+
+query I
+SELECT count(*) FROM read_arrow('__TEST_DIR__/empty.arrow');
+----
+0
+
+statement ok
+SET threads=4;
+
+statement ok
+SET preserve_insertion_order=false;
+
+statement ok
+COPY test TO '__TEST_DIR__/rotate' (FORMAT ARROW, ROW_GROUP_SIZE 4096, ROW_GROUPS_PER_FILE 5);
+
+query III
+SELECT (SELECT count(*) > 1 FROM glob('__TEST_DIR__/rotate/*.arrow')), count(*), (SELECT count(*) FROM (FROM test EXCEPT ALL FROM read_arrow('__TEST_DIR__/rotate/*.arrow'))) FROM read_arrow('__TEST_DIR__/rotate/*.arrow');
+----
+true	100000	0
+
+# ENUM output requires dictionary messages
+statement ok
+CREATE TYPE mood AS ENUM ('happy', 'sad');
+
+statement error
+COPY (SELECT 'happy'::mood AS m WHERE false) TO '__TEST_DIR__/enum.arrow';
+----
+Not implemented Error: Arrow IPC output does not support ENUM values in column "m"
+
+statement error
+COPY (SELECT [{'m': 'happy'::mood}] AS nested) TO '__TEST_DIR__/enum.arrow';
+----
+column "nested"
+
+statement error
+FROM to_arrow_ipc((SELECT 'happy'::mood AS m));
+----
+Not implemented Error: Arrow IPC output does not support ENUM values in column "m"
+
+# The bind error leaves the database usable
+query I
+SELECT count(*) FROM read_arrow('__TEST_DIR__/empty.arrow');
+----
+0
+
+# A file size limit below the schema size must not rotate empty files forever
+statement ok
+SET threads=1;
+
+statement ok
+COPY (SELECT i FROM range(5000) t(i)) TO '__TEST_DIR__/tiny' (FORMAT ARROW, FILE_SIZE_BYTES 50, ROW_GROUP_SIZE 1);
+
+query II
+SELECT (SELECT count(*) > 1 FROM glob('__TEST_DIR__/tiny/*.arrow')), count(*) FROM read_arrow('__TEST_DIR__/tiny/*.arrow');
+----
+true	5000
+
+# Arrow view layouts cannot be encoded, so they are rejected at bind
+statement ok
+SET arrow_output_version='1.4';
+
+statement error
+COPY (SELECT 'a'::BLOB AS b) TO '__TEST_DIR__/view.arrow';
+----
+Not implemented Error: Arrow IPC output does not support the Arrow view type "vz" in column "b"
+
+statement error
+FROM to_arrow_ipc((SELECT 'a'::BLOB AS b));
+----
+Arrow view type "vz" in column "b"
+
+statement ok
+RESET arrow_output_version;
+
+# NUL bytes in metadata values are rejected
+statement error
+COPY (SELECT 1 AS x) TO '__TEST_DIR__/nul.arrow' (KV_METADATA {'k': 'ab\x00cd'::BLOB});
+----
+Metadata value for key "k" must not contain NUL bytes

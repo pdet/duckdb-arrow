@@ -1,8 +1,10 @@
 #include "writer/to_arrow_ipc.hpp"
 
+#include "ipc/codecs.hpp"
 #include "writer/column_data_collection_serializer.hpp"
 
 #include "duckdb/common/arrow/arrow_appender.hpp"
+#include "duckdb/common/exception/binder_exception.hpp"
 #include "duckdb/execution/physical_operator.hpp"
 #include "duckdb/function/function.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -15,7 +17,9 @@ namespace ext_nanoarrow {
 
 struct ToArrowIpcFunctionData : public TableFunctionData {
   ToArrowIpcFunctionData() = default;
-  ArrowSchema schema{};
+  ClientProperties options;
+  ArrowIpcCompressionOptions compression;
+  nanoarrow::UniqueSchema schema;
   vector<LogicalType> logical_types;
   const idx_t chunk_size = ToArrowIPCFunction::DEFAULT_CHUNK_SIZE * STANDARD_VECTOR_SIZE;
 };
@@ -37,9 +41,10 @@ unique_ptr<LocalTableFunctionState> ToArrowIPCFunction::InitLocal(
     ExecutionContext& context, TableFunctionInitInput& input,
     GlobalTableFunctionState* global_state) {
   auto local_state = make_uniq<ToArrowIpcLocalState>();
-  auto properties = context.client.GetClientProperties();
+  auto& data = input.bind_data->Cast<ToArrowIpcFunctionData>();
   local_state->serializer = make_uniq<ColumnDataCollectionSerializer>(
-      properties, BufferAllocator::Get(context.client));
+      data.options, BufferAllocator::Get(context.client), data.compression);
+  local_state->serializer->Init(data.schema.get(), data.logical_types);
   return std::move(local_state);
 }
 
@@ -53,36 +58,33 @@ unique_ptr<FunctionData> ToArrowIPCFunction::Bind(ClientContext& context,
                                                   vector<LogicalType>& return_types,
                                                   vector<string>& names) {
   auto result = make_uniq<ToArrowIpcFunctionData>();
+  for (auto& kv : input.named_parameters) {
+    if (kv.second.IsNull()) {
+      throw BinderException("Cannot use NULL as function argument");
+    }
+    result->compression.TrySetOption(kv.first, kv.second);
+  }
+  result->compression.Validate();
 
-  // Set return schema
   return_types.emplace_back(LogicalType::BLOB);
   names.emplace_back("ipc");
   return_types.emplace_back(LogicalType::BOOLEAN);
   names.emplace_back("header");
 
-  // Create the Arrow schema
-  auto properties = context.GetClientProperties();
+  result->options = context.GetClientProperties();
   result->logical_types = input.input_table_types;
-  ArrowConverter::ToArrowSchema(&result->schema, input.input_table_types,
-                                input.input_table_names, properties);
+  result->schema = CreateArrowIpcSchema(input.input_table_types, input.input_table_names,
+                                        result->options);
   return std::move(result);
 }
 
 void SerializeArray(const ToArrowIpcLocalState& local_state,
                     nanoarrow::UniqueBuffer& arrow_serialized_ipc_buffer) {
-  ArrowArray arr = local_state.appender->Finalize();
-  local_state.serializer->Serialize(arr);
+  local_state.serializer->Serialize(*local_state.appender);
   arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
   auto body = local_state.serializer->GetBody();
-  idx_t ipc_buffer_size = arrow_serialized_ipc_buffer->size_bytes;
-  arrow_serialized_ipc_buffer->data = arrow_serialized_ipc_buffer->allocator.reallocate(
-      &arrow_serialized_ipc_buffer->allocator, arrow_serialized_ipc_buffer->data,
-      static_cast<int64_t>(ipc_buffer_size),
-      static_cast<int64_t>(ipc_buffer_size + body->size_bytes));
-  arrow_serialized_ipc_buffer->size_bytes += body->size_bytes;
-  arrow_serialized_ipc_buffer->capacity_bytes += body->size_bytes;
-  memcpy(arrow_serialized_ipc_buffer->data + ipc_buffer_size, body->data,
-         body->size_bytes);
+  NANOARROW_THROW_NOT_OK(
+      ArrowBufferAppend(arrow_serialized_ipc_buffer.get(), body->data, body->size_bytes));
 }
 
 void InsertMessageToChunk(nanoarrow::UniqueBuffer& arrow_serialized_ipc_buffer,
@@ -111,14 +113,11 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
 
   bool caching_disabled =
       PhysicalOperator::SelectOperatorCachingMode(context) == OperatorCachingMode::NONE;
-  local_state.serializer->Init(&data.schema, data.logical_types);
 
   if (!local_state.checked_schema) {
     if (!global_state.sent_schema) {
       lock_guard<mutex> init_lock(global_state.lock);
       if (!global_state.sent_schema) {
-        // This run will send the schema, other threads can just send the
-        // buffers
         global_state.sent_schema = true;
         sending_schema = true;
       }
@@ -127,28 +126,24 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
   }
 
   if (sending_schema) {
-    local_state.serializer->SerializeSchema();
+    local_state.serializer->SerializeSchema(data.schema.get());
     arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
     output.data[1].SetValue(0, Value::BOOLEAN(true));
   } else {
     if (!local_state.appender) {
       local_state.appender = make_uniq<ArrowAppender>(
-          input.GetTypes(), data.chunk_size, context.client.GetClientProperties(),
+          input.GetTypes(), data.chunk_size, data.options,
           ArrowTypeExtensionData::GetExtensionTypes(context.client, input.GetTypes()));
     }
 
-    // Append input chunk
     local_state.appender->Append(input, 0, input.size(), input.size());
     local_state.current_count += input.size();
 
-    // If chunk size is reached, we can flush to IPC blob
     if (caching_disabled || local_state.current_count >= data.chunk_size) {
       SerializeArray(local_state, arrow_serialized_ipc_buffer);
-      // Reset appender
       local_state.appender.reset();
       local_state.current_count = 0;
 
-      // This is a data message, hence we set the second column to false
       output.data[1].SetValue(0, Value::BOOLEAN(false));
     } else {
       return OperatorResultType::NEED_MORE_INPUT;
@@ -168,10 +163,10 @@ OperatorFinalizeResultType ToArrowIPCFunction::FunctionFinal(ExecutionContext& c
   auto& local_state = data_p.local_state->Cast<ToArrowIpcLocalState>();
 
   if (local_state.appender) {
-    // Flush remaining buffered data first, then come back to emit EOS
     nanoarrow::UniqueBuffer arrow_serialized_ipc_buffer;
     SerializeArray(local_state, arrow_serialized_ipc_buffer);
     InsertMessageToChunk(arrow_serialized_ipc_buffer, output);
+
     output.data[1].SetValue(0, Value::BOOLEAN(false));
     local_state.appender.reset();
     return OperatorFinalizeResultType::HAVE_MORE_OUTPUT;
@@ -193,6 +188,8 @@ TableFunction ToArrowIPCFunction::GetFunction() {
                     InitLocal);
   fun.in_out_function = Function;
   fun.in_out_function_final = FunctionFinal;
+  fun.named_parameters["compression"] = LogicalType::VARCHAR;
+  fun.named_parameters["compression_level"] = LogicalType::BIGINT;
   return fun;
 }
 
