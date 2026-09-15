@@ -21,7 +21,8 @@ ArrowFileScan::ArrowFileScan(ClientContext& context, const string& file_name)
   if (types.empty()) {
     throw InvalidInputException("Provided table/dataframe must have at least one column");
   }
-  columns = MultiFileColumnDefinition::ColumnsFromNamesAndTypes(names, types);
+  columns = MultiFileColumnDefinition::ColumnsFromNamesAndTypes(
+      StringsToIdentifiers(names), types);
 }
 
 string ArrowFileScan::GetReaderType() const { return "ARROW"; }
@@ -59,9 +60,8 @@ bool ArrowFileScan::TryInitializeScan(ClientContext& context,
   }
   lstate.local_arrow_global_state =
       ArrowTableFunction::ArrowScanInitGlobal(context, *lstate.init_input);
-  lstate.local_arrow_local_state =
-      ArrowTableFunction::ArrowScanInitLocal(lstate.execution_context, *lstate.init_input,
-                                             lstate.local_arrow_global_state.get());
+  lstate.local_arrow_local_state = ArrowTableFunction::ArrowScanInitLocalInternal(
+      context, *lstate.init_input, lstate.local_arrow_global_state.get());
   lstate.table_function_input = make_uniq<TableFunctionInput>(
       lstate.local_arrow_function_data.get(), lstate.local_arrow_local_state.get(),
       lstate.local_arrow_global_state.get());

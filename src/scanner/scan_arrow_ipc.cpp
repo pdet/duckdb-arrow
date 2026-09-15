@@ -22,7 +22,7 @@ struct ScanArrowIPCFunction : ArrowTableFunction {
   static unique_ptr<FunctionData> ScanArrowIPCBind(ClientContext& context,
                                                    TableFunctionBindInput& input,
                                                    vector<LogicalType>& return_types,
-                                                   vector<string>& names) {
+                                                   vector<Identifier>& names) {
     // Create a vector with all the buffers and their sizes
     vector<ArrowIPCBuffer> buffers;
     const auto buffer_ptr_list = ListValue::GetChildren(input.inputs[0]);
@@ -37,7 +37,7 @@ struct ScanArrowIPCFunction : ArrowTableFunction {
     res->factory->GetFileSchema(res->schema_root);
 
     PopulateArrowTableSchema(context, res->arrow_table, res->schema_root.arrow_schema);
-    names = res->arrow_table.GetNames();
+    names = StringsToIdentifiers(res->arrow_table.GetNames());
     return_types = res->arrow_table.GetTypes();
     res->all_types = return_types;
     if (return_types.empty()) {

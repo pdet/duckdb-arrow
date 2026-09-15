@@ -2,6 +2,7 @@
 
 #include "duckdb/common/multi_file/multi_file_reader.hpp"
 #include "duckdb/common/mutex.hpp"
+#include "duckdb/common/vector/vector_writer.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "ipc/stream_factory.hpp"
 #include "utf8proc_wrapper.hpp"
@@ -65,7 +66,8 @@ void CollectMetadata(const ArrowSchema* schema, vector<Value>& path,
 }
 
 unique_ptr<FunctionData> Bind(ClientContext& context, TableFunctionBindInput& input,
-                              vector<LogicalType>& return_types, vector<string>& names) {
+                              vector<LogicalType>& return_types,
+                              vector<Identifier>& names) {
   auto result = make_uniq<ArrowKvMetadataBindData>();
   auto multi_file_reader = MultiFileReader::CreateDefault("arrow_kv_metadata");
   result->files = multi_file_reader->CreateFileList(context, input.inputs[0]);
@@ -111,17 +113,17 @@ void Function(ClientContext& context, TableFunctionInput& input, DataChunk& outp
     CollectMetadata(factory.reader->GetBaseSchema(), path, state.rows);
   }
   idx_t count = MinValue<idx_t>(STANDARD_VECTOR_SIZE, state.rows.size() - state.next_row);
-  output.data[0].Reference(Value(state.file_name));
-  auto keys = FlatVector::GetData<string_t>(output.data[2]);
-  auto values = FlatVector::GetData<string_t>(output.data[3]);
+  output.data[0].Reference(Value(state.file_name), count_t(count));
+  auto keys = FlatVector::Writer<string_t>(output.data[2], count);
+  auto values = FlatVector::Writer<string_t>(output.data[3], count);
   for (idx_t i = 0; i < count; i++) {
     auto& row = state.rows[state.next_row + i];
-    output.SetValue(1, i, row.field_path);
-    keys[i] = StringVector::AddStringOrBlob(output.data[2], row.key);
-    values[i] = StringVector::AddStringOrBlob(output.data[3], row.value);
+    output.data[1].Append(row.field_path);
+    keys.WriteValue(string_t(row.key));
+    values.WriteValue(string_t(row.value));
   }
   state.next_row += count;
-  output.SetCardinality(count);
+  output.CheckCardinality(count);
 }
 
 }  // namespace

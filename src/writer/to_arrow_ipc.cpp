@@ -5,6 +5,7 @@
 
 #include "duckdb/common/arrow/arrow_appender.hpp"
 #include "duckdb/common/exception/binder_exception.hpp"
+#include "duckdb/common/vector/vector_writer.hpp"
 #include "duckdb/execution/physical_operator.hpp"
 #include "duckdb/function/function.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -56,13 +57,13 @@ unique_ptr<GlobalTableFunctionState> ToArrowIPCFunction::InitGlobal(
 unique_ptr<FunctionData> ToArrowIPCFunction::Bind(ClientContext& context,
                                                   TableFunctionBindInput& input,
                                                   vector<LogicalType>& return_types,
-                                                  vector<string>& names) {
+                                                  vector<Identifier>& names) {
   auto result = make_uniq<ToArrowIpcFunctionData>();
   for (auto& kv : input.named_parameters) {
     if (kv.second.IsNull()) {
       throw BinderException("Cannot use NULL as function argument");
     }
-    result->compression.TrySetOption(kv.first, kv.second);
+    result->compression.TrySetOption(kv.first.GetIdentifierName(), kv.second);
   }
   result->compression.Validate();
 
@@ -91,14 +92,11 @@ void InsertMessageToChunk(nanoarrow::UniqueBuffer& arrow_serialized_ipc_buffer,
                           DataChunk& output) {
   const auto ptr = reinterpret_cast<const char*>(arrow_serialized_ipc_buffer->data);
   const auto len = arrow_serialized_ipc_buffer->size_bytes;
-  const auto wrapped_buffer =
-      make_buffer<ArrowStringVectorBuffer>(std::move(arrow_serialized_ipc_buffer));
   auto& vector = output.data[0];
-  StringVector::AddBuffer(vector, wrapped_buffer);
-  const auto data_ptr = reinterpret_cast<string_t*>(vector.GetData());
-  *data_ptr = string_t(ptr, len);
-  output.SetCardinality(1);
-  output.Verify();
+  auto writer = FlatVector::Writer<string_t>(vector, 1);
+  StringVector::AddAuxiliaryData(
+      vector, make_uniq<ArrowStringVectorBuffer>(std::move(arrow_serialized_ipc_buffer)));
+  writer.WriteStringRef(string_t(ptr, len));
 }
 
 OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
@@ -128,7 +126,7 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
   if (sending_schema) {
     local_state.serializer->SerializeSchema(data.schema.get());
     arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
-    output.data[1].SetValue(0, Value::BOOLEAN(true));
+    output.data[1].Append(Value::BOOLEAN(true));
   } else {
     if (!local_state.appender) {
       local_state.appender = make_uniq<ArrowAppender>(
@@ -144,7 +142,7 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
       local_state.appender.reset();
       local_state.current_count = 0;
 
-      output.data[1].SetValue(0, Value::BOOLEAN(false));
+      output.data[1].Append(Value::BOOLEAN(false));
     } else {
       return OperatorResultType::NEED_MORE_INPUT;
     }
@@ -167,7 +165,7 @@ OperatorFinalizeResultType ToArrowIPCFunction::FunctionFinal(ExecutionContext& c
     SerializeArray(local_state, arrow_serialized_ipc_buffer);
     InsertMessageToChunk(arrow_serialized_ipc_buffer, output);
 
-    output.data[1].SetValue(0, Value::BOOLEAN(false));
+    output.data[1].Append(Value::BOOLEAN(false));
   }
 
   return OperatorFinalizeResultType::FINISHED;

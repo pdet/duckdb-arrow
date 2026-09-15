@@ -63,7 +63,7 @@ class ColumnDataCollectionSerializer {
 
 // The writer does not emit dictionary messages or support view layouts
 nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
-                                             const vector<string>& names,
+                                             const vector<Identifier>& names,
                                              ClientProperties& options);
 
 }  // namespace ext_nanoarrow

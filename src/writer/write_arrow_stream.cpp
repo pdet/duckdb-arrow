@@ -7,7 +7,6 @@
 #include "duckdb/common/serializer/buffered_file_writer.hpp"
 #include "duckdb/function/copy_function.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
-#include "duckdb/main/settings.hpp"
 
 #include "nanoarrow/nanoarrow_ipc.hpp"
 
@@ -32,8 +31,6 @@ struct ArrowWriteBindData : public TableFunctionData {
   bool file_format = true;
   bool size_metadata = false;
   idx_t row_group_size = 122880;
-  bool row_group_size_set = false;
-  optional_idx row_groups_per_file;
   static constexpr const idx_t BYTES_PER_ROW = 1024;
   idx_t row_group_size_bytes{};
 };
@@ -75,7 +72,7 @@ vector<pair<string, string>> ReadMetadataPairs(const Value& kv_struct,
   auto& values = StructValue::GetChildren(kv_struct);
   for (idx_t i = 0; i < values.size(); i++) {
     const auto& value = values[i];
-    auto key = StructType::GetChildName(kv_struct_type, i);
+    const auto& key = StructType::GetChildName(kv_struct_type, i).GetIdentifierName();
     if (value.IsNull()) {
       throw BinderException("Metadata value for key \"%s\" must not be NULL", key);
     }
@@ -95,17 +92,16 @@ vector<pair<string, string>> ReadMetadataPairs(const Value& kv_struct,
 
 // Reads a STRUCT of column name to STRUCT of key/value pairs
 vector<ArrowFieldMetadata> ReadFieldMetadata(const Value& columns,
-                                             const vector<string>& names) {
+                                             const vector<Identifier>& names) {
   if (columns.IsNull() || columns.type().id() != LogicalTypeId::STRUCT) {
     throw BinderException("Expected field_metadata argument to be a STRUCT");
   }
   vector<ArrowFieldMetadata> result;
   auto& values = StructValue::GetChildren(columns);
   for (idx_t i = 0; i < values.size(); i++) {
-    auto column = StructType::GetChildName(columns.type(), i);
+    const auto& column = StructType::GetChildName(columns.type(), i).GetIdentifierName();
     idx_t column_index = 0;
-    while (column_index < names.size() &&
-           !StringUtil::CIEquals(names[column_index], column)) {
+    while (column_index < names.size() && names[column_index] != column) {
       column_index++;
     }
     if (column_index == names.size()) {
@@ -120,18 +116,17 @@ vector<ArrowFieldMetadata> ReadFieldMetadata(const Value& columns,
 
 unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
                                         CopyFunctionBindInput& input,
-                                        const vector<string>& names,
+                                        const vector<Identifier>& names,
                                         const vector<LogicalType>& sql_types) {
   D_ASSERT(names.size() == sql_types.size());
   auto bind_data = make_uniq<ArrowWriteBindData>();
   bind_data->options = context.GetClientProperties();
   bind_data->schema = CreateArrowIpcSchema(sql_types, names, bind_data->options);
   // Arrow recommends .arrow for the file format and .arrows for the stream
-  bind_data->file_format = StringUtil::Lower(input.info.format) != "arrows";
-  bool row_group_size_bytes_set = false;
+  bind_data->file_format = !StringUtil::CIEquals(input.info.format, "arrows");
 
   for (auto& option : input.info.options) {
-    const auto loption = StringUtil::Lower(option.first);
+    const auto loption = StringUtil::Lower(option.first.GetIdentifierName());
     if (loption == "size_metadata") {
       if (option.second.size() > 1) {
         throw BinderException("SIZE_METADATA accepts at most one argument");
@@ -149,23 +144,8 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
     if (bind_data->compression.TrySetOption(loption, option.second[0])) {
       continue;
     }
-    if (loption == "row_group_size" || loption == "chunk_size") {
-      if (bind_data->row_group_size_set) {
-        throw BinderException(
-            "ROW_GROUP_SIZE and ROW_GROUP_SIZE_BYTES are mutually exclusive");
-      }
+    if (loption == "chunk_size") {
       bind_data->row_group_size = option.second[0].GetValue<uint64_t>();
-      bind_data->row_group_size_set = true;
-    } else if (loption == "row_group_size_bytes") {
-      auto roption = option.second[0];
-      if (roption.GetTypeMutable().id() == LogicalTypeId::VARCHAR) {
-        bind_data->row_group_size_bytes = DBConfig::ParseMemoryLimit(roption.ToString());
-      } else {
-        bind_data->row_group_size_bytes = option.second[0].GetValue<uint64_t>();
-      }
-      row_group_size_bytes_set = true;
-    } else if (loption == "row_groups_per_file") {
-      bind_data->row_groups_per_file = option.second[0].GetValue<uint64_t>();
     } else if (loption == "kv_metadata") {
       bind_data->kv_metadata =
           ReadMetadataPairs(option.second[0], "kv_metadata argument");
@@ -193,17 +173,8 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
     }
   }
 
-  if (row_group_size_bytes_set) {
-    if (Settings::Get<PreserveInsertionOrderSetting>(context)) {
-      throw BinderException(
-          "ROW_GROUP_SIZE_BYTES does not work while preserving insertion order. Use "
-          "\"SET preserve_insertion_order=false;\" to disable preserving insertion "
-          "order.");
-    }
-  } else {
-    bind_data->row_group_size_bytes =
-        bind_data->row_group_size * ArrowWriteBindData::BYTES_PER_ROW;
-  }
+  bind_data->row_group_size_bytes =
+      bind_data->row_group_size * ArrowWriteBindData::BYTES_PER_ROW;
 
   bind_data->sql_types = sql_types;
 
@@ -277,31 +248,13 @@ idx_t ArrowWriteDesiredBatchSize(ClientContext& context, FunctionData& bind_data
   return bind_data.row_group_size;
 }
 
-bool ArrowWriteRotateFiles(FunctionData& bind_data_p,
-                           const optional_idx& file_size_bytes) {
-  auto& bind_data = bind_data_p.Cast<ArrowWriteBindData>();
-  return file_size_bytes.IsValid() || bind_data.row_groups_per_file.IsValid();
-}
-
-bool ArrowWriteRotateNextFile(GlobalFunctionData& gstate, FunctionData& bind_data_p,
-                              const optional_idx& file_size_bytes) {
+idx_t ArrowWriteFileSizeBytes(GlobalFunctionData& gstate) {
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
-  auto& bind_data = bind_data_p.Cast<ArrowWriteBindData>();
   // A file with no row groups would rotate forever
   if (global_state.writer->NumberOfRowGroups() == 0) {
-    return false;
+    return 0;
   }
-  if (file_size_bytes.IsValid() &&
-      global_state.writer->FileSize() > file_size_bytes.GetIndex()) {
-    return true;
-  }
-
-  if (bind_data.row_groups_per_file.IsValid() &&
-      global_state.writer->NumberOfRowGroups() >=
-          bind_data.row_groups_per_file.GetIndex()) {
-    return true;
-  }
-  return false;
+  return global_state.writer->FileSize();
 }
 
 struct ArrowWriteBatchData : public PreparedBatchData {
@@ -345,8 +298,7 @@ void RegisterArrowStreamCopyFunction(ExtensionLoader& loader) {
   function.prepare_batch = ArrowWritePrepareBatch;
   function.flush_batch = ArrowWriteFlushBatch;
   function.desired_batch_size = ArrowWriteDesiredBatchSize;
-  function.rotate_files = ArrowWriteRotateFiles;
-  function.rotate_next_file = ArrowWriteRotateNextFile;
+  function.file_size_bytes = ArrowWriteFileSizeBytes;
 
   function.extension = "arrows";
   loader.RegisterFunction(function);

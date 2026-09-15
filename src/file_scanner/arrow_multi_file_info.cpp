@@ -12,10 +12,10 @@ unique_ptr<BaseFileReaderOptions> ArrowMultiFileInfo::InitializeOptions(
   return make_uniq<ArrowFileReaderOptions>();
 }
 
-bool ArrowMultiFileInfo::ParseCopyOption(ClientContext& context, const string& key,
+bool ArrowMultiFileInfo::ParseCopyOption(ClientContext& context, const Identifier& key,
                                          const vector<Value>& values,
                                          BaseFileReaderOptions& options_p,
-                                         vector<string>& expected_names,
+                                         vector<Identifier>& expected_names,
                                          vector<LogicalType>& expected_types) {
   // We currently do not have any options for the scanner, so we always return false
   return false;
@@ -26,7 +26,7 @@ unique_ptr<MultiFileReaderInterface> ArrowMultiFileInfo::CreateInterface(
   return make_uniq<ArrowMultiFileInfo>();
 }
 
-bool ArrowMultiFileInfo::ParseOption(ClientContext& context, const string& key,
+bool ArrowMultiFileInfo::ParseOption(ClientContext& context, const Identifier& key,
                                      const Value& val, MultiFileOptions& file_options,
                                      BaseFileReaderOptions& options) {
   // We currently do not have any options for the scanner, so we always return false
@@ -35,7 +35,7 @@ bool ArrowMultiFileInfo::ParseOption(ClientContext& context, const string& key,
 
 void ArrowMultiFileInfo::FinalizeCopyBind(ClientContext& context,
                                           BaseFileReaderOptions& options_p,
-                                          const vector<string>& expected_names,
+                                          const vector<Identifier>& expected_names,
                                           const vector<LogicalType>& expected_types) {}
 
 struct ArrowMultiFileData final : public TableFunctionData {
@@ -51,7 +51,8 @@ unique_ptr<TableFunctionData> ArrowMultiFileInfo::InitializeBindData(
 
 void ArrowMultiFileInfo::BindReader(ClientContext& context,
                                     vector<LogicalType>& return_types,
-                                    vector<string>& names, MultiFileBindData& bind_data) {
+                                    vector<Identifier>& names,
+                                    MultiFileBindData& bind_data) {
   ArrowFileReaderOptions options;
   auto& multi_file_list = *bind_data.file_list;
   if (!bind_data.file_options.union_by_name) {
@@ -91,8 +92,8 @@ unique_ptr<GlobalTableFunctionState> ArrowMultiFileInfo::InitializeGlobalState(
 }
 
 unique_ptr<LocalTableFunctionState> ArrowMultiFileInfo::InitializeLocalState(
-    ExecutionContext& context, GlobalTableFunctionState& function_state) {
-  return make_uniq<ArrowFileLocalState>(context);
+    ClientContext& context, GlobalTableFunctionState& function_state) {
+  return make_uniq<ArrowFileLocalState>();
 }
 
 shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
