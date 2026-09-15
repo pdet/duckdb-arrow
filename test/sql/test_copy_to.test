@@ -44,15 +44,16 @@ SELECT count(*) FROM read_arrow('__TEST_DIR__/test_row_group.arrow');
 ----
 15487
 
-statement error
+statement ok
 COPY test TO '__TEST_DIR__/test_row_group.arrow' (row_group_size 100, chunk_size 10)
-----
-ROW_GROUP_SIZE and ROW_GROUP_SIZE_BYTES are mutually exclusive
 
-statement error
+statement ok
 COPY test TO '__TEST_DIR__/test_row_group.arrow' (row_group_size_bytes 100)
+
+query I
+SELECT count(*) FROM read_arrow('__TEST_DIR__/test_row_group.arrow');
 ----
-ROW_GROUP_SIZE_BYTES does not work while preserving insertion order. Use "SET preserve_insertion_order=false;" to disable preserving insertion order.
+15487
 
 statement ok
 SET preserve_insertion_order=false;
@@ -72,7 +73,7 @@ COPY test TO '__TEST_DIR__/test_row_group_folder' (chunk_size 10, row_groups_per
 query I
 select count(file) from glob('__TEST_DIR__/test_row_group_folder/*');
 ----
-9
+8
 
 query I
 SELECT count(*) FROM read_arrow('__TEST_DIR__/test_row_group_folder/*');

@@ -14,10 +14,10 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 
-class ArrowStringVectorBuffer : public VectorBuffer {
+class ArrowStringVectorBuffer : public AuxiliaryDataHolder {
  public:
   explicit ArrowStringVectorBuffer(nanoarrow::UniqueBuffer buffer_p)
-      : VectorBuffer(VectorBufferType::OPAQUE_BUFFER), buffer(std::move(buffer_p)) {}
+      : buffer(std::move(buffer_p)) {}
 
  private:
   nanoarrow::UniqueBuffer buffer;
@@ -40,7 +40,7 @@ class ToArrowIPCFunction {
   static unique_ptr<FunctionData> Bind(ClientContext& context,
                                        TableFunctionBindInput& input,
                                        vector<LogicalType>& return_types,
-                                       vector<string>& names);
+                                       vector<Identifier>& names);
   static OperatorResultType Function(ExecutionContext& context,
                                      TableFunctionInput& data_p, DataChunk& input,
                                      DataChunk& output);

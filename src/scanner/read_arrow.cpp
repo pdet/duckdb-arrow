@@ -59,14 +59,14 @@ struct ReadArrowStream : ArrowTableFunction {
 
     auto table_function = make_uniq<TableFunctionRef>();
     vector<unique_ptr<ParsedExpression>> children;
-    auto table_name_expr = make_uniq<ConstantExpression>(Value(table_name));
+    auto table_name_expr = ConstantExpression::String(table_name);
     children.push_back(std::move(table_name_expr));
     auto function_expr = make_uniq<FunctionExpression>("read_arrow", std::move(children));
     table_function->function = std::move(function_expr);
 
     if (!FileSystem::HasGlob(table_name)) {
       auto& fs = FileSystem::GetFileSystem(context);
-      table_function->alias = fs.ExtractBaseName(table_name);
+      table_function->alias = Identifier(fs.ExtractBaseName(table_name));
     }
 
     return std::move(table_function);

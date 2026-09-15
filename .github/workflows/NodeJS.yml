@@ -24,7 +24,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.11'
 
       - uses: actions/setup-node@v4
         with:
@@ -32,18 +32,19 @@ jobs:
 
       - name: Install required node packages
         run: |
-          npm install @duckdb/node-api@1.5.5-r.4 apache-arrow mocha --no-audit --no-fund
+          npm install @duckdb/node-api@1.5.5-r.5 apache-arrow mocha --no-audit --no-fund
           echo "$(pwd)/node_modules/.bin" >> $GITHUB_PATH
           npm -v
           node -v
 
       - name: Build duckdb
         run: |
-          cd duckdb
-          git fetch --tags
-          git checkout v1.5.5
-          cd ..
           GEN=ninja make release
+
+      - name: Use the built DuckDB library
+        run: |
+          cp build/release/src/libduckdb.dylib "node_modules/@duckdb/node-bindings-darwin-$(node -p 'process.arch')/libduckdb.dylib"
+          node -e "require('assert').match(require('@duckdb/node-bindings').library_version(), /^v2\\.0\\./)"
 
       - name: Run JS tests
         run: |

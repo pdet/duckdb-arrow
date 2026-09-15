@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: duckdb/duckdb-python
-          ref: v1.5-variegata
+          ref: v2.0-cyanoptera
           path: duckdb-python
           fetch-depth: 0
           submodules: true

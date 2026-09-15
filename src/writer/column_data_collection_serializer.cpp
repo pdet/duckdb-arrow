@@ -65,10 +65,11 @@ static void CheckEncodableField(const ArrowSchema& field, const char* column) {
 }
 
 nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
-                                             const vector<string>& names,
+                                             const vector<Identifier>& names,
                                              ClientProperties& options) {
   nanoarrow::UniqueSchema schema;
-  ArrowConverter::ToArrowSchema(schema.get(), types, names, options);
+  ArrowConverter::ToArrowSchema(schema.get(), types, IdentifiersToStrings(names),
+                                options);
   for (int64_t i = 0; i < schema->n_children; i++) {
     CheckEncodableField(*schema->children[i], schema->children[i]->name);
   }

@@ -23,12 +23,8 @@ class ArrowFileScan;
 //! This is done by calling the Arrow Scan directly on one file.
 struct ArrowFileLocalState : public LocalTableFunctionState {
  public:
-  explicit ArrowFileLocalState(ExecutionContext& execution_context)
-      : execution_context(execution_context) {};
   //! Factory Pointer
   shared_ptr<ArrowFileScan> file_scan;
-
-  ExecutionContext& execution_context;
 
   //! Each local state refers to an Arrow Scan on a local file
   unique_ptr<ArrowScanFunctionData> local_arrow_function_data;
@@ -58,17 +54,17 @@ struct ArrowMultiFileInfo : MultiFileReaderInterface {
 
   static unique_ptr<MultiFileReaderInterface> CreateInterface(ClientContext& context);
 
-  bool ParseCopyOption(ClientContext& context, const string& key,
+  bool ParseCopyOption(ClientContext& context, const Identifier& key,
                        const vector<Value>& values, BaseFileReaderOptions& options,
-                       vector<string>& expected_names,
+                       vector<Identifier>& expected_names,
                        vector<LogicalType>& expected_types) override;
 
-  bool ParseOption(ClientContext& context, const string& key, const Value& val,
+  bool ParseOption(ClientContext& context, const Identifier& key, const Value& val,
                    MultiFileOptions& file_options,
                    BaseFileReaderOptions& options) override;
 
   void FinalizeCopyBind(ClientContext& context, BaseFileReaderOptions& options,
-                        const vector<string>& expected_names,
+                        const vector<Identifier>& expected_names,
                         const vector<LogicalType>& expected_types) override;
 
   unique_ptr<TableFunctionData> InitializeBindData(
@@ -79,7 +75,7 @@ struct ArrowMultiFileInfo : MultiFileReaderInterface {
   //! 1. union_by_name = False. We set the schema/name depending on the first file
   //! 2. union_by_name = True.
   void BindReader(ClientContext& context, vector<LogicalType>& return_types,
-                  vector<string>& names, MultiFileBindData& bind_data) override;
+                  vector<Identifier>& names, MultiFileBindData& bind_data) override;
 
   void FinalizeBindData(MultiFileBindData& multi_file_data) override;
 
@@ -94,7 +90,7 @@ struct ArrowMultiFileInfo : MultiFileReaderInterface {
       MultiFileGlobalState& global_state) override;
 
   unique_ptr<LocalTableFunctionState> InitializeLocalState(
-      ExecutionContext& context, GlobalTableFunctionState& function_state) override;
+      ClientContext& context, GlobalTableFunctionState& function_state) override;
 
   shared_ptr<BaseFileReader> CreateReader(ClientContext& context,
                                           GlobalTableFunctionState& gstate,
