@@ -54,9 +54,9 @@ def compare_result(arrow_result, duckdb_result, con):
         """
     SELECT COUNT(*) = 0
     FROM (
-        (SELECT * FROM arrow_result EXCEPT SELECT * FROM duckdb_result)
-        UNION
-        (SELECT * FROM duckdb_result EXCEPT SELECT * FROM arrow_result)
+        (SELECT * FROM arrow_result EXCEPT ALL SELECT * FROM duckdb_result)
+        UNION ALL
+        (SELECT * FROM duckdb_result EXCEPT ALL SELECT * FROM arrow_result)
     ) """
     ).fetchone()[0]
 
@@ -68,13 +68,12 @@ def compare_ipc_file_reader(con, file):
     assert compare_result(arrow_result, duckdb_file_result, con)
 
 
-# 2. Now test the writer, write it to a file from DuckDB, read it with arrow and compare
 def compare_ipc_file_writer(con, file):
     arrow_result = ipc.open_stream(file).read_all()
     with tempfile.TemporaryDirectory() as temp_dir:
-        file_path = os.path.join(temp_dir, "arrow_duck.arrows")
-        con.execute(f"COPY (FROM read_arrow('{file}')) TO '{file_path}'")
-        duckdb_file_result = con.sql(f"FROM read_arrow('{file}')").to_arrow_table()
+        file_path = os.path.join(temp_dir, "arrow_duck.arrow")
+        con.execute(f"COPY (FROM read_arrow('{file}')) TO '{file_path}' (FORMAT ARROW)")
+        duckdb_file_result = ipc.open_file(file_path).read_all()
         assert compare_result(arrow_result, duckdb_file_result, con)
 
 
@@ -121,7 +120,7 @@ class TestArrowIntegrationTests(object):
             compare_ipc_file_writer(connection, os.path.join(big_endian_folder, file))
             compare_ipc_file_writer(connection, os.path.join(little_endian_folder, file))
         for file in compression_2_0_0:
-            compare_ipc_file_reader(connection, os.path.join(compression_folder, file))
+            compare_ipc_file_writer(connection, os.path.join(compression_folder, file))
 
     def test_read_ipc_buffer(self, connection):
         for file in little_big_integration_files:

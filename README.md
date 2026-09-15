@@ -51,14 +51,14 @@ In the remainder of this section, we cover the supported parameters and usages f
 ### IPC Files
 
 #### Write
-Writing an Arrow IPC file is done using the COPY statement Below is a simple example of how you can use DuckDB to create such a file.
+Writing Arrow IPC output is done using the COPY statement. Below is a simple example of how you can use DuckDB to create an IPC file.
 
 ```sql
-COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrows";
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrow";
 ```
 
-Both `.arrows` and `.arrow` will be automatically recognized by DuckDB as Arrow IPC streams.
-However, if you wish to use a different extension, you can manually specify the format using:
+`COPY` follows the Arrow file extension convention. `.arrow` files and `FORMAT ARROW` produce the Arrow IPC file format, including a footer for random access with readers such as `pyarrow.ipc.open_file`. `.arrows` files and `FORMAT ARROWS` produce the Arrow IPC streaming format, which the `to_arrow_ipc` buffer function also emits as messages.
+For a different filename extension, specify the format explicitly:
 
 ```sql
 COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.ipc" (FORMAT ARROWS);
@@ -85,12 +85,12 @@ COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrows" (COMPRESSION 'zs
 #### Read
 You can consume the file using the `read_arrow` scanner. For example, to read the file we just created, you could run:
 ```sql
-FROM read_arrow('test.arrows');
+FROM read_arrow('test.arrow');
 ```
 
 Similar to the copy function, the extension also registers `.arrows` and `.arrow` as valid extensions for the Arrow IPC format. This means that a replacement scan can be applied if that is the file extension, so the following would also be a valid query:
 ```sql
-FROM 'test.arrows';
+FROM 'test.arrow';
 ```
 
 Files and streams whose record batch bodies are compressed with `zstd` or `lz4` (the two codecs allowed by the Arrow IPC format) are read transparently.
@@ -99,17 +99,17 @@ Besides single-file reading, our extension also fully supports multi-file readin
 
 If we were to create a second test file using:
 ```sql
-COPY (SELECT 42 as foofy, 'string' as stringy) TO "test_2.arrows" (FORMAT ARROWS);
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "test_2.arrow" (FORMAT ARROW);
 ```
 
 We can then run a query that reads both files using a glob pattern or a list of file paths:
 
 ```sql
 -- Glob
-FROM read_arrow('*.arrows')
+FROM read_arrow('*.arrow')
 
 -- List
-FROM read_arrow(['test.arrows','test_2.arrows'])
+FROM read_arrow(['test.arrow','test_2.arrow'])
 ```
 
 When reading multiple files, the following parameters are also supported:
@@ -122,7 +122,7 @@ The key-value metadata of the schema and of its fields can be read with `arrow_k
 SELECT field_path, key, value FROM arrow_kv_metadata('test.arrows');
 ```
 > [!NOTE]
-> [Arrow IPC files (.arrow)](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams (.arrows)](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are distinct but related formats. This extension can read both but only writes Arrow IPC Streams.
+> [Arrow IPC files](https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format) and [Arrow IPC streams](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) are both standard Arrow formats. This extension reads both regardless of filename extension, and `COPY` writes a file for `.arrow` or `FORMAT ARROW` and a stream for `.arrows` or `FORMAT ARROWS`.
 ### IPC Stream Buffers
 Similar to the old core Arrow extension, this extension also allows direct production and consumption of the Arrow IPC streaming format from in-memory buffers in both Python and Node.js.
 In this section, we will demonstrate how to use the Python API, but you can find many tests that serve as examples for both [Node.js](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/nodejs) and [Python](https://github.com/paleolimbot/duckdb-nanoarrow/tree/main/test/python).

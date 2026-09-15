@@ -18,6 +18,8 @@
 #include "nanoarrow_errors.hpp"
 
 namespace duckdb {
+class ArrowAppender;
+
 namespace ext_nanoarrow {
 
 class ColumnDataCollectionSerializer {
@@ -25,19 +27,18 @@ class ColumnDataCollectionSerializer {
   ColumnDataCollectionSerializer(ClientProperties options, Allocator& allocator,
                                  ArrowIpcCompressionOptions compression = {});
 
-  //! Prepares the serializer for arrays matching schema; no reference to it is kept
   void Init(const ArrowSchema* schema, const vector<LogicalType>& logical_types);
 
-  //! Encodes the IPC schema message for schema into the header buffer
   void SerializeSchema(const ArrowSchema* schema);
 
-  //! Copies the array buffers, so the array only needs to live through this call
-  idx_t Serialize(ArrowArray& array);
-  idx_t Serialize(DataChunk& chunk);
+  void SerializeFooter(const ArrowSchema* schema,
+                       const vector<ArrowIpcFileBlock>& blocks);
+
+  idx_t Serialize(ArrowAppender& appender);
 
   idx_t Serialize(const ColumnDataCollection& buffer);
 
-  void Flush(BufferedFileWriter& writer);
+  ArrowIpcFileBlock Flush(BufferedFileWriter& writer);
 
   nanoarrow::UniqueBuffer GetHeader();
 
@@ -54,6 +55,11 @@ class ColumnDataCollectionSerializer {
   nanoarrow::UniqueBuffer body;
   ArrowError error{};
 };
+
+// The writer does not emit dictionary messages or support view layouts
+nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
+                                             const vector<string>& names,
+                                             ClientProperties& options);
 
 }  // namespace ext_nanoarrow
 }  // namespace duckdb

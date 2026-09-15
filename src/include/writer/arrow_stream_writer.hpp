@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
+#include "duckdb/common/atomic.hpp"
 #include "duckdb/common/mutex.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "writer/column_data_collection_serializer.hpp"
@@ -14,34 +15,28 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 
-//! Key/value metadata for one field of the written schema
 struct ArrowFieldMetadata {
   idx_t column_index;
   vector<pair<string, string>> metadata;
 };
 
-//! Arrow IPC stream shared by threads; encoding is per thread, the lock guards the file
 struct ArrowStreamWriter {
-  ArrowStreamWriter(ClientContext& context, FileSystem& fs, const string& file_path,
-                    const vector<LogicalType>& logical_types,
-                    const vector<string>& column_names,
+  ArrowStreamWriter(const ClientProperties& options, FileSystem& fs,
+                    const string& file_path, const vector<LogicalType>& logical_types,
+                    const ArrowSchema& schema,
                     const vector<pair<string, string>>& metadata,
                     const vector<ArrowFieldMetadata>& field_metadata,
-                    const ArrowIpcCompressionOptions& compression);
+                    const ArrowIpcCompressionOptions& compression, bool file_format);
 
-  void InitSchema(const vector<LogicalType>& logical_types,
-                  const vector<string>& column_names,
-                  const vector<pair<string, string>>& metadata,
+  void InitSchema(const ArrowSchema& schema, const vector<pair<string, string>>& metadata,
                   const vector<ArrowFieldMetadata>& field_metadata);
 
   void InitOutputFile(FileSystem& fs, const string& file_path);
 
   void WriteSchema();
 
-  //! Creates a per-thread serializer (own ArrowIpcEncoder) that may outlive this writer
   unique_ptr<ColumnDataCollectionSerializer> NewSerializer() const;
 
-  //! Appends the encoded row group held by serializer to the file
   void Flush(ColumnDataCollectionSerializer& serializer);
 
   void Finalize();
@@ -51,16 +46,20 @@ struct ArrowStreamWriter {
   idx_t FileSize() const;
 
  private:
+  void WriteFooter();
+
   ClientProperties options;
   Allocator& allocator;
   ArrowIpcCompressionOptions compression;
-  string file_name;
   vector<LogicalType> logical_types;
-  nanoarrow::UniqueSchema schema;
-  //! Guards writer and row_group_count only; encoding happens outside of it
-  mutable mutex lock;
+  bool file_format;
+  mutex lock;
   unique_ptr<BufferedFileWriter> writer;
-  idx_t row_group_count{0};
+  vector<ArrowIpcFileBlock> blocks;
+  // Rotation checks read these while another thread may be flushing
+  atomic<idx_t> row_group_count{0};
+  atomic<idx_t> file_size{0};
+  nanoarrow::UniqueSchema schema;
 };
 
 }  // namespace ext_nanoarrow

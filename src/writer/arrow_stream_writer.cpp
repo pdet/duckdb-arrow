@@ -1,11 +1,15 @@
 #include "writer/arrow_stream_writer.hpp"
+
+#include "duckdb/common/bswap.hpp"
+#include "duckdb/common/numeric_utils.hpp"
+#include "ipc/file_format.hpp"
+
 namespace duckdb {
 
 namespace ext_nanoarrow {
 
 namespace {
 
-// Adds the pairs to the metadata the schema already has, replacing repeated keys
 void SetSchemaMetadata(ArrowSchema* schema,
                        const vector<pair<string, string>>& metadata) {
   nanoarrow::UniqueBuffer packed;
@@ -21,40 +25,33 @@ void SetSchemaMetadata(ArrowSchema* schema,
 
 }  // namespace
 
-ArrowStreamWriter::ArrowStreamWriter(ClientContext& context, FileSystem& fs,
+ArrowStreamWriter::ArrowStreamWriter(const ClientProperties& options_p, FileSystem& fs,
                                      const string& file_path,
                                      const vector<LogicalType>& logical_types,
-                                     const vector<string>& column_names,
+                                     const ArrowSchema& schema_p,
                                      const vector<pair<string, string>>& metadata,
                                      const vector<ArrowFieldMetadata>& field_metadata,
-                                     const ArrowIpcCompressionOptions& compression)
-    : options(context.GetClientProperties()),
-      allocator(BufferAllocator::Get(context)),
+                                     const ArrowIpcCompressionOptions& compression,
+                                     bool file_format)
+    : options(options_p),
+      allocator(BufferAllocator::Get(*options.client_context)),
       compression(compression),
-      file_name(file_path),
-      logical_types(logical_types) {
-  InitSchema(logical_types, column_names, metadata, field_metadata);
+      logical_types(logical_types),
+      file_format(file_format) {
+  InitSchema(schema_p, metadata, field_metadata);
   InitOutputFile(fs, file_path);
 }
 
-void ArrowStreamWriter::InitSchema(const vector<LogicalType>& logical_types,
-                                   const vector<string>& column_names,
+void ArrowStreamWriter::InitSchema(const ArrowSchema& schema_p,
                                    const vector<pair<string, string>>& metadata,
                                    const vector<ArrowFieldMetadata>& field_metadata) {
-  nanoarrow::UniqueSchema tmp_schema;
-  ArrowConverter::ToArrowSchema(tmp_schema.get(), logical_types, column_names, options);
-
-  if (metadata.empty() && field_metadata.empty()) {
-    ArrowSchemaMove(tmp_schema.get(), schema.get());
-  } else {
-    // Metadata can only be set on schemas allocated by nanoarrow, hence the copy
-    NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(tmp_schema.get(), schema.get()));
-    if (!metadata.empty()) {
-      SetSchemaMetadata(schema.get(), metadata);
-    }
-    for (const auto& field : field_metadata) {
-      SetSchemaMetadata(schema->children[field.column_index], field.metadata);
-    }
+  // Copy into a nanoarrow owned schema so the metadata set below is freed with it
+  NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(&schema_p, schema.get()));
+  if (!metadata.empty()) {
+    SetSchemaMetadata(schema.get(), metadata);
+  }
+  for (const auto& field : field_metadata) {
+    SetSchemaMetadata(schema->children[field.column_index], field.metadata);
   }
 }
 
@@ -62,13 +59,16 @@ void ArrowStreamWriter::InitOutputFile(FileSystem& fs, const string& file_path) 
   writer = make_uniq<BufferedFileWriter>(
       fs, file_path.c_str(),
       FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW);
+  if (file_format) {
+    writer->WriteData(const_data_ptr_cast(kArrowIPCFileMagic), kArrowIPCFileHeaderSize);
+  }
 }
 
 void ArrowStreamWriter::WriteSchema() {
   auto serializer = NewSerializer();
   serializer->SerializeSchema(schema.get());
-  lock_guard<mutex> guard(lock);
   serializer->Flush(*writer);
+  file_size = writer->GetTotalWritten();
 }
 
 unique_ptr<ColumnDataCollectionSerializer> ArrowStreamWriter::NewSerializer() const {
@@ -80,26 +80,38 @@ unique_ptr<ColumnDataCollectionSerializer> ArrowStreamWriter::NewSerializer() co
 
 void ArrowStreamWriter::Flush(ColumnDataCollectionSerializer& serializer) {
   lock_guard<mutex> guard(lock);
-  serializer.Flush(*writer);
+  auto block = serializer.Flush(*writer);
+  if (file_format) {
+    blocks.push_back(block);
+  }
   ++row_group_count;
+  file_size = writer->GetTotalWritten();
 }
 
 void ArrowStreamWriter::Finalize() {
   uint8_t end_of_stream[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
   lock_guard<mutex> guard(lock);
   writer->WriteData(end_of_stream, sizeof(end_of_stream));
+  if (file_format) {
+    WriteFooter();
+  }
+  file_size = writer->GetTotalWritten();
   writer->Close();
 }
 
-idx_t ArrowStreamWriter::NumberOfRowGroups() const {
-  lock_guard<mutex> guard(lock);
-  return row_group_count;
+void ArrowStreamWriter::WriteFooter() {
+  auto serializer = NewSerializer();
+  serializer->SerializeFooter(schema.get(), blocks);
+  auto footer = serializer->GetHeader();
+  auto footer_size = NumericCast<int32_t>(footer->size_bytes);
+  writer->WriteData(footer->data, footer->size_bytes);
+  writer->Write<int32_t>(BSwapIfBE(footer_size));
+  writer->WriteData(const_data_ptr_cast(kArrowIPCFileMagic), kArrowIPCFileMagicSize);
 }
 
-idx_t ArrowStreamWriter::FileSize() const {
-  lock_guard<mutex> guard(lock);
-  return writer->GetTotalWritten();
-}
+idx_t ArrowStreamWriter::NumberOfRowGroups() const { return row_group_count; }
+
+idx_t ArrowStreamWriter::FileSize() const { return file_size; }
 
 }  // namespace ext_nanoarrow
 }  // namespace duckdb
