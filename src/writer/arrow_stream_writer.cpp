@@ -1,8 +1,7 @@
 #include "writer/arrow_stream_writer.hpp"
 
-#include <limits>
-
 #include "duckdb/common/bswap.hpp"
+#include "duckdb/common/limits.hpp"
 #include "duckdb/common/numeric_utils.hpp"
 #include "ipc/file_format.hpp"
 
@@ -61,7 +60,7 @@ void ArrowStreamWriter::InitSchema(const ArrowSchema& schema_p,
   }
   if (size_metadata) {
     // Reserve space for the longest totals before writing any record batches
-    const auto max_size = std::to_string(std::numeric_limits<int64_t>::max());
+    const auto max_size = std::to_string(NumericLimits<int64_t>::Maximum());
     SetSchemaMetadata(schema.get(), {{kTotalCompressedSize, max_size},
                                      {kTotalUncompressedSize, max_size}});
   }

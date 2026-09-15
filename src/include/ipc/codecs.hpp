@@ -33,8 +33,7 @@ nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder();
 
 //! Makes an IPC encoder compress bodies, throws if this nanoarrow build lacks the codec
 void SetArrowIpcEncoderCompression(ArrowIpcEncoder& encoder,
-                                   const ArrowIpcCompressionOptions& options,
-                                   int64_t* uncompressed_size = nullptr);
+                                   const ArrowIpcCompressionOptions& options);
 
 }  // namespace ext_nanoarrow
 }  // namespace duckdb

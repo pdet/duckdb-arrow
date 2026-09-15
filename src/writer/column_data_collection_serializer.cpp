@@ -95,8 +95,7 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
   InitArrowDuckBuffer(header.get(), allocator);
   InitArrowDuckBuffer(body.get(), allocator);
   NANOARROW_THROW_NOT_OK(ArrowIpcEncoderInit(encoder.get()));
-  SetArrowIpcEncoderCompression(*encoder.get(), compression,
-                                track_body_size ? &uncompressed_body_size : nullptr);
+  SetArrowIpcEncoderCompression(*encoder.get(), compression);
   THROW_NOT_OK(InternalException, &error,
                ArrowArrayViewInitFromSchema(chunk_view.get(), schema, &error));
 
@@ -113,12 +112,11 @@ void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema,
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
   if (reserved_size) {
-    if (reserved_size < static_cast<idx_t>(header->size_bytes) ||
-        reserved_size % 8 != 0) {
+    if (reserved_size < static_cast<idx_t>(header->size_bytes)) {
       throw InternalException("Arrow IPC schema does not fit in its reserved message");
     }
     // Include padding in the message length to keep record batch offsets unchanged
-    auto length = BSwapIfBE(NumericCast<int32_t>(reserved_size - 8));
+    auto length = BSwapIfBE(NumericCast<int32_t>(reserved_size - 2 * sizeof(int32_t)));
     NANOARROW_THROW_NOT_OK(ArrowBufferAppendFill(
         header.get(), 0, NumericCast<int64_t>(reserved_size) - header->size_bytes));
     std::memcpy(header->data + sizeof(int32_t), &length, sizeof(length));
@@ -140,6 +138,19 @@ void ColumnDataCollectionSerializer::SerializeFooter(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), false, header.get()));
 }
 
+// Uncompressed body size, the buffers ArrowIpcEncoderCollectArray collects padded to 8
+static int64_t PaddedBodySize(const ArrowArrayView& view) {
+  int64_t size = 0;
+  for (int64_t c = 0; c < view.n_children; c++) {
+    const auto& child = *view.children[c];
+    for (int64_t b = 0; b < child.array->n_buffers; b++) {
+      size += AlignValue<int64_t>(child.buffer_views[b].size_bytes);
+    }
+    size += PaddedBodySize(child);
+  }
+  return size;
+}
+
 idx_t ColumnDataCollectionSerializer::Serialize(ArrowAppender& appender) {
   ArrowArray finalized = appender.Finalize();
   nanoarrow::UniqueArray array(&finalized);
@@ -148,12 +159,14 @@ idx_t ColumnDataCollectionSerializer::Serialize(ArrowAppender& appender) {
 
   THROW_NOT_OK(duckdb::InternalException, &error,
                ArrowArrayViewSetArray(chunk_view.get(), array.get(), &error));
-  uncompressed_body_size = 0;
   THROW_NOT_OK(InternalException, &error,
                ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(),
                                                       body.get(), &error));
-  if (track_body_size && compression.type == NANOARROW_IPC_COMPRESSION_TYPE_NONE) {
-    uncompressed_body_size = body->size_bytes;
+  if (track_body_size) {
+    // An uncompressed body already has the padded size, so only compressed ones walk
+    uncompressed_body_size = compression.type == NANOARROW_IPC_COMPRESSION_TYPE_NONE
+                                 ? body->size_bytes
+                                 : PaddedBodySize(*chunk_view.get());
   }
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));

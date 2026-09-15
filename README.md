@@ -73,13 +73,13 @@ The Copy function of the Copy To Arrow File operation accepts the following para
 * `field_metadata`: Key-value metadata to be added to individual fields of the file schema, as a struct of column name to struct of metadata, e.g. `FIELD_METADATA {'id': {'unit': 'count'}}`. The keys are merged with the metadata DuckDB attaches to the field, so `ARROW:extension:name` and `ARROW:extension:metadata` can be set to tag a field with an extension type. For both options, values must be valid UTF-8 without NUL bytes and not `NULL`.
 * `compression`: The codec used to compress the record batch bodies: `uncompressed` (the default), `zstd` or `lz4`.
 * `compression_level`: The compression level for the selected codec. For `zstd` this ranges from -131072 to 22 (default: 3, negative levels favour speed), for `lz4` from -65536 to 12 (default: 0, i.e. the fast mode; 3 and above use LZ4HC, negative levels select an acceleration). Requires `compression`.
-* `size_metadata`: Disabled by default. Adds `total_compressed_size` and `total_uncompressed_size` to schema metadata as decimal byte counts summed over all record batch bodies, including buffer padding. Excludes message headers, the schema, and file framing. The compressed total includes compression prefixes and padding as stored on disk. The uncompressed total counts the original buffers with padding. Both totals are equal for uncompressed output. Requires `FORMAT ARROW` or the `.arrow` extension and a seekable local output so the opening schema can be updated to match the footer.
+* `size_metadata`: Disabled by default. Adds `total_compressed_size` and `total_uncompressed_size` to schema metadata as decimal byte counts summed over the record batch bodies of each output file, including buffer padding. Excludes message headers, the schema, and file framing. The compressed total includes compression prefixes and padding as stored on disk. The uncompressed total counts the original buffers with padding. Both totals are equal for uncompressed output. Requires `FORMAT ARROW` or the `.arrow` extension and a seekable local output so the opening schema can be updated to match the footer.
 
 ```sql
 COPY (SELECT * FROM range(10000)) TO 'sizes.arrow' (SIZE_METADATA);
 ```
 
-The totals are available through `pyarrow.ipc.open_file('sizes.arrow').schema.metadata`.
+The totals can be read with `SELECT key, value FROM arrow_kv_metadata('sizes.arrow') WHERE field_path IS NULL` or through `pyarrow.ipc.open_file('sizes.arrow').schema.metadata`.
 
 If `row_group_size_bytes` and either `chunk_size` or `row_group_size` are used, the row groups will be defined by the smallest of these parameters.
 
