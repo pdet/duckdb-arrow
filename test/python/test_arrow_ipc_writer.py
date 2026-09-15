@@ -15,6 +15,28 @@ def tables_match(result):
 
 
 class TestArrowIPCBufferWriter(object):
+    @pytest.mark.parametrize("emit_eos", [False, True])
+    @pytest.mark.parametrize("threads,preserve_order", [(1, True), (4, False)])
+    @pytest.mark.parametrize("source,expected", [
+        ("SELECT 1 AS i UNION ALL SELECT 2 AS i", [1, 2]),
+        ("SELECT i FROM range(0) t(i)", []),
+        ("SELECT 1 AS i WHERE false", []),
+    ])
+    def test_stream_framing(self, connection, threads, preserve_order, source, expected, emit_eos):
+        connection.execute(f"SET threads={threads}")
+        connection.execute(f"SET preserve_insertion_order={str(preserve_order).lower()}")
+        buffers = connection.execute(
+            f"FROM to_arrow_ipc(({source}), emit_eos := {str(emit_eos).lower()})"
+        ).fetchall()
+        eos = b"\xff\xff\xff\xff\x00\x00\x00\x00"
+        if emit_eos:
+            assert buffers[-1] == (eos, False)
+        assert sum(message == eos for message, _ in buffers) == int(emit_eos)
+        assert [header for _, header in buffers] == [True] + [False] * (len(buffers) - 1)
+        with ipc.open_stream(b"".join(message for message, _ in buffers)) as reader:
+            assert reader.schema.names == ["i"]
+            assert sorted(reader.read_all().column("i").to_pylist()) == expected
+
     def test_round_trip(self, connection):
         create_table(connection)
         buffers = connection.execute("FROM to_arrow_ipc((FROM T))").fetchall()

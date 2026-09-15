@@ -41,6 +41,10 @@ class ToArrowIPCFunction {
                                        TableFunctionBindInput& input,
                                        vector<LogicalType>& return_types,
                                        vector<string>& names);
+  static unique_ptr<LogicalOperator> BindOperator(ClientContext& context,
+                                                  TableFunctionBindInput& input,
+                                                  idx_t bind_index,
+                                                  vector<string>& names);
   static OperatorResultType Function(ExecutionContext& context,
                                      TableFunctionInput& data_p, DataChunk& input,
                                      DataChunk& output);

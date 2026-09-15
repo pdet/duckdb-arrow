@@ -150,16 +150,13 @@ We can then obtain our buffers by simply issuing a `to_arrow_ipc` call, like thi
 ```python
 buffers = connection.execute("FROM to_arrow_ipc((FROM T))").fetchall()
 ```
-In this case, our buffers will contain two tuples: the first is the header of our message, and the second is the data. The record batch bodies can be compressed with the same `compression` and `compression_level` options as `COPY`, given as named parameters, e.g. `to_arrow_ipc((FROM T), compression := 'zstd')`. To convert this into an Arrow table, we simply concatenate the tuples and use the `ipc.RecordBatchStreamReader`. For example, you can read them as follows:
+In this case, our buffers contain two tuples: the schema and the record batch. Empty inputs produce only the schema. Set `emit_eos := true` to append an end of stream marker, for example `to_arrow_ipc((FROM T), emit_eos := true)`. This option defaults to `false`. The record batch bodies can be compressed with the same `compression` and `compression_level` options as `COPY`, given as named parameters, e.g. `to_arrow_ipc((FROM T), compression := 'zstd')`. To convert this into an Arrow table, we simply concatenate the tuples and use the `ipc.RecordBatchStreamReader`. For example, you can read them as follows:
 
 
 ```python
-batches = []
-with pa.BufferReader(pa.py_buffer(buffers[0][0] + buffers[1][0])) as reader:
-     stream_reader = ipc.RecordBatchStreamReader(reader)
-     schema = stream_reader.schema
-     batches.extend(stream_reader)
-arrow_table = pa.Table.from_batches(batches, schema=schema)
+buffer = b"".join(message for message, _ in buffers)
+with ipc.open_stream(buffer) as reader:
+    arrow_table = reader.read_all()
 ```
 
 To read buffers with DuckDB, you must use the Python function `from_arrow`. Continuing from our example, we would first need to convert our Arrow table into the Arrow IPC format.

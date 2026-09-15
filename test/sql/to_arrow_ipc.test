@@ -14,6 +14,22 @@ SET disabled_optimizers='column_lifetime'
 statement ok
 SELECT * FROM to_arrow_ipc((SELECT 'Its working!'));
 
+query II
+SELECT count(*), count(*) FILTER (WHERE hex(ipc) = 'FFFFFFFF00000000')
+FROM to_arrow_ipc((SELECT 1 AS i));
+----
+2	0
+
+query IIII
+SELECT count(*) FILTER (WHERE is_schema),
+       count(*) FILTER (WHERE hex(payload) = 'FFFFFFFF00000000'),
+       arg_min(is_schema, position),
+       arg_max(hex(payload), position) = 'FFFFFFFF00000000'
+FROM to_arrow_ipc((SELECT 1 AS i UNION ALL SELECT 2 AS i), emit_eos := true)
+WITH ORDINALITY AS messages(payload, is_schema, position);
+----
+1	1	true	true
+
 # Test operator caching behaviour is sane
 statement ok
 create table data as select * from range(0,2000) tbl(col)
