@@ -3,6 +3,7 @@
 #include <iostream>
 #include <utility>
 
+#include "duckdb/common/map.hpp"
 #include "ipc/stream_reader/ipc_buffer_stream_reader.hpp"
 #include "ipc/stream_reader/ipc_file_stream_reader.hpp"
 
@@ -21,7 +22,14 @@ unique_ptr<ArrowArrayStreamWrapper> ArrowIPCStreamFactory::Produce(
   }
 
   if (!parameters.projected_columns.columns.empty()) {
-    factory->reader->SetColumnProjection(parameters.projected_columns.columns);
+    // Arrow field names may repeat, so take the bound indexes in output position order
+    const auto& filter_to_col = parameters.projected_columns.filter_to_col;
+    const map<idx_t, idx_t> ordered(filter_to_col.begin(), filter_to_col.end());
+    vector<idx_t> column_indexes;
+    for (const auto& entry : ordered) {
+      column_indexes.push_back(entry.second);
+    }
+    factory->reader->SetColumnProjection(column_indexes);
   }
 
   auto out = make_uniq<ArrowArrayStreamWrapper>();

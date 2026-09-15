@@ -125,8 +125,8 @@ bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
   return true;
 }
 
-void IPCStreamReader::SetColumnProjection(const vector<string>& column_names) {
-  if (column_names.empty()) {
+void IPCStreamReader::SetColumnProjection(const vector<idx_t>& column_indexes) {
+  if (column_indexes.empty()) {
     throw InternalException("Can't request zero fields projected from IpcStreamReader");
   }
 
@@ -136,59 +136,21 @@ void IPCStreamReader::SetColumnProjection(const vector<string>& column_names) {
   nanoarrow::UniqueSchema schema;
   ArrowSchemaInit(schema.get());
   NANOARROW_THROW_NOT_OK(ArrowSchemaSetTypeStruct(
-      schema.get(), UnsafeNumericCast<int64_t>(column_names.size())));
+      schema.get(), UnsafeNumericCast<int64_t>(column_indexes.size())));
 
-  // The ArrowArray builder needs the flattened field index, which we need to
-  // keep track of.
-  unordered_map<string, pair<int64_t, const ArrowSchema*>> name_to_flat_field_map;
-
-  // Duplicate column names are in theory fine as long as they are not queried,
-  // so we need to make a list of them to check.
-  unordered_set<string> duplicate_column_names;
-
-  vector<string> names;
-  // Let's check if we need to deduplicate projection column names
-  for (idx_t col_idx = 0; col_idx < static_cast<idx_t>(base_schema->n_children);
-       col_idx++) {
-    if (base_schema->children[col_idx]->name) {
-      names.push_back(base_schema->children[col_idx]->name);
-    } else {
-      names.push_back("");
-    }
-  }
-  QueryResult::DeduplicateColumns(names);
-  // Loop over columns to build the field map
+  // The decoder addresses a field by its index in a depth first walk of the schema
+  vector<int64_t> flat_field_indexes;
   int64_t field_count = 0;
   for (int64_t i = 0; i < base_schema->n_children; i++) {
-    if (name_to_flat_field_map.find(names[i]) != name_to_flat_field_map.end()) {
-      duplicate_column_names.insert(names[i]);
-    }
-    name_to_flat_field_map.insert({names[i], {field_count, base_schema->children[i]}});
+    flat_field_indexes.push_back(field_count);
     field_count += CountFields(base_schema->children[i]);
   }
 
-  // Loop over projected column names to build the projection information
-  int64_t output_column_index = 0;
-  for (const auto& column_name : column_names) {
-    if (duplicate_column_names.find(column_name) != duplicate_column_names.end()) {
-      throw InternalException(string("Field '") + column_name +
-                              "' refers to a duplicate column name in IPC file schema");
-    }
-
-    auto field_id_item = name_to_flat_field_map.find(column_name);
-    if (field_id_item == name_to_flat_field_map.end()) {
-      throw InternalException(string("Field '") + column_name +
-                              "' does not exist in IPC file schema");
-    }
-
-    // Record the flat field index for this column
-    projected_fields.push_back(field_id_item->second.first);
-
-    // Record the Schema for this column
-    NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(field_id_item->second.second,
-                                               schema->children[output_column_index]));
-
-    ++output_column_index;
+  for (idx_t i = 0; i < column_indexes.size(); i++) {
+    const auto col_idx = column_indexes[i];
+    projected_fields.push_back(flat_field_indexes[col_idx]);
+    NANOARROW_THROW_NOT_OK(
+        ArrowSchemaDeepCopy(base_schema->children[col_idx], schema->children[i]));
   }
   projected_schema = std::move(schema);
 }
