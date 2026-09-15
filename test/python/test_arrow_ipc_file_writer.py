@@ -1,8 +1,50 @@
+import os
 import struct
 
+import duckdb
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
+
+
+def assert_size_metadata(payload):
+    schema = ipc.open_file(payload).schema
+    assert schema.equals(ipc.open_stream(payload[8:]).schema, check_metadata=True)
+
+    def field(metadata, table, index):
+        vtable = table - struct.unpack_from("<i", metadata, table)[0]
+        entry = 4 + 2 * index
+        if entry >= struct.unpack_from("<H", metadata, vtable)[0]:
+            return 0
+        offset = struct.unpack_from("<H", metadata, vtable + entry)[0]
+        return table + offset if offset else 0
+
+    compressed_size = uncompressed_size = 0
+    for message in ipc.MessageReader.open_stream(payload[8:]):
+        if message.type != "record batch":
+            continue
+        compressed_size += message.body.size
+        metadata = message.metadata
+        root = struct.unpack_from("<I", metadata)[0]
+        header = field(metadata, root, 2)
+        batch = header + struct.unpack_from("<I", metadata, header)[0]
+        compression = field(metadata, batch, 3)
+        if not compression:
+            uncompressed_size += message.body.size
+            continue
+        buffers = field(metadata, batch, 2)
+        buffers += struct.unpack_from("<I", metadata, buffers)[0]
+        for i in range(struct.unpack_from("<I", metadata, buffers)[0]):
+            offset, length = struct.unpack_from("<qq", metadata, buffers + 4 + 16 * i)
+            if length == 0:
+                continue
+            size = struct.unpack_from("<q", message.body, offset)[0]
+            if size == -1:
+                size = length - 8
+            uncompressed_size += (size + 7) // 8 * 8
+    assert schema.metadata[b"total_compressed_size"] == str(compressed_size).encode()
+    assert schema.metadata[b"total_uncompressed_size"] == str(uncompressed_size).encode()
+    return compressed_size, uncompressed_size
 
 
 @pytest.fixture
@@ -35,6 +77,7 @@ def test_copy_aliases_pick_framing(connection, tmp_path, suffix, format_option, 
     else:
         assert payload[:4] == b"\xff\xff\xff\xff"
         reader = ipc.open_stream(payload)
+    assert not reader.schema.metadata
     assert reader.read_all().to_pydict() == {"x": [42]}
 
 
@@ -87,6 +130,7 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order, source_
             SELECT i, CASE WHEN i % 7 = 0 THEN NULL ELSE i::VARCHAR END AS s
             FROM source
         ) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048, COMPRESSION '{compression}',
+                      SIZE_METADATA,
                       KV_METADATA {{'source': 'file-format-test'}},
                       FIELD_METADATA {{'i': {{'unit': 'count'}}}})
         """
@@ -98,6 +142,9 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order, source_
     stream_reader = ipc.open_stream(payload[8:])
     assert file_reader.schema.equals(stream_reader.schema, check_metadata=True)
     assert file_reader.schema.metadata[b"source"] == b"file-format-test"
+    compressed_size, uncompressed_size = assert_size_metadata(payload)
+    if compression != "uncompressed":
+        assert compressed_size < uncompressed_size
     assert file_reader.schema.field("i").metadata[b"unit"] == b"count"
     batches = list(stream_reader)
     assert file_reader.num_record_batches == len(batches) > 1
@@ -127,19 +174,57 @@ def test_file_footer_random_access(connection, tmp_path, preserve_order, source_
         assert message.metadata_version == pa.MetadataVersion.V5
 
 
-@pytest.mark.parametrize("compression", ["uncompressed", "zstd", "lz4"])
-def test_file_footer_without_batches(connection, tmp_path, compression):
+def test_file_footer_without_batches(connection, tmp_path):
     path = tmp_path / "empty.arrow"
-    connection.execute(f"COPY (SELECT 42 AS x WHERE false) TO '{path}' (COMPRESSION '{compression}')")
+    connection.execute(f"COPY (SELECT 42 AS x WHERE false) TO '{path}' (SIZE_METADATA)")
+    assert_size_metadata(path.read_bytes())
     reader = ipc.open_file(path)
     assert reader.num_record_batches == 0
     assert reader.schema == pa.schema([("x", pa.int32())])
     assert reader.read_all().num_rows == 0
-    assert reader.schema.equals(ipc.open_stream(path.read_bytes()[8:]).schema, check_metadata=True)
+
+
+@pytest.mark.parametrize("compression", ["uncompressed", "zstd", "lz4"])
+def test_size_metadata_matches_uncompressed_file(connection, tmp_path, compression):
+    connection.execute("SET threads=1")
+    connection.execute(
+        """
+        CREATE TABLE sizes AS
+        SELECT i::INTEGER AS id, repeat('x', 128) AS text,
+               from_hex(md5(i::VARCHAR)) AS payload,
+               CASE WHEN i % 3 = 0 THEN NULL ELSE i % 2 = 0 END AS flag,
+               ''::VARCHAR AS empty, NULL::VARCHAR AS missing
+        FROM range(4099) t(i)
+        """
+    )
+    reference_path = tmp_path / "uncompressed.arrow"
+    path = tmp_path / "sizes.arrow"
+    connection.execute(f"COPY sizes TO '{reference_path}' (ROW_GROUP_SIZE 2048)")
+    connection.execute(
+        f"COPY sizes TO '{path}' "
+        f"(ROW_GROUP_SIZE 2048, COMPRESSION '{compression}', SIZE_METADATA)"
+    )
+
+    expected_size = sum(
+        message.body.size
+        for message in ipc.MessageReader.open_stream(reference_path.read_bytes()[8:])
+        if message.type == "record batch"
+    )
+    compressed_size, uncompressed_size = assert_size_metadata(path.read_bytes())
+    assert uncompressed_size == expected_size
+    if compression == "uncompressed":
+        assert compressed_size == expected_size
+    else:
+        assert compressed_size < expected_size
+
+    reference = ipc.open_file(reference_path)
+    reader = ipc.open_file(path)
+    assert reader.num_record_batches == reference.num_record_batches == 3
 
 
 @pytest.mark.parametrize("preserve_order", [True, False])
-def test_nested_columns_across_batches(connection, tmp_path, preserve_order, source_row_count):
+@pytest.mark.parametrize("compression", ["uncompressed", "zstd"])
+def test_nested_columns_across_batches(connection, tmp_path, preserve_order, source_row_count, compression):
     path = tmp_path / "nested.arrow"
     connection.execute("SET threads=4")
     connection.execute(f"SET preserve_insertion_order={str(preserve_order).lower()}")
@@ -156,34 +241,52 @@ def test_nested_columns_across_batches(connection, tmp_path, preserve_order, sou
     """
     expected = connection.execute(source).to_arrow_table().sort_by("i")
     connection.execute(
-        f"COPY ({source}) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048)"
+        f"COPY ({source}) TO '{path}' (FORMAT ARROW, ROW_GROUP_SIZE 2048, "
+        f"SIZE_METADATA, COMPRESSION '{compression}')"
     )
+    assert_size_metadata(path.read_bytes())
     reader = ipc.open_file(path)
     assert reader.num_record_batches > 1
     result = reader.read_all()
     result.validate(full=True)
     if not preserve_order:
         result = result.sort_by("i")
-    assert result.equals(expected, check_metadata=True)
+    assert result.replace_schema_metadata(None).equals(expected, check_metadata=True)
 
 
 @pytest.mark.parametrize("format_name", ["arrow", "arrows"])
-def test_rotated_files_are_complete(connection, tmp_path, source_row_count, format_name):
+@pytest.mark.parametrize("compression", ["uncompressed", "zstd"])
+def test_rotated_files_are_complete(connection, tmp_path, source_row_count, format_name, compression):
     path = tmp_path / "parts"
     connection.execute("SET threads=4")
     connection.execute("SET preserve_insertion_order=false")
     connection.execute(
         f"""
         COPY source TO '{path}'
-        (FORMAT {format_name}, ROW_GROUP_SIZE 2048, ROW_GROUPS_PER_FILE 3)
+        (FORMAT {format_name}, ROW_GROUP_SIZE 2048, ROW_GROUPS_PER_FILE 3,
+         SIZE_METADATA {format_name == 'arrow'}, COMPRESSION '{compression}')
         """
     )
     files = list(path.glob(f"*.{format_name}"))
     assert len(files) > 1
     values = []
     for file in files:
+        if format_name == "arrow":
+            assert_size_metadata(file.read_bytes())
         reader = ipc.open_file(file) if format_name == "arrow" else ipc.open_stream(file)
         table = reader.read_all()
         table.validate(full=True)
         values.extend(table.column("i").to_pylist())
     assert sorted(values) == list(range(source_row_count))
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="Named pipes require POSIX")
+def test_size_metadata_requires_seekable_output(connection, tmp_path):
+    path = tmp_path / "output.arrow"
+    os.mkfifo(path)
+    read_fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        with pytest.raises(duckdb.IOException, match="SIZE_METADATA requires a seekable local output"):
+            connection.execute(f"COPY (SELECT 42 AS i) TO '{path}' (SIZE_METADATA)")
+    finally:
+        os.close(read_fd)

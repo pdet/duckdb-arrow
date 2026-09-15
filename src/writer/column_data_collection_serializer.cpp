@@ -1,8 +1,10 @@
 #include "writer/column_data_collection_serializer.hpp"
 
+#include <cstring>
 #include <utility>
 
 #include "duckdb/common/arrow/arrow_appender.hpp"
+#include "duckdb/common/bswap.hpp"
 #include "duckdb/common/numeric_utils.hpp"
 
 namespace duckdb {
@@ -78,8 +80,11 @@ nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
 
 ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(
     ClientProperties options, Allocator& allocator,
-    ArrowIpcCompressionOptions compression)
-    : options(std::move(options)), allocator(allocator), compression(compression) {}
+    ArrowIpcCompressionOptions compression, bool track_body_size)
+    : options(std::move(options)),
+      allocator(allocator),
+      compression(compression),
+      track_body_size(track_body_size) {}
 
 void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
                                           const vector<LogicalType>& logical_types) {
@@ -99,21 +104,32 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
       ArrowTypeExtensionData::GetExtensionTypes(*options.client_context, logical_types);
 }
 
-void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema) {
+void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema,
+                                                     idx_t reserved_size) {
   header->size_bytes = 0;
   body->size_bytes = 0;
   THROW_NOT_OK(NotImplementedException, &error,
                ArrowIpcEncoderEncodeSchema(encoder.get(), schema, &error));
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
+  if (reserved_size) {
+    if (reserved_size < static_cast<idx_t>(header->size_bytes)) {
+      throw InternalException("Arrow IPC schema does not fit in its reserved message");
+    }
+    // Include padding in the message length to keep record batch offsets unchanged
+    auto length = BSwapIfBE(NumericCast<int32_t>(reserved_size - 2 * sizeof(int32_t)));
+    NANOARROW_THROW_NOT_OK(ArrowBufferAppendFill(
+        header.get(), 0, NumericCast<int64_t>(reserved_size) - header->size_bytes));
+    std::memcpy(header->data + sizeof(int32_t), &length, sizeof(length));
+  }
 }
 
 void ColumnDataCollectionSerializer::SerializeFooter(
-    const ArrowSchema* schema, const vector<ArrowIpcFileBlock>& blocks) {
+    nanoarrow::UniqueSchema schema, const vector<ArrowIpcFileBlock>& blocks) {
   header->size_bytes = 0;
   body->size_bytes = 0;
   nanoarrow::ipc::UniqueFooter footer;
-  NANOARROW_THROW_NOT_OK(ArrowSchemaDeepCopy(schema, &footer->schema));
+  ArrowSchemaMove(schema.get(), &footer->schema);
   NANOARROW_THROW_NOT_OK(
       ArrowBufferAppend(&footer->record_batch_blocks, blocks.data(),
                         NumericCast<int64_t>(blocks.size() * sizeof(ArrowIpcFileBlock))));
@@ -121,6 +137,19 @@ void ColumnDataCollectionSerializer::SerializeFooter(
                ArrowIpcEncoderEncodeFooter(encoder.get(), footer.get(), &error));
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), false, header.get()));
+}
+
+// Uncompressed body size, the buffers ArrowIpcEncoderCollectArray collects padded to 8
+static int64_t PaddedBodySize(const ArrowArrayView& view) {
+  int64_t size = 0;
+  for (int64_t c = 0; c < view.n_children; c++) {
+    const auto& child = *view.children[c];
+    for (int64_t b = 0; b < child.array->n_buffers; b++) {
+      size += AlignValue<int64_t>(child.buffer_views[b].size_bytes);
+    }
+    size += PaddedBodySize(child);
+  }
+  return size;
 }
 
 idx_t ColumnDataCollectionSerializer::Serialize(ArrowAppender& appender) {
@@ -134,6 +163,12 @@ idx_t ColumnDataCollectionSerializer::Serialize(ArrowAppender& appender) {
   THROW_NOT_OK(InternalException, &error,
                ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(),
                                                       body.get(), &error));
+  if (track_body_size) {
+    // An uncompressed body already has the padded size, so only compressed ones walk
+    uncompressed_body_size = compression.type == NANOARROW_IPC_COMPRESSION_TYPE_NONE
+                                 ? body->size_bytes
+                                 : PaddedBodySize(*chunk_view.get());
+  }
   NANOARROW_THROW_NOT_OK(
       ArrowIpcEncoderFinalizeBuffer(encoder.get(), true, header.get()));
 

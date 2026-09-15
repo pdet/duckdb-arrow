@@ -29,6 +29,7 @@ struct ArrowWriteBindData : public TableFunctionData {
   vector<ArrowFieldMetadata> field_metadata;
   ArrowIpcCompressionOptions compression;
   bool file_format = true;
+  bool size_metadata = false;
   idx_t row_group_size = 122880;
   static constexpr const idx_t BYTES_PER_ROW = 1024;
   idx_t row_group_size_bytes{};
@@ -126,6 +127,15 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
 
   for (auto& option : input.info.options) {
     const auto loption = StringUtil::Lower(option.first.GetIdentifierName());
+    if (loption == "size_metadata") {
+      if (option.second.size() > 1) {
+        throw BinderException("SIZE_METADATA accepts at most one argument");
+      }
+      bind_data->size_metadata =
+          option.second.empty() ||
+          BooleanValue::Get(option.second[0].DefaultCastAs(LogicalType::BOOLEAN));
+      continue;
+    }
     if (option.second.size() != 1) {
       throw BinderException("%s requires exactly one argument",
                             StringUtil::Upper(loption));
@@ -145,6 +155,24 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
   }
   bind_data->compression.Validate();
 
+  if (bind_data->size_metadata) {
+    if (!bind_data->file_format) {
+      throw BinderException(
+          "SIZE_METADATA requires the Arrow IPC file format, use FORMAT ARROW or the "
+          ".arrow extension");
+    }
+    if (FileSystem::IsRemoteFile(input.info.file_path)) {
+      throw BinderException(
+          "SIZE_METADATA requires a seekable local output to update the schema");
+    }
+    for (const auto& item : bind_data->kv_metadata) {
+      if (ArrowStreamWriter::IsSizeMetadataKey(item.first)) {
+        throw BinderException("KV_METADATA key \"%s\" is written by SIZE_METADATA",
+                              item.first);
+      }
+    }
+  }
+
   bind_data->row_group_size_bytes =
       bind_data->row_group_size * ArrowWriteBindData::BYTES_PER_ROW;
 
@@ -163,7 +191,7 @@ unique_ptr<GlobalFunctionData> ArrowWriteInitializeGlobal(ClientContext& context
   global_state->writer = make_uniq<ArrowStreamWriter>(
       arrow_bind.options, fs, file_path, arrow_bind.sql_types, *arrow_bind.schema.get(),
       arrow_bind.kv_metadata, arrow_bind.field_metadata, arrow_bind.compression,
-      arrow_bind.file_format);
+      arrow_bind.file_format, arrow_bind.size_metadata);
   global_state->writer->WriteSchema();
   return std::move(global_state);
 }

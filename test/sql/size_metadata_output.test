@@ -1,0 +1,12 @@
+# name: test/sql/size_metadata_output.test
+# description: SIZE_METADATA rejects outputs whose schema cannot be patched in place
+# group: [sql]
+
+require nanoarrow
+
+require notwindows
+
+statement error
+COPY (SELECT 1 AS i) TO '/dev/null' (FORMAT ARROW, SIZE_METADATA);
+----
+SIZE_METADATA requires a seekable local output

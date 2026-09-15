@@ -26,7 +26,8 @@ struct ArrowStreamWriter {
                     const ArrowSchema& schema,
                     const vector<pair<string, string>>& metadata,
                     const vector<ArrowFieldMetadata>& field_metadata,
-                    const ArrowIpcCompressionOptions& compression, bool file_format);
+                    const ArrowIpcCompressionOptions& compression, bool file_format,
+                    bool size_metadata);
 
   void InitSchema(const ArrowSchema& schema, const vector<pair<string, string>>& metadata,
                   const vector<ArrowFieldMetadata>& field_metadata);
@@ -45,6 +46,8 @@ struct ArrowStreamWriter {
 
   idx_t FileSize() const;
 
+  static bool IsSizeMetadataKey(const string& key);
+
  private:
   void WriteFooter();
 
@@ -53,9 +56,13 @@ struct ArrowStreamWriter {
   ArrowIpcCompressionOptions compression;
   vector<LogicalType> logical_types;
   bool file_format;
+  bool size_metadata;
   mutex lock;
   unique_ptr<BufferedFileWriter> writer;
   vector<ArrowIpcFileBlock> blocks;
+  idx_t schema_message_size = 0;
+  int64_t total_compressed_size = 0;
+  int64_t total_uncompressed_size = 0;
   // Rotation checks read these while another thread may be flushing
   atomic<idx_t> row_group_count{0};
   atomic<idx_t> file_size{0};
