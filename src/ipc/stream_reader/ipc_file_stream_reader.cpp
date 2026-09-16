@@ -6,7 +6,10 @@ namespace duckdb {
 namespace ext_nanoarrow {
 IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle,
                                          Allocator& allocator)
-    : IPCStreamReader(allocator), file_reader(fs, std::move(handle)) {}
+    : IPCStreamReader(allocator), file_reader(fs, std::move(handle)) {
+  // Only a regular file can be read at an offset, and the type cannot change later
+  regular_file = file_reader.handle->GetType() == FileType::FILE_TYPE_REGULAR;
+}
 
 void IPCFileStreamReader::PopulateNames(vector<string>& names) {
   GetBaseSchema();
@@ -60,17 +63,33 @@ bool IPCFileStreamReader::DecodeHeader(const idx_t message_header_size) {
   return DecodeHeaderBuffer(AllocatedDataView(message_header.get(), message_header_size));
 }
 
+bool IPCFileStreamReader::CanReadBodyPositionally(idx_t body_start, idx_t body_size) {
+  // CanSeek answers for the file system, not for this handle, so it lets pipes through
+  if (!regular_file) {
+    return false;
+  }
+  // A body running past the end keeps the sequential read, which reports truncation
+  const auto file_size = file_reader.FileSize();
+  return body_start <= file_size && body_size <= file_size - body_start;
+}
+
 void IPCFileStreamReader::DecodeBody() {
   message_body.reset();
   if (decoder->body_size_bytes > 0) {
     EnsureInputStreamAligned();
+    // The padding belongs to the previous message, so take the offset after it
+    const auto body_start = file_reader.CurrentOffset();
+    const auto body_size = static_cast<idx_t>(decoder->body_size_bytes);
     message_body =
         make_shared_ptr<AllocatedData>(allocator.Allocate(decoder->body_size_bytes));
 
-    // Again, this is possibly a long running Read() call for a large body.
-    // We could possibly be smarter about how we do this, particularly if we
-    // are reading a small portion of the input from a seekable file.
-    ReadData(message_body->get(), decoder->body_size_bytes);
+    if (CanReadBodyPositionally(body_start, body_size)) {
+      // One read replaces the 4 KB reads the buffered reader would issue
+      file_reader.handle->Read(message_body->get(), body_size, body_start);
+      file_reader.Seek(body_start + body_size);
+    } else {
+      ReadData(message_body->get(), decoder->body_size_bytes);
+    }
   }
   if (message_body) {
     cur_ptr = message_body->get();

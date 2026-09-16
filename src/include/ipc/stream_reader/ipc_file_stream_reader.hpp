@@ -27,8 +27,12 @@ class IPCFileStreamReader final : public IPCStreamReader {
   BufferedFileReader file_reader;
   AllocatedData message_header;
   shared_ptr<AllocatedData> message_body;
+  //! Pipes and character devices must keep the sequential read
+  bool regular_file = false;
 
   void EnsureInputStreamAligned();
+  //! Whether the body can be read with one positional read instead of the buffered reader
+  bool CanReadBodyPositionally(idx_t body_start, idx_t body_size);
 
   data_ptr_t ReadData(data_ptr_t ptr, idx_t size) override;
   static void DecodeArray(nanoarrow::ipc::UniqueDecoder& decoder, ArrowArray* out,
