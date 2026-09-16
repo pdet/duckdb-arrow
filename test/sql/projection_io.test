@@ -1,0 +1,45 @@
+# name: test/sql/projection_io.test
+# description: A projected read fetches only the buffers of the columns it needs
+# group: [sql]
+
+require nanoarrow
+
+require noforcestorage
+
+statement ok
+SET logging_storage = 'memory';
+
+# Eight columns of 20000 rows make a 1.28 MB body, above the 1 MB floor for projected reads
+statement ok
+COPY (SELECT i AS c0, i AS c1, i AS c2, i AS c3, i AS c4, i AS c5, i AS c6, i AS c7
+      FROM range(20000) t(i))
+TO '__TEST_DIR__/io_one.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 20000);
+
+statement ok
+COPY (SELECT i AS c0, i AS c1, i AS c2, i AS c3, i AS c4, i AS c5, i AS c6, i AS c7
+      FROM range(20000) t(i))
+TO '__TEST_DIR__/io_all.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 20000);
+
+# Logging starts after the writes so that only the reads below are counted
+statement ok
+CALL enable_logging('FileSystem');
+
+statement ok
+SELECT sum(c7) FROM read_arrow('__TEST_DIR__/io_one.arrows');
+
+# One of eight columns is read, so the reads stay far below the 1.28 MB body
+query I
+SELECT sum(bytes) < 400000 FROM duckdb_logs_parsed('FileSystem')
+WHERE op = 'READ' AND path LIKE '%io_one.arrows%';
+----
+true
+
+statement ok
+SELECT sum(c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7) FROM read_arrow('__TEST_DIR__/io_all.arrows');
+
+# Every column is projected, so the ranges cover the body and it is read in one go
+query I
+SELECT sum(bytes) > 1000000 FROM duckdb_logs_parsed('FileSystem')
+WHERE op = 'READ' AND path LIKE '%io_all.arrows%';
+----
+true

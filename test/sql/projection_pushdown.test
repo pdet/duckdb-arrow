@@ -1,0 +1,127 @@
+# name: test/sql/projection_pushdown.test
+# description: Reading only the projected buffers returns what a full read returns
+# group: [sql]
+
+require nanoarrow
+
+# Bodies must be well over a megabyte, smaller ones are read whole on purpose
+statement ok
+CREATE TABLE wide AS
+SELECT i,
+       md5(i::VARCHAR) AS h,
+       [i, NULL] AS l,
+       {'a': i, 'b': i::VARCHAR} AS st,
+       CASE WHEN i % 5 = 0 THEN NULL ELSE i END AS n,
+       md5((i * 7)::VARCHAR) AS h2
+FROM range(100000) t(i);
+
+statement ok
+COPY wide TO '__TEST_DIR__/wide.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 50000);
+
+# Each field alone, so the first, a nested one and the last are each projected
+foreach col i h l st n h2
+
+query I
+SELECT count(*) FROM (SELECT ${col} FROM read_arrow('__TEST_DIR__/wide.arrows') EXCEPT ALL SELECT ${col} FROM wide);
+----
+0
+
+query I
+SELECT count(*) FROM (SELECT ${col} FROM wide EXCEPT ALL SELECT ${col} FROM read_arrow('__TEST_DIR__/wide.arrows'));
+----
+0
+
+endloop
+
+# Two fields at opposite ends, with unread buffers between them
+query I
+SELECT count(*) FROM (SELECT i, h2 FROM read_arrow('__TEST_DIR__/wide.arrows') EXCEPT ALL SELECT i, h2 FROM wide);
+----
+0
+
+# Every field, which reads the whole body anyway
+query I
+SELECT count(*) FROM (FROM read_arrow('__TEST_DIR__/wide.arrows') EXCEPT ALL FROM wide);
+----
+0
+
+# Compressed buffers sit at the same offsets, only their contents differ
+foreach compression zstd lz4
+
+statement ok
+COPY wide TO '__TEST_DIR__/wide_${compression}.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 50000, COMPRESSION '${compression}');
+
+query I
+SELECT count(*) FROM (SELECT i, h2 FROM read_arrow('__TEST_DIR__/wide_${compression}.arrows') EXCEPT ALL SELECT i, h2 FROM wide);
+----
+0
+
+endloop
+
+# Layouts whose buffers do not follow field order in the body
+foreach setting arrow_output_list_view arrow_large_buffer_size
+
+statement ok
+SET ${setting} = true;
+
+statement ok
+COPY wide TO '__TEST_DIR__/layout_${setting}.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 50000);
+
+statement ok
+SET ${setting} = false;
+
+query I
+SELECT count(*) FROM (SELECT l, h2 FROM read_arrow('__TEST_DIR__/layout_${setting}.arrows') EXCEPT ALL SELECT l, h2 FROM wide);
+----
+0
+
+endloop
+
+# Only d is read from this body of over 1 MB, and its dictionary lives in another batch the walk must skip
+query II
+SELECT d, count(*) FROM read_arrow('__WORKING_DIRECTORY__/data/dictionary_large.arrows') GROUP BY d ORDER BY d;
+----
+alpha	50000
+beta	50000
+delta	50000
+epsilon	50000
+gamma	50000
+
+statement ok
+SET VARIABLE dict_file = '__WORKING_DIRECTORY__/arrow-testing/data/arrow-ipc-stream/integration/1.0.0-littleendian/generated_dictionary.stream';
+
+statement ok
+CREATE TABLE dict AS FROM read_arrow(getvariable('dict_file'));
+
+foreach col dict0 dict1 dict2
+
+query I
+SELECT count(*) FROM (SELECT ${col} FROM read_arrow(getvariable('dict_file')) EXCEPT ALL SELECT ${col} FROM dict);
+----
+0
+
+endloop
+
+# Columns whose buffers are empty or absent have no offset to take
+statement ok
+COPY (SELECT NULL AS n, NULL::INT AS ni, '' AS e, []::INT[] AS l) TO '__TEST_DIR__/empty_buffers.arrows' (FORMAT ARROWS);
+
+query IIIII
+SELECT count(*), count(n), count(ni), count(e), count(l) FROM read_arrow('__TEST_DIR__/empty_buffers.arrows');
+----
+1	0	0	1	1
+
+# A byte swapped stream keeps the whole body read, its endianness is read from the schema
+query I
+SELECT count(*) FROM (
+  SELECT int64_nullable FROM read_arrow('__WORKING_DIRECTORY__/arrow-testing/data/arrow-ipc-stream/integration/1.0.0-bigendian/generated_primitive.stream')
+  EXCEPT ALL
+  SELECT int64_nullable FROM read_arrow('__WORKING_DIRECTORY__/arrow-testing/data/arrow-ipc-stream/integration/1.0.0-littleendian/generated_primitive.stream'));
+----
+0
+
+# A truncated body still reports as truncated when a column is projected
+statement error
+SELECT count(i) FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/truncated_body_none.arrows');
+----
+Arrow IPC stream is truncated
