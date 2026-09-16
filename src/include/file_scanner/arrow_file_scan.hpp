@@ -43,6 +43,9 @@ class ArrowFileScan : public BaseFileReader {
 
   shared_ptr<BaseUnionData> GetUnionData(idx_t file_idx) override;
 
+  //! Rows estimated from the file size and the average width of a row, 0 when unknown
+  idx_t EstimatedRowCount();
+
  private:
   vector<string> names;
   vector<LogicalType> types;
