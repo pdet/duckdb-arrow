@@ -110,7 +110,8 @@ struct ArrowMultiFileInfo : MultiFileReaderInterface {
   void FinishReading(ClientContext& context, GlobalTableFunctionState& global_state,
                      LocalTableFunctionState& local_state) override;
 
-  unique_ptr<NodeStatistics> GetCardinality(const MultiFileBindData& bind_data,
+  unique_ptr<NodeStatistics> GetCardinality(ClientContext& context,
+                                            const MultiFileBindData& bind_data,
                                             idx_t file_count) override;
 
   void GetVirtualColumns(ClientContext& context, MultiFileBindData& bind_data,

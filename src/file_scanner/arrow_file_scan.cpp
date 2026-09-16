@@ -87,6 +87,24 @@ double ArrowFileScan::GetProgressInFile(ClientContext& context) {
   return file_reader->GetProgress();
 }
 
+idx_t ArrowFileScan::EstimatedRowCount() {
+  if (!factory || !factory->reader) {
+    return 0;
+  }
+  // Without reading the footer the row count is the file size over the row width
+  idx_t row_width = 0;
+  for (const auto& type : types) {
+    auto width = GetTypeIdSize(type.InternalType());
+    // A variable length value stores an offset here and its bytes elsewhere
+    row_width += type.InternalType() == PhysicalType::VARCHAR ? width + 16 : width;
+  }
+  if (row_width == 0) {
+    return 0;
+  }
+  auto file_size = static_cast<IPCFileStreamReader*>(factory->reader.get())->FileSize();
+  return file_size / row_width;
+}
+
 shared_ptr<BaseUnionData> ArrowFileScan::GetUnionData(idx_t file_idx) {
   auto data = make_shared_ptr<BaseUnionData>(OpenFileInfo(GetFileName()));
   data->names = GetNames();

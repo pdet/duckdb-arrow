@@ -119,10 +119,17 @@ void ArrowMultiFileInfo::FinishReading(ClientContext& context,
                                        LocalTableFunctionState& local_state) {}
 
 unique_ptr<NodeStatistics> ArrowMultiFileInfo::GetCardinality(
-    const MultiFileBindData& bind_data, idx_t file_count) {
-  // TODO: Here is where we might set statistics, for optimizations if we have them
-  // e.g., cardinality from the file footer
-  return make_uniq<NodeStatistics>();
+    ClientContext& context, const MultiFileBindData& bind_data, idx_t file_count) {
+  // Without an estimate every Arrow scan looks like one row and joins build on it
+  if (!bind_data.initial_reader) {
+    return make_uniq<NodeStatistics>();
+  }
+  auto rows = bind_data.initial_reader->Cast<ArrowFileScan>().EstimatedRowCount();
+  if (rows == 0) {
+    return make_uniq<NodeStatistics>();
+  }
+  // The first file stands in for the rest, as the parquet reader also does
+  return make_uniq<NodeStatistics>(rows * (file_count > 0 ? file_count : 1));
 }
 
 void ArrowMultiFileInfo::GetVirtualColumns(ClientContext&, MultiFileBindData&,
