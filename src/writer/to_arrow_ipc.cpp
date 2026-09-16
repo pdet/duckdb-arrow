@@ -128,14 +128,15 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
     arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
     output.data[1].Append(Value::BOOLEAN(true));
   } else {
+    auto& chunk = local_state.serializer->CastToWriteTypes(input);
     if (!local_state.appender) {
       local_state.appender = make_uniq<ArrowAppender>(
-          input.GetTypes(), data.chunk_size, data.options,
-          ArrowTypeExtensionData::GetExtensionTypes(context.client, input.GetTypes()));
+          chunk.GetTypes(), data.chunk_size, data.options,
+          ArrowTypeExtensionData::GetExtensionTypes(context.client, chunk.GetTypes()));
     }
 
-    local_state.appender->Append(input, 0, input.size(), input.size());
-    local_state.current_count += input.size();
+    local_state.appender->Append(chunk, 0, chunk.size(), chunk.size());
+    local_state.current_count += chunk.size();
 
     if (caching_disabled || local_state.current_count >= data.chunk_size) {
       SerializeArray(local_state, arrow_serialized_ipc_buffer);

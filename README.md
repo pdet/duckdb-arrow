@@ -89,6 +89,8 @@ For example, to write a zstd-compressed stream:
 COPY (SELECT 42 as foofy, 'string' as stringy) TO "test.arrows" (COMPRESSION 'zstd');
 ```
 
+Unless `arrow_lossless_conversion` is enabled, `COPY`, `EXPORT DATABASE` and `to_arrow_ipc` write `HUGEINT` and `UHUGEINT` values, including nested ones, as `decimal128(38, 0)` and raise a conversion error for values outside that range. With `SET arrow_lossless_conversion = true` they are written losslessly as `arrow.opaque` extension types, which DuckDB reads back exactly.
+
 #### Read
 You can consume the file using the `read_arrow` scanner. For example, to read the file we just created, you could run:
 ```sql

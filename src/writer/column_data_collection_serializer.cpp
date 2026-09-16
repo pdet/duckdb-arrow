@@ -6,6 +6,9 @@
 #include "duckdb/common/arrow/arrow_appender.hpp"
 #include "duckdb/common/bswap.hpp"
 #include "duckdb/common/numeric_utils.hpp"
+#include "duckdb/common/type_visitor.hpp"
+#include "duckdb/planner/expression/bound_cast_expression.hpp"
+#include "duckdb/planner/expression/bound_reference_expression.hpp"
 
 namespace duckdb {
 
@@ -78,6 +81,21 @@ nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
   return schema;
 }
 
+static bool IsWideInteger(const LogicalType& type) {
+  return type.id() == LogicalTypeId::HUGEINT || type.id() == LogicalTypeId::UHUGEINT;
+}
+
+// HUGEINT and UHUGEINT are written as DECIMAL(38, 0) unless lossless conversion is on
+static LogicalType ArrowIpcWriteType(const LogicalType& type,
+                                     const ClientProperties& options) {
+  if (options.arrow_lossless_conversion || !TypeVisitor::Contains(type, IsWideInteger)) {
+    return type;
+  }
+  return TypeVisitor::VisitReplace(type, [](const LogicalType& child) -> LogicalType {
+    return IsWideInteger(child) ? LogicalType::DECIMAL(38, 0) : child;
+  });
+}
+
 ColumnDataCollectionSerializer::ColumnDataCollectionSerializer(
     ClientProperties options, Allocator& allocator,
     ArrowIpcCompressionOptions compression, bool track_body_size)
@@ -92,6 +110,10 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
   body.reset();
   encoder.reset();
   chunk_view.reset();
+  write_types.clear();
+  casts.clear();
+  cast_executor.reset();
+  cast_chunk.Destroy();
 
   InitArrowDuckBuffer(header.get(), allocator);
   InitArrowDuckBuffer(body.get(), allocator);
@@ -100,8 +122,24 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
   THROW_NOT_OK(InternalException, &error,
                ArrowArrayViewInitFromSchema(chunk_view.get(), schema, &error));
 
-  extension_types =
-      ArrowTypeExtensionData::GetExtensionTypes(*options.client_context, logical_types);
+  auto& context = *options.client_context;
+  for (const auto& type : logical_types) {
+    write_types.push_back(ArrowIpcWriteType(type, options));
+  }
+  extension_types = ArrowTypeExtensionData::GetExtensionTypes(context, write_types);
+  if (write_types == logical_types) {
+    return;
+  }
+  // A checked cast rejects values the Arrow decimal128 cannot hold, unlike a raw copy
+  for (idx_t i = 0; i < logical_types.size(); i++) {
+    casts.push_back(BoundCastExpression::AddCastToType(
+        context,
+        make_uniq<BoundReferenceExpression>(schema->children[i]->name, logical_types[i],
+                                            i),
+        write_types[i]));
+  }
+  cast_executor = make_uniq<ExpressionExecutor>(context, casts);
+  cast_chunk.Initialize(context, write_types);
 }
 
 void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema,
@@ -178,11 +216,21 @@ idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buff
   if (buffer.Count() == 0) {
     return 0;
   }
-  ArrowAppender appender(buffer.Types(), buffer.Count(), options, extension_types);
+  ArrowAppender appender(write_types, buffer.Count(), options, extension_types);
   for (auto& chunk : buffer.Chunks()) {
-    appender.Append(chunk, 0, chunk.size(), chunk.size());
+    auto& write_chunk = CastToWriteTypes(chunk);
+    appender.Append(write_chunk, 0, write_chunk.size(), write_chunk.size());
   }
   return Serialize(appender);
+}
+
+DataChunk& ColumnDataCollectionSerializer::CastToWriteTypes(DataChunk& input) {
+  if (!cast_executor) {
+    return input;
+  }
+  cast_chunk.Reset();
+  cast_executor->Execute(input, cast_chunk);
+  return cast_chunk;
 }
 
 ArrowIpcFileBlock ColumnDataCollectionSerializer::Flush(BufferedFileWriter& writer) {

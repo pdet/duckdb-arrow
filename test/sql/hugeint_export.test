@@ -1,0 +1,36 @@
+# name: test/sql/hugeint_export.test
+# description: Out of range HUGEINT and UHUGEINT values fail instead of being corrupted
+# group: [sql]
+
+require nanoarrow
+
+# UHUGEINT above 2^127 used to be written with the sign flipped
+statement error
+COPY (SELECT 340282366920938463463374607431768211455::UHUGEINT AS u) TO '{TEST_DIR}/u.arrow';
+----
+when casting from source column u
+
+statement error
+COPY (SELECT [100000000000000000000000000000000000000::HUGEINT] AS l) TO '{TEST_DIR}/l.arrows';
+----
+Could not cast value
+
+statement error
+FROM to_arrow_ipc((SELECT 340282366920938463463374607431768211455::UHUGEINT AS u));
+----
+when casting from source column u
+
+statement ok
+COPY (SELECT 99999999999999999999999999999999999999::UHUGEINT AS u, -99999999999999999999999999999999999999::HUGEINT AS h) TO '{TEST_DIR}/fit.arrow';
+
+query II
+FROM '{TEST_DIR}/fit.arrow';
+----
+99999999999999999999999999999999999999	-99999999999999999999999999999999999999
+
+# The plan keeps the original types, so ORDER_BY and unwritten partition keys keep working
+statement ok
+COPY (SELECT (i * 7 % 23)::HUGEINT AS h, i FROM range(50) t(i)) TO '{TEST_DIR}/sorted' (FORMAT arrow, ORDER_BY (h));
+
+statement ok
+COPY (SELECT 340282366920938463463374607431768211455::UHUGEINT AS u, 1 AS x) TO '{TEST_DIR}/part' (FORMAT arrow, PARTITION_BY (u));
