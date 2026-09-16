@@ -140,6 +140,31 @@ orange	navel	142.1	b
 apple	fuji	NULL	b
 orange	cara cara	NULL	b
 
+# Queries that read no column of a file still get its rows
+query I
+SELECT DISTINCT part FROM read_arrow('data/multifile/hive/*/*.arrow', hive_partitioning = true) ORDER BY part
+----
+a
+b
+
+query I
+SELECT count(DISTINCT filename) FROM read_arrow('data/multifile/glob/*.arrow', filename = true)
+----
+3
+
+query I
+SELECT count(DISTINCT file_index) FROM read_arrow('data/multifile/glob/*.arrow')
+----
+3
+
+query I
+SELECT tasteness FROM read_arrow(['data/multifile/fruit_extra.arrows', 'data/multifile/glob/f1.arrow'], union_by_name = true) ORDER BY ALL
+----
+10.0
+NULL
+NULL
+NULL
+
 # Multifile reader works with replacement scans
 query III
 FROM 'data/multifile/glob/*.arrow' ORDER BY ALL

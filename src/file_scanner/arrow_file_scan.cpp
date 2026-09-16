@@ -49,15 +49,16 @@ bool ArrowFileScan::TryInitializeScan(ClientContext& context,
       &FileIPCStreamFactory::Produce, reinterpret_cast<uintptr_t>(factory.get()));
   lstate.local_arrow_function_data->schema_root = schema_root;
   lstate.local_arrow_function_data->arrow_table = arrow_table;
-  if (!column_indexes.empty()) {
-    lstate.init_input = make_uniq<TableFunctionInitInput>(
-        *lstate.local_arrow_function_data, column_indexes,
-        gstate.global_state.projection_ids, filters);
-  } else {
-    lstate.init_input = make_uniq<TableFunctionInitInput>(
-        *lstate.local_arrow_function_data, gstate.global_state.column_indexes,
-        gstate.global_state.projection_ids, filters);
+  // Global column indexes and projection ids do not address this file's schema
+  auto local_column_indexes = column_indexes;
+  if (local_column_indexes.empty()) {
+    // Only virtual or constant columns are read, so any file column yields the rows
+    local_column_indexes.emplace_back(0);
   }
+  const vector<idx_t> no_projection_ids;
+  lstate.init_input = make_uniq<TableFunctionInitInput>(*lstate.local_arrow_function_data,
+                                                        std::move(local_column_indexes),
+                                                        no_projection_ids, filters);
   lstate.local_arrow_global_state =
       ArrowTableFunction::ArrowScanInitGlobal(context, *lstate.init_input);
   lstate.local_arrow_local_state = ArrowTableFunction::ArrowScanInitLocalInternal(
