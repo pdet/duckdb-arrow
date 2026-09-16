@@ -74,6 +74,8 @@ class IPCStreamReader {
   }
 
   bool HasProjection() const;
+  //! Whether the decoder byte swaps buffers, which rewrites them outside the body
+  bool NeedsEndianSwap() const;
 
   static ArrowBufferView AllocatedDataView(const_data_ptr_t data, int64_t size);
   static nanoarrow::UniqueBuffer AllocatedDataToOwningBuffer(
@@ -88,6 +90,8 @@ class IPCStreamReader {
   ArrowError error{};
   nanoarrow::ipc::UniqueDecoder decoder{};
   nanoarrow::ipc::UniqueDictionaries dictionaries{};
+  //! The schema message endianness, which the decoder wipes before every message
+  ArrowIpcEndianness stream_endianness = NANOARROW_IPC_ENDIANNESS_UNINITIALIZED;
   vector<int64_t> projected_fields;
   nanoarrow::UniqueSchema projected_schema;
   //! Schema without projection applied to it

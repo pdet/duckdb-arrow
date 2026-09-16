@@ -1,9 +1,71 @@
 #include "ipc/stream_reader/ipc_file_stream_reader.hpp"
+
+#include <algorithm>
+
 #include "duckdb/common/file_system.hpp"
 #include "ipc/file_format.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
+
+namespace {
+
+//! A half open byte range inside a record batch body
+struct BodyRange {
+  idx_t begin;
+  idx_t end;
+};
+
+//! Ranges nearer than this are read together, sized for one seek on a local disk
+constexpr idx_t kCoalesceGapBytes = 64 * 1024;
+//! Small bodies are read whole, several reads cost more than the bytes they save
+constexpr idx_t kMinBodyBytesForRanges = 1024 * 1024;
+//! Reading most of the body is the whole body read with extra system calls
+constexpr double kMaxProjectedFraction = 0.8;
+
+//! Makes the discovery decode take the uncompressed path, which only does arithmetic
+struct CodecOverride {
+  explicit CodecOverride(ArrowIpcDecoder& decoder)
+      : decoder(decoder), saved(decoder.codec) {
+    decoder.codec = NANOARROW_IPC_COMPRESSION_TYPE_NONE;
+  }
+  ~CodecOverride() { decoder.codec = saved; }
+  ArrowIpcDecoder& decoder;
+  ArrowIpcCompressionType saved;
+};
+
+//! Collects the body ranges of one decoded field, children only and never dictionaries
+bool CollectFieldRanges(const ArrowArrayView& view, const_data_ptr_t base,
+                        idx_t body_size, vector<BodyRange>& ranges) {
+  for (int i = 0; i < NANOARROW_MAX_FIXED_BUFFERS; i++) {
+    if (view.layout.buffer_type[i] == NANOARROW_BUFFER_TYPE_NONE) {
+      break;
+    }
+    const auto& buffer = view.buffer_views[i];
+    // An empty buffer carries no pointer to take an offset from
+    if (buffer.size_bytes <= 0 || buffer.data.data == nullptr) {
+      continue;
+    }
+    if (buffer.data.as_uint8 < base) {
+      return false;
+    }
+    const auto begin = static_cast<idx_t>(buffer.data.as_uint8 - base);
+    const auto size = static_cast<idx_t>(buffer.size_bytes);
+    if (begin > body_size || size > body_size - begin) {
+      return false;
+    }
+    ranges.push_back(BodyRange{begin, begin + size});
+  }
+  // A dictionary is decoded from its own batch body, so its buffers are not in ours
+  for (int64_t i = 0; i < view.n_children; i++) {
+    if (!CollectFieldRanges(*view.children[i], base, body_size, ranges)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
 IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle,
                                          Allocator& allocator)
     : IPCStreamReader(allocator), file_reader(fs, std::move(handle)) {
@@ -73,6 +135,76 @@ bool IPCFileStreamReader::CanReadBodyPositionally(idx_t body_start, idx_t body_s
   return body_start <= file_size && body_size <= file_size - body_start;
 }
 
+bool IPCFileStreamReader::TryReadProjectedBody(idx_t body_start, idx_t body_size) {
+  if (!HasProjection() || body_size < kMinBodyBytesForRanges) {
+    return false;
+  }
+  // Dictionary batches are decoded whole, and only a record batch has projected fields
+  if (decoder->message_type != NANOARROW_IPC_MESSAGE_TYPE_RECORD_BATCH) {
+    return false;
+  }
+  // Unions carried an extra buffer before V5, which shifts every later buffer index
+  if (decoder->metadata_version < NANOARROW_IPC_METADATA_VERSION_V5) {
+    return false;
+  }
+  // A swap rewrites buffers into scratch space, so their addresses stop meaning offsets
+  if (NeedsEndianSwap()) {
+    return false;
+  }
+
+  const auto base = const_data_ptr_cast(message_body->get());
+  const auto body_view = AllocatedDataView(base, static_cast<int64_t>(body_size));
+
+  vector<BodyRange> ranges;
+  {
+    // Compressed buffers are found at the same offsets, only their contents differ
+    CodecOverride codec_override(*decoder.get());
+    for (const auto field_index : projected_fields) {
+      ArrowArrayView* view = nullptr;
+      if (ArrowIpcDecoderDecodeArrayViewWithDictionaries(decoder.get(), body_view,
+                                                         field_index, dictionaries.get(),
+                                                         &view, &error) != NANOARROW_OK) {
+        return false;
+      }
+      if (!CollectFieldRanges(*view, base, body_size, ranges)) {
+        return false;
+      }
+    }
+  }
+  if (ranges.empty()) {
+    return false;
+  }
+
+  std::sort(ranges.begin(), ranges.end(),
+            [](const BodyRange& a, const BodyRange& b) { return a.begin < b.begin; });
+  vector<BodyRange> merged;
+  for (const auto& range : ranges) {
+    if (!merged.empty() && range.begin <= merged.back().end + kCoalesceGapBytes) {
+      if (range.end > merged.back().end) {
+        merged.back().end = range.end;
+      }
+    } else {
+      merged.push_back(range);
+    }
+  }
+
+  idx_t projected_bytes = 0;
+  for (const auto& range : merged) {
+    projected_bytes += range.end - range.begin;
+  }
+  if (static_cast<double>(projected_bytes) >
+      static_cast<double>(body_size) * kMaxProjectedFraction) {
+    return false;
+  }
+
+  for (const auto& range : merged) {
+    file_reader.handle->Read(message_body->get() + range.begin, range.end - range.begin,
+                             body_start + range.begin);
+  }
+  file_reader.Seek(body_start + body_size);
+  return true;
+}
+
 void IPCFileStreamReader::DecodeBody() {
   message_body.reset();
   if (decoder->body_size_bytes > 0) {
@@ -84,9 +216,11 @@ void IPCFileStreamReader::DecodeBody() {
         make_shared_ptr<AllocatedData>(allocator.Allocate(decoder->body_size_bytes));
 
     if (CanReadBodyPositionally(body_start, body_size)) {
-      // One read replaces the 4 KB reads the buffered reader would issue
-      file_reader.handle->Read(message_body->get(), body_size, body_start);
-      file_reader.Seek(body_start + body_size);
+      if (!TryReadProjectedBody(body_start, body_size)) {
+        // One read replaces the 4 KB reads the buffered reader would issue
+        file_reader.handle->Read(message_body->get(), body_size, body_start);
+        file_reader.Seek(body_start + body_size);
+      }
     } else {
       ReadData(message_body->get(), decoder->body_size_bytes);
     }

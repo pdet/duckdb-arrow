@@ -26,6 +26,9 @@ const ArrowSchema* IPCStreamReader::GetBaseSchema() {
       IOException, &error,
       ArrowIpcDictionariesInit(dictionaries.get(), dictionary_encodings.get(), &error));
 
+  // Only the schema message carries this, later messages read back as uninitialized
+  stream_endianness = decoder->endianness;
+
   // Set up the decoder to decode batches
   THROW_NOT_OK(IOException, &error,
                ArrowIpcDecoderSetEndianness(decoder.get(), decoder->endianness));
@@ -37,6 +40,15 @@ const ArrowSchema* IPCStreamReader::GetBaseSchema() {
 }
 
 bool IPCStreamReader::HasProjection() const { return !projected_fields.empty(); }
+
+bool IPCStreamReader::NeedsEndianSwap() const {
+  // Mirrors nanoarrow, which swaps only for an explicit endianness that is not ours
+  if (stream_endianness != NANOARROW_IPC_ENDIANNESS_LITTLE &&
+      stream_endianness != NANOARROW_IPC_ENDIANNESS_BIG) {
+    return false;
+  }
+  return stream_endianness != ArrowIpcSystemEndianness();
+}
 
 const ArrowSchema* IPCStreamReader::GetOutputSchema() {
   if (HasProjection()) {
