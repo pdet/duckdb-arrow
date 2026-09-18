@@ -145,12 +145,5 @@ unique_ptr<NodeStatistics> ArrowMultiFileInfo::GetCardinality(
   return make_uniq<NodeStatistics>(rows * (file_count > 0 ? file_count : 1));
 }
 
-void ArrowMultiFileInfo::GetVirtualColumns(ClientContext&, MultiFileBindData&,
-                                           virtual_column_map_t& result) {
-  if (result.find(COLUMN_IDENTIFIER_EMPTY) != result.end()) {
-    result.erase(COLUMN_IDENTIFIER_EMPTY);
-  }
-}
-
 }  // namespace ext_nanoarrow
 }  // namespace duckdb

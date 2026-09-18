@@ -33,6 +33,7 @@ ArrowFileScan::ArrowFileScan(ClientContext& context, const string& file_name)
   // Scans move this reader away, so progress and estimates keep their own copies
   file_size = reader.FileSize();
   reader.TrackProgress(progress_offset);
+  count_without_bodies = reader.CanCountWithoutBodies();
   // Dictionaries must be decoded in stream order, so those files keep one scan
   if (reader.TryReadFooter() && !reader.HasDictionaryBlocks()) {
     PlanClaims(reader.RecordBatchBlocks());
@@ -140,8 +141,22 @@ void ArrowFileScan::PrepareScan(ClientContext& context,
                                 LocalTableFunctionState& lstate_p) {
   // The global lock is released before this runs, so the first batch decodes here
   auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
+  lstate.count_reader = nullptr;
+  lstate.count_owned_reader.reset();
+  lstate.count_rows_left = 0;
+  // Only virtual or constant columns are read, so the headers alone give the rows
+  const bool count_only = column_indexes.empty() && count_without_bodies;
   if (claims.empty()) {
     lstate.block_scan_id = 0;
+    if (count_only) {
+      if (!factory->reader) {
+        throw InternalException("ArrowFileScan counted a file whose reader was moved");
+      }
+      lstate.count_owned_reader.reset(
+          static_cast<IPCFileStreamReader*>(factory->reader.release()));
+      lstate.count_reader = lstate.count_owned_reader.get();
+      return;
+    }
     InitializeScanData(lstate, &FileIPCStreamFactory::Produce,
                        reinterpret_cast<uintptr_t>(factory.get()));
     StartScan(context, lstate);
@@ -164,6 +179,10 @@ void ArrowFileScan::PrepareScan(ClientContext& context,
   }
   const auto& claim = claims[lstate.claim_index];
   lstate.block_reader->SetBlocks(blocks.data() + claim.begin, blocks.data() + claim.end);
+  if (count_only) {
+    lstate.count_reader = lstate.block_reader.get();
+    return;
+  }
   StartScan(context, lstate);
 }
 
@@ -171,6 +190,17 @@ AsyncResult ArrowFileScan::Scan(ClientContext& context,
                                 GlobalTableFunctionState& global_state,
                                 LocalTableFunctionState& local_state, DataChunk& chunk) {
   auto& lstate = local_state.Cast<ArrowFileLocalState>();
+  if (lstate.count_reader) {
+    while (lstate.count_rows_left == 0) {
+      if (!lstate.count_reader->NextBatchLength(lstate.count_rows_left)) {
+        return SourceResultType::FINISHED;
+      }
+    }
+    const auto count = MinValue<idx_t>(lstate.count_rows_left, STANDARD_VECTOR_SIZE);
+    chunk.SetChildCardinality(count);
+    lstate.count_rows_left -= count;
+    return SourceResultType::HAVE_MORE_OUTPUT;
+  }
   ArrowTableFunction::ArrowScanFunction(context, *lstate.table_function_input, chunk);
   if (chunk.size() == 0) {
     return SourceResultType::FINISHED;
