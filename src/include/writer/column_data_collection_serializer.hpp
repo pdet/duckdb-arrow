@@ -45,7 +45,8 @@ class ColumnDataCollectionSerializer {
 
   nanoarrow::UniqueBuffer GetHeader();
 
-  nanoarrow::UniqueBuffer GetBody();
+  //! Header and body in one exactly sized buffer, leaving both buffers for the next batch
+  nanoarrow::UniqueBuffer GetMessage();
 
  private:
   ClientProperties options;

@@ -215,10 +215,15 @@ nanoarrow::UniqueBuffer ColumnDataCollectionSerializer::GetHeader() {
   InitArrowDuckBuffer(header.get(), allocator);
   return result_header;
 }
-nanoarrow::UniqueBuffer ColumnDataCollectionSerializer::GetBody() {
-  auto result_body = std::move(body);
-  InitArrowDuckBuffer(body.get(), allocator);
-  return result_body;
+nanoarrow::UniqueBuffer ColumnDataCollectionSerializer::GetMessage() {
+  nanoarrow::UniqueBuffer message;
+  InitArrowDuckBuffer(message.get(), allocator);
+  NANOARROW_THROW_NOT_OK(
+      ArrowBufferReserve(message.get(), header->size_bytes + body->size_bytes));
+  NANOARROW_THROW_NOT_OK(
+      ArrowBufferAppend(message.get(), header->data, header->size_bytes));
+  NANOARROW_THROW_NOT_OK(ArrowBufferAppend(message.get(), body->data, body->size_bytes));
+  return message;
 }
 }  // namespace ext_nanoarrow
 }  // namespace duckdb
