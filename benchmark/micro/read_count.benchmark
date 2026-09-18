@@ -1,5 +1,5 @@
 # name: benchmark/micro/read_count.benchmark
-# description: Count the rows of one file, which reads the message headers only
+# description: Count the rows of one file of 14,600 batches, which reads only their headers
 # group: [micro]
 
 name Read count
@@ -7,13 +7,13 @@ group micro
 
 require nanoarrow
 
-cache_file nanoarrow_large_batches.arrows
+cache_file nanoarrow_small_batches.arrows
 
 load
-COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(4000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_large_batches.arrows' (FORMAT ARROWS);
+COPY (SELECT i::INTEGER AS i FROM range(30000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_small_batches.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 2048);
 
 run
-SELECT count(*) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_large_batches.arrows');
+SELECT count(*) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_small_batches.arrows');
 
 result I
-4000000
+30000000
