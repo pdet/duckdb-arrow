@@ -218,6 +218,22 @@ bool IPCFileStreamReader::CanReadBodyPositionally(idx_t body_start, idx_t body_s
   return body_start <= file_size && body_size <= file_size - body_start;
 }
 
+void IPCFileStreamReader::ReadBodyPositionally(idx_t body_start, idx_t body_size) {
+  // A body smaller than the buffer reads through it, which also buffers the next header
+  if (body_size < FILE_BUFFER_SIZE) {
+    ReadData(message_body->get(), body_size);
+    return;
+  }
+  // Reading the header usually buffered the start of the body, so copy it, not reread it
+  const auto buffered =
+      MinValue<idx_t>(file_reader.read_data - file_reader.offset, body_size);
+  ReadData(message_body->get(), buffered);
+  // One read replaces the 4 KB reads the buffered reader would issue
+  file_reader.handle->Read(message_body->get() + buffered, body_size - buffered,
+                           body_start + buffered);
+  file_reader.Seek(body_start + body_size);
+}
+
 bool IPCFileStreamReader::TryReadProjectedBody(idx_t body_start, idx_t body_size) {
   if (!HasProjection() || body_size < kMinBodyBytesForRanges) {
     return false;
@@ -304,9 +320,7 @@ void IPCFileStreamReader::DecodeBody() {
       file_reader.Seek(body_start + body_size);
     } else if (CanReadBodyPositionally(body_start, body_size)) {
       if (!TryReadProjectedBody(body_start, body_size)) {
-        // One read replaces the 4 KB reads the buffered reader would issue
-        file_reader.handle->Read(message_body->get(), body_size, body_start);
-        file_reader.Seek(body_start + body_size);
+        ReadBodyPositionally(body_start, body_size);
       }
     } else {
       ReadData(message_body->get(), decoder->body_size_bytes);
