@@ -1,0 +1,20 @@
+# name: benchmark/micro/read_small_batches.benchmark
+# description: Scan one file of many small batches, where the cost per message dominates
+# group: [micro]
+
+name Read small batches
+group micro
+
+require nanoarrow
+
+cache_file nanoarrow_small_batches.arrows
+
+# One integer column in batches of one vector keeps every body at 8 KB
+load
+COPY (SELECT i::INTEGER AS i FROM range(30000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_small_batches.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 2048);
+
+run
+SELECT sum(i) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_small_batches.arrows');
+
+result I
+449999985000000
