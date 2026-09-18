@@ -7,13 +7,13 @@ group micro
 
 require nanoarrow
 
-cache_file nanoarrow_tiny_batches.arrows
+cache_file nanoarrow_tiny_batches_50m.arrows
 
 load
-COPY (SELECT (i % 100)::TINYINT AS i FROM range(20000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_tiny_batches.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 2048);
+COPY (SELECT (i % 100)::TINYINT AS i FROM range(50000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_tiny_batches_50m.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 2048);
 
 run
-SELECT sum(i) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_tiny_batches.arrows');
+SELECT sum(i) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_tiny_batches_50m.arrows');
 
 result I
-990000000
+2475000000
