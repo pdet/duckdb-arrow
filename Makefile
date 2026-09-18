@@ -4,6 +4,9 @@ PROJ_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 EXT_NAME=nanoarrow
 EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 
+# Built for the TPC tests only, which generate data and check answers with them
+DEFAULT_TEST_EXTENSION_DEPS=tpch;tpcds
+
 # Include the Makefile from extension-ci-tools
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
 

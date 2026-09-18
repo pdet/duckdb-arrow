@@ -1,0 +1,41 @@
+# name: test/sql/tpch_sf1.test_slow
+# description: TPC-H at scale factor 1 over Arrow IPC files
+# group: [sql]
+
+require nanoarrow
+
+require tpch
+
+statement ok
+CREATE SCHEMA tpch;
+
+statement ok
+CALL dbgen(sf=1, schema='tpch');
+
+foreach tbl lineitem nation orders supplier part partsupp region customer
+
+statement ok
+COPY tpch.{tbl} TO '{TEST_DIR}/{tbl}.arrow' (FORMAT ARROW);
+
+statement ok
+CREATE VIEW {tbl} AS FROM read_arrow('{TEST_DIR}/{tbl}.arrow');
+
+endloop
+
+loop i 1 9
+
+query I
+PRAGMA tpch({i})
+----
+<FILE>:duckdb/extension/tpch/dbgen/answers/sf1/q0{i}.csv
+
+endloop
+
+loop i 10 23
+
+query I
+PRAGMA tpch({i})
+----
+<FILE>:duckdb/extension/tpch/dbgen/answers/sf1/q{i}.csv
+
+endloop
