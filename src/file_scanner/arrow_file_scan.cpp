@@ -34,7 +34,6 @@ bool ArrowFileScan::TryInitializeScan(ClientContext& context,
                                       GlobalTableFunctionState& gstate_p,
                                       LocalTableFunctionState& lstate_p) {
   auto& gstate = gstate_p.Cast<ArrowFileGlobalState>();
-  auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
   if (gstate.files.find(file_list_idx.GetIndex()) != gstate.files.end()) {
     // Return false because we don't currently support more than one thread
     // scanning a file. In the future we may be able to support this by (e.g.)
@@ -43,8 +42,14 @@ bool ArrowFileScan::TryInitializeScan(ClientContext& context,
     return false;
   }
   gstate.files.insert(file_list_idx.GetIndex());
+  return true;
+}
 
-  // lstate.file_scan = shared_ptr_cast<BaseFileReader, ArrowFileScan>(this);
+void ArrowFileScan::PrepareScan(ClientContext& context,
+                                GlobalTableFunctionState& gstate_p,
+                                LocalTableFunctionState& lstate_p) {
+  // The global lock is released before this runs, so the first batch decodes here
+  auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
   lstate.local_arrow_function_data = make_uniq<ArrowScanFunctionData>(
       &FileIPCStreamFactory::Produce, reinterpret_cast<uintptr_t>(factory.get()));
   lstate.local_arrow_function_data->schema_root = schema_root;
@@ -66,7 +71,6 @@ bool ArrowFileScan::TryInitializeScan(ClientContext& context,
   lstate.table_function_input = make_uniq<TableFunctionInput>(
       lstate.local_arrow_function_data.get(), lstate.local_arrow_local_state.get(),
       lstate.local_arrow_global_state.get());
-  return true;
 }
 AsyncResult ArrowFileScan::Scan(ClientContext& context,
                                 GlobalTableFunctionState& global_state,

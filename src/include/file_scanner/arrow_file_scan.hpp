@@ -37,6 +37,8 @@ class ArrowFileScan : public BaseFileReader {
 
   bool TryInitializeScan(ClientContext& context, GlobalTableFunctionState& gstate,
                          LocalTableFunctionState& lstate) override;
+  void PrepareScan(ClientContext& context, GlobalTableFunctionState& gstate,
+                   LocalTableFunctionState& lstate) override;
   AsyncResult Scan(ClientContext& context, GlobalTableFunctionState& global_state,
                    LocalTableFunctionState& local_state, DataChunk& chunk) override;
   double GetProgressInFile(ClientContext& context) override;
