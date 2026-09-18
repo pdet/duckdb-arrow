@@ -82,10 +82,7 @@ unique_ptr<FunctionData> ToArrowIPCFunction::Bind(ClientContext& context,
 void SerializeArray(const ToArrowIpcLocalState& local_state,
                     nanoarrow::UniqueBuffer& arrow_serialized_ipc_buffer) {
   local_state.serializer->Serialize(*local_state.appender);
-  arrow_serialized_ipc_buffer = local_state.serializer->GetHeader();
-  auto body = local_state.serializer->GetBody();
-  NANOARROW_THROW_NOT_OK(
-      ArrowBufferAppend(arrow_serialized_ipc_buffer.get(), body->data, body->size_bytes));
+  arrow_serialized_ipc_buffer = local_state.serializer->GetMessage();
 }
 
 void InsertMessageToChunk(nanoarrow::UniqueBuffer& arrow_serialized_ipc_buffer,
