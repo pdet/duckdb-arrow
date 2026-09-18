@@ -20,14 +20,14 @@ Arrow IPC stream is truncated
 
 endloop
 
-# The recorded uncompressed length of a buffer does not match what the codec produces
+# A recorded uncompressed length does not match the codec output, which only a column read decompresses
 statement error
-SELECT count(*) FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/bad_body_zstd.arrows');
+SELECT sum(i) FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/bad_body_zstd.arrows');
 ----
 ZSTD_decompress
 
 statement error
-SELECT count(*) FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/bad_body_lz4.arrows');
+SELECT sum(i) FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/bad_body_lz4.arrows');
 ----
 LZ4 frame
 

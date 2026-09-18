@@ -32,6 +32,12 @@ struct ArrowFileLocalState : public LocalTableFunctionState {
   bool block_reader_projected = false;
   //! The claim that TryInitializeScan handed to this state
   idx_t claim_index = 0;
+  //! Set when no file column is read, so the scan only counts rows from the headers
+  optional_ptr<IPCFileStreamReader> count_reader;
+  //! Owns the reader of a counting scan without claims
+  unique_ptr<IPCFileStreamReader> count_owned_reader;
+  //! Rows of the current batch that the counting scan has not emitted yet
+  idx_t count_rows_left = 0;
 
   //! Factory Pointer
   shared_ptr<ArrowFileScan> file_scan;
@@ -123,9 +129,6 @@ struct ArrowMultiFileInfo : MultiFileReaderInterface {
   unique_ptr<NodeStatistics> GetCardinality(ClientContext& context,
                                             const MultiFileBindData& bind_data,
                                             idx_t file_count) override;
-
-  void GetVirtualColumns(ClientContext& context, MultiFileBindData& bind_data,
-                         virtual_column_map_t& result) override;
 };
 
 }  // namespace ext_nanoarrow
