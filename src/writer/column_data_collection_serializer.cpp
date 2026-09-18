@@ -152,6 +152,18 @@ static int64_t PaddedBodySize(const ArrowArrayView& view) {
   return size;
 }
 
+// A zero null count lets readers take every value as valid without a bitmap
+static void DropUnusedValidity(ArrowArrayView& view) {
+  for (int64_t c = 0; c < view.n_children; c++) {
+    auto& child = *view.children[c];
+    if (child.null_count == 0 &&
+        child.layout.buffer_type[0] == NANOARROW_BUFFER_TYPE_VALIDITY) {
+      child.buffer_views[0].size_bytes = 0;
+    }
+    DropUnusedValidity(child);
+  }
+}
+
 idx_t ColumnDataCollectionSerializer::Serialize(ArrowAppender& appender) {
   ArrowArray finalized = appender.Finalize();
   nanoarrow::UniqueArray array(&finalized);
@@ -160,6 +172,7 @@ idx_t ColumnDataCollectionSerializer::Serialize(ArrowAppender& appender) {
 
   THROW_NOT_OK(duckdb::InternalException, &error,
                ArrowArrayViewSetArray(chunk_view.get(), array.get(), &error));
+  DropUnusedValidity(*chunk_view.get());
   if (compression.type == NANOARROW_IPC_COMPRESSION_TYPE_NONE) {
     // One exact allocation, where growing buffer by buffer doubles and keeps the peaks
     NANOARROW_THROW_NOT_OK(

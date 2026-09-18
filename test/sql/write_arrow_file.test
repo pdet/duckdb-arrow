@@ -102,3 +102,17 @@ statement error
 COPY (SELECT 1 AS x) TO '__TEST_DIR__/nul.arrow' (KV_METADATA {'k': 'ab\x00cd'::BLOB});
 ----
 Metadata value for key "k" must not contain NUL bytes
+
+# A column without NULLs has no validity bitmap, which would double these 10 KB
+statement ok
+COPY (SELECT i % 2 = 0 AS a FROM range(80000) t(i)) TO '__TEST_DIR__/no_validity.arrows' (FORMAT ARROWS);
+
+query II
+SELECT count(*), count(*) FILTER (WHERE a) FROM read_arrow('__TEST_DIR__/no_validity.arrows');
+----
+80000	40000
+
+query I
+SELECT size < 15000 FROM read_blob('__TEST_DIR__/no_validity.arrows');
+----
+true
