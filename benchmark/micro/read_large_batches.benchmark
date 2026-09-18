@@ -1,0 +1,19 @@
+# name: benchmark/micro/read_large_batches.benchmark
+# description: Scan every column of one file written with the default batch size
+# group: [micro]
+
+name Read large batches
+group micro
+
+require nanoarrow
+
+cache_file nanoarrow_large_batches.arrows
+
+load
+COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(4000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_large_batches.arrows' (FORMAT ARROWS);
+
+run
+SELECT sum(id), sum(k), sum(v), max(d), max(s) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_large_batches.arrows');
+
+result IIIII
+7999998000000	1998000000	200003890152	571428.4285714285	item_9999

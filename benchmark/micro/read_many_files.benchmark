@@ -1,0 +1,20 @@
+# name: benchmark/micro/read_many_files.benchmark
+# description: Scan sixty four files in parallel
+# group: [micro]
+
+name Read many files
+group micro
+
+require nanoarrow
+
+# One partition file stands in for the whole directory
+cache_file nanoarrow_many_files/p=63/data_0.arrows
+
+load
+COPY (SELECT *, id % 64 AS p FROM (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(4000000) t(i))) TO '${BENCHMARK_DIR}/nanoarrow_many_files' (FORMAT ARROWS, PARTITION_BY (p));
+
+run
+SELECT sum(id), sum(k), sum(v), max(d), max(s) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_many_files/*/*.arrows');
+
+result IIIII
+7999998000000	1998000000	200003890152	571428.4285714285	item_9999

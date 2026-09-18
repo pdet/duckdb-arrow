@@ -1,0 +1,19 @@
+# name: benchmark/micro/read_lz4.benchmark
+# description: Scan every column of one file compressed with lz4
+# group: [micro]
+
+name Read lz4
+group micro
+
+require nanoarrow
+
+cache_file nanoarrow_lz4.arrows
+
+load
+COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(4000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_lz4.arrows' (FORMAT ARROWS, COMPRESSION 'lz4');
+
+run
+SELECT sum(id), sum(k), sum(v), max(d), max(s) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_lz4.arrows');
+
+result IIIII
+7999998000000	1998000000	200003890152	571428.4285714285	item_9999

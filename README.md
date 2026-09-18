@@ -244,6 +244,29 @@ Different tests can be created for DuckDB extensions. Tests are written in
 SQL  `./test/sql`. These SQL tests can be run using `make test` (if using
 make) or `./test_local.sh` (if using CMake via VSCode).
 
+## Running the benchmarks
+
+Benchmarks live in `./benchmark/micro` and run with DuckDB's benchmark runner,
+which `BUILD_BENCHMARK=1 make release` builds with the extension linked in.
+
+``` shell
+build/release/benchmark/benchmark_runner benchmark/micro/read_large_batches.benchmark
+```
+
+The `Regression` workflow builds the runner for the base branch and for the pull
+request, then runs the benchmarks in `.github/regression/micro.csv` with DuckDB's
+`scripts/regression/test_runner.py`. It reports every benchmark that is 10%
+slower, and fails when a benchmark errors or returns a wrong result or when the
+geometric mean of all of them is 10% slower. The same comparison runs locally
+against two runners built from different checkouts.
+
+``` shell
+python3 duckdb/scripts/regression/test_runner.py \
+  --old ../base/build/release/benchmark/benchmark_runner \
+  --new build/release/benchmark/benchmark_runner \
+  --benchmarks .github/regression/micro.csv
+```
+
 ## Debugging
 
 You can debug an interactive SQL session by launching it with `gdb` or `lldb`:
