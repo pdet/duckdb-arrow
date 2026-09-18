@@ -41,7 +41,15 @@ void ArrowMultiFileInfo::FinalizeCopyBind(ClientContext& context,
 struct ArrowMultiFileData final : public TableFunctionData {
   ArrowMultiFileData() = default;
 
+  unique_ptr<FunctionData> Copy() const override {
+    auto result = make_uniq<ArrowMultiFileData>();
+    result->initial_file_claims = initial_file_claims;
+    return std::move(result);
+  }
+
   unique_ptr<ArrowFileScan> file_scan;
+  //! How many scans the first file allows, which bounds the threads of a one file scan
+  idx_t initial_file_claims = 1;
 };
 
 unique_ptr<TableFunctionData> ArrowMultiFileInfo::InitializeBindData(
@@ -68,7 +76,13 @@ void ArrowMultiFileInfo::BindReader(ClientContext& context,
   D_ASSERT(names.size() == return_types.size());
 }
 
-void ArrowMultiFileInfo::FinalizeBindData(MultiFileBindData& multi_file_data) {}
+void ArrowMultiFileInfo::FinalizeBindData(MultiFileBindData& multi_file_data) {
+  if (multi_file_data.initial_reader) {
+    auto& bind_data = multi_file_data.bind_data->Cast<ArrowMultiFileData>();
+    bind_data.initial_file_claims =
+        multi_file_data.initial_reader->Cast<ArrowFileScan>().ClaimCount();
+  }
+}
 
 void ArrowMultiFileInfo::GetBindInfo(const TableFunctionData& bind_data, BindInfo& info) {
 }
@@ -80,8 +94,7 @@ optional_idx ArrowMultiFileInfo::MaxThreads(const MultiFileBindData& bind_data_p
     // always launch max threads if we are reading multiple files
     return {};
   }
-  // Otherwise, only one thread
-  return 1;
+  return bind_data_p.bind_data->Cast<ArrowMultiFileData>().initial_file_claims;
 }
 
 unique_ptr<GlobalTableFunctionState> ArrowMultiFileInfo::InitializeGlobalState(

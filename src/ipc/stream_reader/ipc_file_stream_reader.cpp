@@ -73,6 +73,81 @@ IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> 
   regular_file = file_reader.handle->GetType() == FileType::FILE_TYPE_REGULAR;
 }
 
+bool IPCFileStreamReader::TryReadFooter() {
+  if (footer_read) {
+    return !record_batch_blocks.empty();
+  }
+  footer_read = true;
+  if (!regular_file) {
+    return false;
+  }
+  // The tail of a file is the footer size as an int32 then the bare magic
+  constexpr idx_t kFooterTailSize = sizeof(int32_t) + kArrowIPCFileMagicSize;
+  const auto file_size = file_reader.FileSize();
+  if (file_size < kArrowIPCFileHeaderSize + kFooterTailSize) {
+    return false;
+  }
+
+  // A mismatch is reported by formatting the end of the buffer, so keep a NUL past it
+  auto tail = allocator.Allocate(kFooterTailSize + 1);
+  std::memset(tail.get(), 0, kFooterTailSize + 1);
+  file_reader.handle->Read(tail.get(), kFooterTailSize, file_size - kFooterTailSize);
+
+  auto scratch = NewDuckDBArrowDecoder();
+  ArrowError footer_error{};
+  if (ArrowIpcDecoderPeekFooter(scratch.get(),
+                                AllocatedDataView(tail.get(), kFooterTailSize),
+                                &footer_error) != NANOARROW_OK) {
+    return false;
+  }
+  // Verification adds the tail to this size in int32, so bound it in 64 bits first
+  const auto footer_size = static_cast<int64_t>(scratch->header_size_bytes);
+  if (footer_size <= 0 || static_cast<idx_t>(footer_size) > file_size - kFooterTailSize) {
+    return false;
+  }
+
+  // Verification rejects a window that is not the footer plus the tail
+  const auto window_size = static_cast<idx_t>(footer_size) + kFooterTailSize;
+  auto window = allocator.Allocate(window_size + 1);
+  window.get()[window_size] = 0;
+  file_reader.handle->Read(window.get(), window_size, file_size - window_size);
+  const auto window_view =
+      AllocatedDataView(window.get(), static_cast<int64_t>(window_size));
+  if (ArrowIpcDecoderVerifyFooter(scratch.get(), window_view, &footer_error) !=
+          NANOARROW_OK ||
+      ArrowIpcDecoderDecodeFooter(scratch.get(), window_view, &footer_error) !=
+          NANOARROW_OK) {
+    return false;
+  }
+
+  const auto& footer = *scratch->footer;
+  has_dictionary_blocks = footer.dictionary_blocks.size_bytes > 0;
+  const auto count = static_cast<idx_t>(footer.record_batch_blocks.size_bytes) /
+                     sizeof(ArrowIpcFileBlock);
+  record_batch_blocks.resize(count);
+  if (count > 0) {
+    std::memcpy(record_batch_blocks.data(), footer.record_batch_blocks.data,
+                count * sizeof(ArrowIpcFileBlock));
+  }
+  // A block naming bytes outside the file would send a positional read anywhere
+  for (const auto& block : record_batch_blocks) {
+    // Messages start aligned after the leading magic, and a scan seeks straight to them
+    if (block.offset < static_cast<int64_t>(kArrowIPCFileHeaderSize) ||
+        block.offset % 8 != 0 || block.metadata_length <= 0 || block.body_length < 0) {
+      record_batch_blocks.clear();
+      return false;
+    }
+    const auto end = static_cast<idx_t>(block.offset) +
+                     static_cast<idx_t>(block.metadata_length) +
+                     static_cast<idx_t>(block.body_length);
+    if (end > file_size) {
+      record_batch_blocks.clear();
+      return false;
+    }
+  }
+  return !record_batch_blocks.empty();
+}
+
 void IPCFileStreamReader::PopulateNames(vector<string>& names) {
   GetBaseSchema();
   for (int64_t i = 0; i < base_schema->n_children; i++) {
@@ -239,7 +314,22 @@ data_ptr_t IPCFileStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
   return ptr;
 }
 
+void IPCFileStreamReader::SetBlocks(const ArrowIpcFileBlock* begin,
+                                    const ArrowIpcFileBlock* end) {
+  next_block = begin;
+  end_block = end;
+  finished = false;
+}
+
 ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
+  if (next_block) {
+    if (next_block == end_block) {
+      return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+    }
+    // TryReadFooter checked that the block lies inside the file on an aligned offset
+    file_reader.Seek(static_cast<idx_t>(next_block->offset));
+    next_block++;
+  }
   if (finished) {
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
   }
