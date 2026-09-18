@@ -33,6 +33,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
   void EnsureInputStreamAligned();
   //! Whether the body can be read with one positional read instead of the buffered reader
   bool CanReadBodyPositionally(idx_t body_start, idx_t body_size);
+  //! Reads only the buffers the projection needs, returns false to read the whole body
+  bool TryReadProjectedBody(idx_t body_start, idx_t body_size);
 
   data_ptr_t ReadData(data_ptr_t ptr, idx_t size) override;
   static void DecodeArray(nanoarrow::ipc::UniqueDecoder& decoder, ArrowArray* out,
