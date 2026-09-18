@@ -1,0 +1,17 @@
+# name: benchmark/micro/write_file_format.benchmark
+# description: Write one file with a footer
+# group: [micro]
+
+name Write file format
+group micro
+
+require nanoarrow
+
+load
+CREATE TABLE mixed AS SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(8000000) t(i);
+
+run
+COPY mixed TO '${BENCHMARK_DIR}/nanoarrow_write_file_format.arrow' (FORMAT ARROW);
+
+result I
+8000000

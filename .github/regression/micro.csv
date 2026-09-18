@@ -8,4 +8,11 @@ benchmark/micro/read_small_batches.benchmark
 benchmark/micro/read_tiny_batches.benchmark
 benchmark/micro/read_zstd.benchmark
 benchmark/micro/write.benchmark
+benchmark/micro/write_file_format.benchmark
+benchmark/micro/write_lz4.benchmark
+benchmark/micro/write_nested.benchmark
+benchmark/micro/write_partitioned.benchmark
+benchmark/micro/write_small_batches.benchmark
+benchmark/micro/write_unordered.benchmark
+benchmark/micro/write_wide.benchmark
 benchmark/micro/write_zstd.benchmark

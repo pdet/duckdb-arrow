@@ -1,0 +1,17 @@
+# name: benchmark/micro/write_small_batches.benchmark
+# description: Write one file of many small batches, where the cost per message dominates
+# group: [micro]
+
+name Write small batches
+group micro
+
+require nanoarrow
+
+load
+CREATE TABLE ints AS SELECT i::INTEGER AS i FROM range(30000000) t(i);
+
+run
+COPY ints TO '${BENCHMARK_DIR}/nanoarrow_write_small_batches.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 2048);
+
+result I
+30000000
