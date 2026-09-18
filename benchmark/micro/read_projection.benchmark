@@ -1,0 +1,19 @@
+# name: benchmark/micro/read_projection.benchmark
+# description: Read one column of sixteen from one file
+# group: [micro]
+
+name Read projection
+group micro
+
+require nanoarrow
+
+cache_file nanoarrow_projection.arrows
+
+load
+COPY (SELECT i + 0 AS c0, i + 1 AS c1, i + 2 AS c2, i + 3 AS c3, i + 4 AS c4, i + 5 AS c5, i + 6 AS c6, i + 7 AS c7, i + 8 AS c8, i + 9 AS c9, i + 10 AS c10, i + 11 AS c11, i + 12 AS c12, i + 13 AS c13, i + 14 AS c14, i + 15 AS c15 FROM range(2000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_projection.arrows' (FORMAT ARROWS);
+
+run
+SELECT sum(c7) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_projection.arrows');
+
+result I
+2000013000000

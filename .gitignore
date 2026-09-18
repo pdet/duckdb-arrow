@@ -9,3 +9,4 @@ test/python/__pycache__/
 .vscode/settings.json
 .cache
 duckdb-python
+duckdb_benchmark_data/

@@ -1,0 +1,17 @@
+# name: benchmark/micro/write_zstd.benchmark
+# description: Write one file compressed with zstd
+# group: [micro]
+
+name Write zstd
+group micro
+
+require nanoarrow
+
+load
+CREATE TABLE mixed AS SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(4000000) t(i);
+
+run
+COPY mixed TO '${BENCHMARK_DIR}/nanoarrow_write_zstd.arrows' (FORMAT ARROWS, COMPRESSION 'zstd');
+
+result I
+4000000

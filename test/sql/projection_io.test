@@ -9,8 +9,7 @@ require noforcestorage
 statement ok
 SET logging_storage = 'memory';
 
-# Eight columns of twenty thousand rows is a body of about 1.28 MB, over the floor
-# below which bodies are read whole
+# Eight columns of 20000 rows make a 1.28 MB body, above the 1 MB floor for projected reads
 statement ok
 COPY (SELECT i AS c0, i AS c1, i AS c2, i AS c3, i AS c4, i AS c5, i AS c6, i AS c7
       FROM range(20000) t(i))
@@ -28,8 +27,7 @@ CALL enable_logging('FileSystem');
 statement ok
 SELECT sum(c7) FROM read_arrow('__TEST_DIR__/io_one.arrows');
 
-# One column of eight, so the unread columns must not be fetched. Before the projected
-# read landed this was the whole body, about 1.28 MB
+# One of eight columns is read, so the reads stay far below the 1.28 MB body
 query I
 SELECT sum(bytes) < 400000 FROM duckdb_logs_parsed('FileSystem')
 WHERE op = 'READ' AND path LIKE '%io_one.arrows%';

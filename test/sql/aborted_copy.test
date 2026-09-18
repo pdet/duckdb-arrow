@@ -1,0 +1,43 @@
+# name: test/sql/aborted_copy.test
+# description: A failed COPY removes the file it created and keeps a pre-existing target
+# group: [sql]
+
+require nanoarrow
+
+statement error
+COPY (SELECT CASE WHEN i = 4096 THEN error('boom') ELSE i END AS i FROM range(8192) t(i)) TO '{TEST_DIR}/aborted.arrow';
+----
+boom
+
+query I
+SELECT count(*) FROM glob('{TEST_DIR}/aborted.arrow');
+----
+0
+
+statement ok
+COPY (SELECT 42 AS i) TO '{TEST_DIR}/kept.arrows';
+
+statement error
+COPY (SELECT CASE WHEN i = 4096 THEN error('boom') ELSE i END AS i FROM range(8192) t(i)) TO '{TEST_DIR}/kept.arrows';
+----
+boom
+
+# The file that was there before the failure survives and no temporary file is left
+query II
+SELECT (SELECT count(*) FROM read_arrow('{TEST_DIR}/kept.arrows')), (SELECT count(*) FROM glob('{TEST_DIR}/tmp_*'));
+----
+1	0
+
+statement ok
+COPY (SELECT 42 AS i) TO '{TEST_DIR}/inplace.arrows';
+
+statement error
+COPY (SELECT CASE WHEN i = 4096 THEN error('boom') ELSE i END AS i FROM range(8192) t(i)) TO '{TEST_DIR}/inplace.arrows' (USE_TMP_FILE false);
+----
+boom
+
+# Only a path this COPY creates is removed, so an overwrite in place keeps its bytes
+query I
+SELECT count(*) FROM glob('{TEST_DIR}/inplace.arrows');
+----
+1

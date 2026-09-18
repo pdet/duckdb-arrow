@@ -29,6 +29,9 @@ struct ArrowStreamWriter {
                     const ArrowIpcCompressionOptions& compression, bool file_format,
                     bool size_metadata);
 
+  //! Removes the output when Finalize did not run, as parquet and csv writers do
+  ~ArrowStreamWriter();
+
   void InitSchema(const ArrowSchema& schema, const vector<pair<string, string>>& metadata,
                   const vector<ArrowFieldMetadata>& field_metadata);
 

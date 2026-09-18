@@ -66,10 +66,24 @@ void ArrowStreamWriter::InitSchema(const ArrowSchema& schema_p,
   }
 }
 
+ArrowStreamWriter::~ArrowStreamWriter() {
+  // Finalize closes the handle, so an open one here means the output is incomplete
+  if (!writer || !writer->handle) {
+    return;
+  }
+  try {
+    writer->handle->AbortWrite();
+  } catch (...) {
+  }
+}
+
 void ArrowStreamWriter::InitOutputFile(FileSystem& fs, const string& file_path) {
-  writer = make_uniq<BufferedFileWriter>(
-      fs, file_path.c_str(),
-      FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW);
+  auto flags = FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW;
+  // Only a path this COPY creates may be removed when the write is aborted
+  if (!fs.FileExists(file_path) && !fs.IsPipe(file_path)) {
+    flags |= FileFlags::FILE_FLAGS_EXCLUSIVE_CREATE;
+  }
+  writer = make_uniq<BufferedFileWriter>(fs, file_path.c_str(), flags);
   // WriteFooter patches offset 8 of a new regular file, fsspec needs OnDiskFile first
   if (size_metadata && (!writer->handle->OnDiskFile() ||
                         writer->handle->GetType() != FileType::FILE_TYPE_REGULAR ||

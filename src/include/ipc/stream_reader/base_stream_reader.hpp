@@ -43,8 +43,8 @@ class IPCStreamReader {
     throw InternalException("IPCStreamReader::GetUniqueBuffer not implemented");
   };
 
-  //! Sets the projection pushdown for this reader
-  void SetColumnProjection(const vector<string>& column_names);
+  //! Sets the projection pushdown for this reader, by top level column index
+  void SetColumnProjection(const vector<idx_t>& column_indexes);
   //! Gets the base schema with no projection pushdown
   const ArrowSchema* GetBaseSchema();
 
