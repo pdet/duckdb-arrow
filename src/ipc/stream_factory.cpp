@@ -21,20 +21,29 @@ unique_ptr<ArrowArrayStreamWrapper> ArrowIPCStreamFactory::Produce(
     throw InternalException("IpcStreamReader was not initialized or was already moved");
   }
 
-  if (!parameters.projected_columns.columns.empty()) {
-    // Arrow field names may repeat, so take the bound indexes in output position order
-    const auto& filter_to_col = parameters.projected_columns.filter_to_col;
-    const map<idx_t, idx_t> ordered(filter_to_col.begin(), filter_to_col.end());
-    vector<idx_t> column_indexes;
-    for (const auto& entry : ordered) {
-      column_indexes.push_back(entry.second);
-    }
+  const auto column_indexes = ProjectedColumnIndexes(parameters);
+  if (!column_indexes.empty()) {
     factory->reader->SetColumnProjection(column_indexes);
   }
 
   auto out = make_uniq<ArrowArrayStreamWrapper>();
   IpcArrayStream(std::move(factory->reader)).ToArrayStream(&out->arrow_array_stream);
   return out;
+}
+
+vector<idx_t> ArrowIPCStreamFactory::ProjectedColumnIndexes(
+    const ArrowStreamParameters& parameters) {
+  vector<idx_t> column_indexes;
+  if (parameters.projected_columns.columns.empty()) {
+    return column_indexes;
+  }
+  // Arrow field names may repeat, so take the bound indexes in output position order
+  const auto& filter_to_col = parameters.projected_columns.filter_to_col;
+  const map<idx_t, idx_t> ordered(filter_to_col.begin(), filter_to_col.end());
+  for (const auto& entry : ordered) {
+    column_indexes.push_back(entry.second);
+  }
+  return column_indexes;
 }
 
 void ArrowIPCStreamFactory::GetFileSchema(ArrowSchemaWrapper& schema) const {
@@ -66,8 +75,12 @@ void FileIPCStreamFactory::InitReader() {
   if (reader) {
     throw InternalException("ArrowArrayStream or IpcStreamReader already initialized");
   }
+  reader = OpenReader();
+}
+
+unique_ptr<IPCFileStreamReader> FileIPCStreamFactory::OpenReader() const {
   unique_ptr<FileHandle> handle = fs.OpenFile(src_string, FileOpenFlags::FILE_FLAGS_READ);
-  reader = make_uniq<IPCFileStreamReader>(fs, std::move(handle), allocator);
+  return make_uniq<IPCFileStreamReader>(fs, std::move(handle), allocator);
 }
 
 }  // namespace ext_nanoarrow
