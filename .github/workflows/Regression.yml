@@ -77,7 +77,7 @@ jobs:
       - name: Run regression benchmarks
         working-directory: pr
         run: |
-          python3 duckdb/scripts/regression/test_runner.py \
+          python3 .github/regression/run.py \
             --old ../base/build/release/benchmark/benchmark_runner \
             --new build/release/benchmark/benchmark_runner \
             --benchmarks .github/regression/micro.csv \
