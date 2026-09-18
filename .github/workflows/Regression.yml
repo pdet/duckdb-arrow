@@ -1,0 +1,86 @@
+name: Regression
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  regression:
+    name: Regression benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      GEN: ninja
+      BUILD_BENCHMARK: 1
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+      # Paths are taken relative to the workspace so both checkouts share ccache objects
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: true
+    steps:
+      - name: Install Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          path: pr
+          persist-credentials: false
+
+      # The benchmark files come from the PR checkout, so new benchmarks also run against the base
+      - name: Checkout base
+        uses: actions/checkout@v4
+        with:
+          path: base
+          ref: ${{ github.event.pull_request.base.sha || 'main' }}
+          persist-credentials: false
+
+      - name: Checkout submodules
+        run: |
+          for checkout in pr base; do
+            git -C "$checkout" submodule update --init --depth 1 duckdb extension-ci-tools
+          done
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
+        with:
+          vcpkgGitCommitId: 84bab45d415d22042bd0b9081aea57f362da3f35
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: regression-${{ runner.os }}
+          max-size: 2G
+
+      - name: Build base
+        working-directory: base
+        run: make release
+
+      - name: Build PR
+        working-directory: pr
+        run: make release
+
+      - name: Run regression benchmarks
+        working-directory: pr
+        run: |
+          python3 duckdb/scripts/regression/test_runner.py \
+            --old ../base/build/release/benchmark/benchmark_runner \
+            --new build/release/benchmark/benchmark_runner \
+            --benchmarks .github/regression/micro.csv \
+            --verbose \
+            --early-stop \
+            --threads 2
