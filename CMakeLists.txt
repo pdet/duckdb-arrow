@@ -23,6 +23,12 @@ set(NANOARROW_IPC_WITH_LZ4 ON)
 set(LZ4_INCLUDE_DIRS "${LZ4_INCLUDE_DIR}")
 set(LZ4_LIBRARY_DIRS "${LZ4_LIBRARY_DIR}")
 set(LZ4_LIBRARIES "${LZ4_LIBRARY}")
+# DuckDB instruments only its C++ flags, so nanoarrow's C sources take the same sanitizer
+if(ENABLE_THREAD_SANITIZER)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=thread")
+elseif(ENABLE_SANITIZER AND (FORCE_ASSERT OR RELEASE_SANITIZER))
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address")
+endif()
 # Both libraries link into the extension transitively through nanoarrow_ipc (CMake 3.24)
 fetchcontent_makeavailable(nanoarrow)
 # DuckDB puts its namespaced zstd.h on every target, nanoarrow must see the real one first
