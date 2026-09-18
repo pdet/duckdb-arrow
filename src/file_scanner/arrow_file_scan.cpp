@@ -6,10 +6,15 @@
 
 namespace duckdb {
 namespace ext_nanoarrow {
-struct ArrowFileLocalState;
+
+namespace {
+//! Claims below this many body bytes would spend more on setup than on decoding
+constexpr idx_t kMinClaimBodyBytes = 1024 * 1024;
+atomic<idx_t> next_scan_id{1};
+}  // namespace
 
 ArrowFileScan::ArrowFileScan(ClientContext& context, const string& file_name)
-    : BaseFileReader(OpenFileInfo(file_name)) {
+    : BaseFileReader(OpenFileInfo(file_name)), scan_id(next_scan_id++) {
   factory = make_uniq<FileIPCStreamFactory>(context, file_name);
 
   factory->InitReader();
@@ -23,7 +28,36 @@ ArrowFileScan::ArrowFileScan(ClientContext& context, const string& file_name)
   }
   columns = MultiFileColumnDefinition::ColumnsFromNamesAndTypes(
       StringsToIdentifiers(names), types);
+
+  auto& reader = static_cast<IPCFileStreamReader&>(*factory->reader);
+  // Dictionaries must be decoded in stream order, so those files keep one scan
+  if (reader.TryReadFooter() && !reader.HasDictionaryBlocks()) {
+    PlanClaims(reader.RecordBatchBlocks());
+  }
 }
+
+void ArrowFileScan::PlanClaims(const vector<ArrowIpcFileBlock>& file_blocks) {
+  idx_t begin = 0;
+  idx_t body_bytes = 0;
+  for (idx_t i = 0; i < file_blocks.size(); i++) {
+    body_bytes += static_cast<idx_t>(file_blocks[i].body_length);
+    if (body_bytes >= kMinClaimBodyBytes) {
+      claims.push_back(BlockRange{begin, i + 1});
+      begin = i + 1;
+      body_bytes = 0;
+    }
+  }
+  if (begin < file_blocks.size()) {
+    claims.push_back(BlockRange{begin, file_blocks.size()});
+  }
+  if (claims.size() < 2) {
+    claims.clear();
+    return;
+  }
+  blocks = file_blocks;
+}
+
+idx_t ArrowFileScan::ClaimCount() const { return MaxValue<idx_t>(claims.size(), 1); }
 
 string ArrowFileScan::GetReaderType() const { return "ARROW"; }
 
@@ -33,26 +67,32 @@ const vector<LogicalType>& ArrowFileScan::GetTypes() { return types; }
 bool ArrowFileScan::TryInitializeScan(ClientContext& context,
                                       GlobalTableFunctionState& gstate_p,
                                       LocalTableFunctionState& lstate_p) {
+  if (!claims.empty()) {
+    // Claims go out in file order under the multi file lock, which keeps batch order
+    if (next_claim >= claims.size()) {
+      return false;
+    }
+    lstate_p.Cast<ArrowFileLocalState>().claim_index = next_claim++;
+    return true;
+  }
   auto& gstate = gstate_p.Cast<ArrowFileGlobalState>();
   if (gstate.files.find(file_list_idx.GetIndex()) != gstate.files.end()) {
-    // Return false because we don't currently support more than one thread
-    // scanning a file. In the future we may be able to support this by (e.g.)
-    // reading the Arrow file footer or sending a thread to read ahead to scan
-    // for RecordBatch messages.
+    // Without a footer the batches can only be found by reading the stream in order
     return false;
   }
   gstate.files.insert(file_list_idx.GetIndex());
   return true;
 }
 
-void ArrowFileScan::PrepareScan(ClientContext& context,
-                                GlobalTableFunctionState& gstate_p,
-                                LocalTableFunctionState& lstate_p) {
-  // The global lock is released before this runs, so the first batch decodes here
-  auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
-  lstate.local_arrow_function_data = make_uniq<ArrowScanFunctionData>(
-      &FileIPCStreamFactory::Produce, reinterpret_cast<uintptr_t>(factory.get()));
-  lstate.local_arrow_function_data->schema_root = schema_root;
+void ArrowFileScan::InitializeScanData(ArrowFileLocalState& lstate,
+                                       stream_factory_produce_t producer,
+                                       uintptr_t producer_data) {
+  lstate.local_arrow_function_data =
+      make_uniq<ArrowScanFunctionData>(producer, producer_data);
+  // A memberwise copy shares the release pointer, so a second scan would free it twice
+  NANOARROW_THROW_NOT_OK(
+      ArrowSchemaDeepCopy(&schema_root.arrow_schema,
+                          &lstate.local_arrow_function_data->schema_root.arrow_schema));
   lstate.local_arrow_function_data->arrow_table = arrow_table;
   // Global column indexes and projection ids do not address this file's schema
   auto local_column_indexes = column_indexes;
@@ -64,6 +104,9 @@ void ArrowFileScan::PrepareScan(ClientContext& context,
   lstate.init_input = make_uniq<TableFunctionInitInput>(*lstate.local_arrow_function_data,
                                                         std::move(local_column_indexes),
                                                         no_projection_ids, filters);
+}
+
+void ArrowFileScan::StartScan(ClientContext& context, ArrowFileLocalState& lstate) {
   lstate.local_arrow_global_state =
       ArrowTableFunction::ArrowScanInitGlobal(context, *lstate.init_input);
   lstate.local_arrow_local_state = ArrowTableFunction::ArrowScanInitLocalInternal(
@@ -72,6 +115,55 @@ void ArrowFileScan::PrepareScan(ClientContext& context,
       lstate.local_arrow_function_data.get(), lstate.local_arrow_local_state.get(),
       lstate.local_arrow_global_state.get());
 }
+
+unique_ptr<ArrowArrayStreamWrapper> ArrowFileScan::ProduceBlocks(
+    uintptr_t local_state, ArrowStreamParameters& parameters) {
+  auto& lstate = *reinterpret_cast<ArrowFileLocalState*>(local_state);
+  // Every claim of one file projects the same columns, so the reader keeps the first
+  if (!lstate.block_reader_projected) {
+    const auto column_indexes = ArrowIPCStreamFactory::ProjectedColumnIndexes(parameters);
+    if (!column_indexes.empty()) {
+      lstate.block_reader->SetColumnProjection(column_indexes);
+    }
+    lstate.block_reader_projected = true;
+  }
+  auto out = make_uniq<ArrowArrayStreamWrapper>();
+  IpcArrayStream(*lstate.block_reader).ToArrayStream(&out->arrow_array_stream);
+  return out;
+}
+
+void ArrowFileScan::PrepareScan(ClientContext& context,
+                                GlobalTableFunctionState& gstate_p,
+                                LocalTableFunctionState& lstate_p) {
+  // The global lock is released before this runs, so the first batch decodes here
+  auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
+  if (claims.empty()) {
+    lstate.block_scan_id = 0;
+    InitializeScanData(lstate, &FileIPCStreamFactory::Produce,
+                       reinterpret_cast<uintptr_t>(factory.get()));
+    StartScan(context, lstate);
+    return;
+  }
+  // A state keeps its reader for the next claim of the same file
+  if (lstate.block_scan_id != scan_id) {
+    // The previous scan borrows the previous reader, so it goes first
+    lstate.table_function_input.reset();
+    lstate.local_arrow_local_state.reset();
+    lstate.local_arrow_global_state.reset();
+    lstate.block_scan_id = 0;
+    lstate.block_reader = factory->OpenReader();
+    // The schema is read in stream order, before the reader seeks to any block
+    lstate.block_reader->GetBaseSchema();
+    lstate.block_reader_projected = false;
+    InitializeScanData(lstate, &ArrowFileScan::ProduceBlocks,
+                       reinterpret_cast<uintptr_t>(&lstate));
+    lstate.block_scan_id = scan_id;
+  }
+  const auto& claim = claims[lstate.claim_index];
+  lstate.block_reader->SetBlocks(blocks.data() + claim.begin, blocks.data() + claim.end);
+  StartScan(context, lstate);
+}
+
 AsyncResult ArrowFileScan::Scan(ClientContext& context,
                                 GlobalTableFunctionState& global_state,
                                 LocalTableFunctionState& local_state, DataChunk& chunk) {
@@ -84,6 +176,10 @@ AsyncResult ArrowFileScan::Scan(ClientContext& context,
 }
 
 double ArrowFileScan::GetProgressInFile(ClientContext& context) {
+  if (!claims.empty()) {
+    const auto started = MinValue<idx_t>(next_claim.load(), claims.size());
+    return 100.0 * static_cast<double>(started) / static_cast<double>(claims.size());
+  }
   if (!factory->reader) {
     return 100;
   }

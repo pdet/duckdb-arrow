@@ -17,6 +17,8 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 
+class IPCFileStreamReader;
+
 class ArrowStreamFactory {
   ArrowStreamFactory() {};
 };
@@ -31,6 +33,8 @@ class ArrowIPCStreamFactory {
   //! Called once when initializing Scan States
   static unique_ptr<ArrowArrayStreamWrapper> Produce(uintptr_t factory_ptr,
                                                      ArrowStreamParameters& parameters);
+  //! The projected top level columns in output order, empty when nothing is projected
+  static vector<idx_t> ProjectedColumnIndexes(const ArrowStreamParameters& parameters);
 
   //! Get the schema of the arrow object
   void GetFileSchema(ArrowSchemaWrapper& schema) const;
@@ -59,6 +63,8 @@ class FileIPCStreamFactory final : public ArrowIPCStreamFactory {
  public:
   explicit FileIPCStreamFactory(ClientContext& context, string src_string);
   void InitReader() override;
+  //! Opens another reader with its own handle, for a scan that keeps its own position
+  unique_ptr<IPCFileStreamReader> OpenReader() const;
 
   FileSystem& fs;
   string src_string;

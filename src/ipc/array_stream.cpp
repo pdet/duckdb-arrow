@@ -4,13 +4,17 @@ namespace duckdb {
 namespace ext_nanoarrow {
 
 IpcArrayStream::IpcArrayStream(unique_ptr<IPCStreamReader> reader)
-    : reader(std::move(reader)) {}
+    : owned_reader(std::move(reader)), reader(owned_reader.get()) {}
+
+IpcArrayStream::IpcArrayStream(IPCStreamReader& borrowed_reader)
+    : reader(&borrowed_reader) {}
 
 IPCStreamReader& IpcArrayStream::Reader() const { return *reader; }
 
 void IpcArrayStream::ToArrayStream(ArrowArrayStream* stream) {
-  nanoarrow::ArrayStreamFactory<IpcArrayStream>::InitArrayStream(
-      new IpcArrayStream(std::move(reader)), stream);
+  auto private_data = owned_reader ? new IpcArrayStream(std::move(owned_reader))
+                                   : new IpcArrayStream(*reader);
+  nanoarrow::ArrayStreamFactory<IpcArrayStream>::InitArrayStream(private_data, stream);
 }
 
 int IpcArrayStream::GetSchema(ArrowSchema* schema) {

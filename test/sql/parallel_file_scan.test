@@ -1,0 +1,40 @@
+# name: test/sql/parallel_file_scan.test
+# description: Threads claim ranges of footer blocks from one Arrow file
+# group: [sql]
+
+require nanoarrow
+
+# Thirty batches of about 520 KB make fifteen claims of two batches
+statement ok
+COPY (SELECT i, i % 7 AS k, md5(i::VARCHAR) AS s FROM range(300000) t(i)) TO '__TEST_DIR__/claims.arrow' (FORMAT ARROW, ROW_GROUP_SIZE 10000);
+
+statement ok
+SET threads = 4;
+
+# Claims go out in file order, so the table keeps the insertion order
+statement ok
+CREATE TABLE t AS FROM read_arrow('__TEST_DIR__/claims.arrow');
+
+query III
+SELECT count(*), count(*) FILTER (WHERE i != rowid), sum(i) FROM t;
+----
+300000	0	44999850000
+
+query II
+SELECT count(*), sum(i) FROM read_arrow('__TEST_DIR__/claims.arrow') WHERE k = 3;
+----
+42857	6428507143
+
+query I
+SELECT count(*) FROM read_arrow('__TEST_DIR__/claims.arrow');
+----
+300000
+
+# Each file of a glob hands out its own claims
+statement ok
+COPY (FROM read_arrow('__TEST_DIR__/claims.arrow')) TO '__TEST_DIR__/claims_2.arrow' (FORMAT ARROW, ROW_GROUP_SIZE 10000);
+
+query II
+SELECT count(*), max(s) FROM read_arrow('__TEST_DIR__/claims*.arrow');
+----
+600000	fffffe98d0963d27015c198262d97221
