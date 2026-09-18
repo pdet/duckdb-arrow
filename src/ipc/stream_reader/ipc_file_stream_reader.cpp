@@ -65,6 +65,19 @@ bool CollectFieldRanges(const ArrowArrayView& view, const_data_ptr_t base,
   return true;
 }
 
+//! Whether a field or any of its children is dictionary encoded
+bool HasDictionary(const ArrowSchema& schema) {
+  if (schema.dictionary) {
+    return true;
+  }
+  for (int64_t i = 0; i < schema.n_children; i++) {
+    if (HasDictionary(*schema.children[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle,
                                          Allocator& allocator)
@@ -160,13 +173,8 @@ void IPCFileStreamReader::PopulateNames(vector<string>& names) {
   }
 }
 
-double IPCFileStreamReader::GetProgress() {
-  idx_t file_size = file_reader.FileSize();
-  if (file_size == 0) {
-    return 100;
-  }
-  auto current_offset = static_cast<double>(file_reader.CurrentOffset());
-  return (current_offset / static_cast<double>(file_size)) * 100;
+void IPCFileStreamReader::TrackProgress(shared_ptr<atomic<idx_t>> offset) {
+  progress_offset = std::move(offset);
 }
 
 void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder& decoder,
@@ -290,7 +298,11 @@ void IPCFileStreamReader::DecodeBody() {
     message_body =
         make_shared_ptr<AllocatedData>(allocator.Allocate(decoder->body_size_bytes));
 
-    if (CanReadBodyPositionally(body_start, body_size)) {
+    if (skip_bodies && !NeedsEndianSwap() &&
+        CanReadBodyPositionally(body_start, body_size)) {
+      // A swap reads the buffers it rewrites, so only an unswapped body can stay unread
+      file_reader.Seek(body_start + body_size);
+    } else if (CanReadBodyPositionally(body_start, body_size)) {
       if (!TryReadProjectedBody(body_start, body_size)) {
         // One read replaces the 4 KB reads the buffered reader would issue
         file_reader.handle->Read(message_body->get(), body_size, body_start);
@@ -314,6 +326,50 @@ data_ptr_t IPCFileStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
   return ptr;
 }
 
+bool IPCFileStreamReader::CanCountWithoutBodies() {
+  GetBaseSchema();
+  int64_t flat_index = 0;
+  for (int64_t i = 0; i < base_schema->n_children; i++) {
+    // A skipped dictionary batch leaves its fields without the values the view needs
+    if (!HasDictionary(*base_schema->children[i])) {
+      count_field = flat_index;
+      return true;
+    }
+    flat_index += CountFields(base_schema->children[i]);
+  }
+  return false;
+}
+
+bool IPCFileStreamReader::NextBatchLength(idx_t& length) {
+  if (count_field < 0 && !CanCountWithoutBodies()) {
+    throw InternalException("NextBatchLength needs a field without dictionaries");
+  }
+  skip_bodies = true;
+  ArrowIpcMessageType message_type;
+  do {
+    message_type =
+        IPCStreamReader::ReadNextMessage({NANOARROW_IPC_MESSAGE_TYPE_RECORD_BATCH,
+                                          NANOARROW_IPC_MESSAGE_TYPE_DICTIONARY_BATCH});
+    if (message_type == NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED) {
+      return false;
+    }
+  } while (message_type != NANOARROW_IPC_MESSAGE_TYPE_RECORD_BATCH);
+
+  // The view only takes offsets inside the body, so an unread body gives the length
+  const auto body_view = AllocatedDataView(cur_ptr, cur_size);
+  CodecOverride codec_override(*decoder.get());
+  ArrowArrayView* view = nullptr;
+  THROW_NOT_OK(
+      IOException, &error,
+      ArrowIpcDecoderDecodeArrayViewWithDictionaries(
+          decoder.get(), body_view, count_field, dictionaries.get(), &view, &error));
+  if (view->length < 0) {
+    throw IOException("Arrow IPC record batch has a negative length");
+  }
+  length = static_cast<idx_t>(view->length);
+  return true;
+}
+
 void IPCFileStreamReader::SetBlocks(const ArrowIpcFileBlock* begin,
                                     const ArrowIpcFileBlock* end) {
   next_block = begin;
@@ -332,6 +388,9 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
   }
   if (finished) {
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+  }
+  if (progress_offset) {
+    progress_offset->store(file_reader.CurrentOffset());
   }
 
   // If there is no more data to be read, we're done!
