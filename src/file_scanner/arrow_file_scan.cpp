@@ -30,6 +30,9 @@ ArrowFileScan::ArrowFileScan(ClientContext& context, const string& file_name)
       StringsToIdentifiers(names), types);
 
   auto& reader = static_cast<IPCFileStreamReader&>(*factory->reader);
+  // Scans move this reader away, so progress and estimates keep their own copies
+  file_size = reader.FileSize();
+  reader.TrackProgress(progress_offset);
   // Dictionaries must be decoded in stream order, so those files keep one scan
   if (reader.TryReadFooter() && !reader.HasDictionaryBlocks()) {
     PlanClaims(reader.RecordBatchBlocks());
@@ -180,17 +183,14 @@ double ArrowFileScan::GetProgressInFile(ClientContext& context) {
     const auto started = MinValue<idx_t>(next_claim.load(), claims.size());
     return 100.0 * static_cast<double>(started) / static_cast<double>(claims.size());
   }
-  if (!factory->reader) {
+  if (file_size == 0) {
     return 100;
   }
-  auto file_reader = static_cast<IPCFileStreamReader*>(factory->reader.get());
-  return file_reader->GetProgress();
+  const auto offset = MinValue<idx_t>(progress_offset->load(), file_size);
+  return 100.0 * static_cast<double>(offset) / static_cast<double>(file_size);
 }
 
 idx_t ArrowFileScan::EstimatedRowCount() {
-  if (!factory || !factory->reader) {
-    return 0;
-  }
   // Without reading the footer the row count is the file size over the row width
   idx_t row_width = 0;
   for (const auto& type : types) {
@@ -201,7 +201,6 @@ idx_t ArrowFileScan::EstimatedRowCount() {
   if (row_width == 0) {
     return 0;
   }
-  auto file_size = static_cast<IPCFileStreamReader*>(factory->reader.get())->FileSize();
   return file_size / row_width;
 }
 

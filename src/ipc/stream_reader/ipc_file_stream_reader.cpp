@@ -160,13 +160,8 @@ void IPCFileStreamReader::PopulateNames(vector<string>& names) {
   }
 }
 
-double IPCFileStreamReader::GetProgress() {
-  idx_t file_size = file_reader.FileSize();
-  if (file_size == 0) {
-    return 100;
-  }
-  auto current_offset = static_cast<double>(file_reader.CurrentOffset());
-  return (current_offset / static_cast<double>(file_size)) * 100;
+void IPCFileStreamReader::TrackProgress(shared_ptr<atomic<idx_t>> offset) {
+  progress_offset = std::move(offset);
 }
 
 void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder& decoder,
@@ -346,6 +341,9 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
   }
   if (finished) {
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+  }
+  if (progress_offset) {
+    progress_offset->store(file_reader.CurrentOffset());
   }
 
   // If there is no more data to be read, we're done!

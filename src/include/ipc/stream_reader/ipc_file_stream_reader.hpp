@@ -21,7 +21,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
 
   ArrowIpcMessageType ReadNextMessage() override;
 
-  double GetProgress();
+  //! Publishes the offset of each message it reaches, for progress read on another thread
+  void TrackProgress(shared_ptr<atomic<idx_t>> offset);
 
   //! The size of the file being read, for estimating a row count without a footer
   idx_t FileSize() { return file_reader.FileSize(); }
@@ -43,6 +44,7 @@ class IPCFileStreamReader final : public IPCStreamReader {
   shared_ptr<AllocatedData> message_body;
   //! Pipes and character devices must keep the sequential read
   bool regular_file = false;
+  shared_ptr<atomic<idx_t>> progress_offset;
   //! Blocks copied out of the decoder, which frees its own copy on the next message
   vector<ArrowIpcFileBlock> record_batch_blocks;
   bool has_dictionary_blocks = false;
