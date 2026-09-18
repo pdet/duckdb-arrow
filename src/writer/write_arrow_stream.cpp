@@ -31,34 +31,10 @@ struct ArrowWriteBindData : public TableFunctionData {
   bool file_format = true;
   bool size_metadata = false;
   idx_t row_group_size = 122880;
-  static constexpr const idx_t BYTES_PER_ROW = 1024;
-  idx_t row_group_size_bytes{};
 };
 
 struct ArrowWriteGlobalState : public GlobalFunctionData {
   unique_ptr<ArrowStreamWriter> writer;
-};
-
-struct ArrowWriteLocalState : public LocalFunctionData {
-  explicit ArrowWriteLocalState(ClientContext& context, const vector<LogicalType>& types)
-      : buffer(context, types, ColumnDataAllocatorType::HYBRID) {
-    buffer.InitializeAppend(append_state);
-  }
-
-  // Encodes the buffered rows on this thread and appends them to the shared file
-  void Flush(ArrowStreamWriter& writer) {
-    if (!serializer) {
-      serializer = writer.NewSerializer();
-    }
-    if (serializer->Serialize(buffer) > 0) {
-      writer.Flush(*serializer);
-    }
-    buffer.Reset();
-  }
-
-  ColumnDataCollection buffer;
-  ColumnDataAppendState append_state;
-  unique_ptr<ColumnDataCollectionSerializer> serializer;
 };
 
 // Reads the entries of a STRUCT option value as key/value pairs, blobs as raw bytes
@@ -173,9 +149,6 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
     }
   }
 
-  bind_data->row_group_size_bytes =
-      bind_data->row_group_size * ArrowWriteBindData::BYTES_PER_ROW;
-
   bind_data->sql_types = sql_types;
 
   return std::move(bind_data);
@@ -196,40 +169,16 @@ unique_ptr<GlobalFunctionData> ArrowWriteInitializeGlobal(ClientContext& context
   return std::move(global_state);
 }
 
-void ArrowWriteSink(ExecutionContext& context, FunctionData& bind_data_p,
-                    GlobalFunctionData& gstate, LocalFunctionData& lstate,
-                    DataChunk& input) {
-  auto& bind_data = bind_data_p.Cast<ArrowWriteBindData>();
-  auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
-  auto& local_state = lstate.Cast<ArrowWriteLocalState>();
-
-  local_state.buffer.Append(local_state.append_state, input);
-
-  if (local_state.buffer.Count() >= bind_data.row_group_size ||
-      local_state.buffer.SizeInBytes() >= bind_data.row_group_size_bytes) {
-    local_state.append_state.current_chunk_state.handles.clear();
-    local_state.Flush(*global_state.writer);
-    local_state.buffer.InitializeAppend(local_state.append_state);
-  }
-}
-
-void ArrowWriteCombine(ExecutionContext& context, FunctionData& bind_data,
-                       GlobalFunctionData& gstate, LocalFunctionData& lstate) {
-  auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
-  auto& local_state = lstate.Cast<ArrowWriteLocalState>();
-  local_state.Flush(*global_state.writer);
-}
-
 void ArrowWriteFinalize(ClientContext& context, FunctionData& bind_data,
                         GlobalFunctionData& gstate) {
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
   global_state.writer->Finalize();
 }
 
+// Batch copies still ask for a local state, which prepare_batch and flush_batch never use
 unique_ptr<LocalFunctionData> ArrowWriteInitializeLocal(ExecutionContext& context,
                                                         FunctionData& bind_data_p) {
-  auto& bind_data = bind_data_p.Cast<ArrowWriteBindData>();
-  return make_uniq<ArrowWriteLocalState>(context.client, bind_data.sql_types);
+  return make_uniq<LocalFunctionData>();
 }
 
 CopyFunctionExecutionMode ArrowWriteExecutionMode(bool preserve_insertion_order,
@@ -289,8 +238,6 @@ void RegisterArrowStreamCopyFunction(ExtensionLoader& loader) {
   function.copy_to_bind = ArrowWriteBind;
   function.copy_to_initialize_global = ArrowWriteInitializeGlobal;
   function.copy_to_initialize_local = ArrowWriteInitializeLocal;
-  function.copy_to_sink = ArrowWriteSink;
-  function.copy_to_combine = ArrowWriteCombine;
   function.copy_to_finalize = ArrowWriteFinalize;
   function.execution_mode = ArrowWriteExecutionMode;
   function.copy_from_bind = MultiFileFunction<ArrowMultiFileInfo>::MultiFileBindCopy;
