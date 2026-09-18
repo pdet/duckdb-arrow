@@ -6,6 +6,7 @@ benchmark/micro/read_lz4.benchmark
 benchmark/micro/read_many_files.benchmark
 benchmark/micro/read_projection.benchmark
 benchmark/micro/read_small_batches.benchmark
+benchmark/micro/read_tiny_batches.benchmark
 benchmark/micro/read_zstd.benchmark
 benchmark/micro/write.benchmark
 benchmark/micro/write_zstd.benchmark
