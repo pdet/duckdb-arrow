@@ -23,6 +23,9 @@ class IPCFileStreamReader final : public IPCStreamReader {
 
   double GetProgress();
 
+  //! The size of the file being read, for estimating a row count without a footer
+  idx_t FileSize() { return file_reader.FileSize(); }
+
  private:
   BufferedFileReader file_reader;
   AllocatedData message_header;
