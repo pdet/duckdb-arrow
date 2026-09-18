@@ -20,6 +20,11 @@ COPY (SELECT i AS c0, i AS c1, i AS c2, i AS c3, i AS c4, i AS c5, i AS c6, i AS
       FROM range(20000) t(i))
 TO '__TEST_DIR__/io_all.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 20000);
 
+statement ok
+COPY (SELECT i AS c0, i AS c1, i AS c2, i AS c3, i AS c4, i AS c5, i AS c6, i AS c7
+      FROM range(20000) t(i))
+TO '__TEST_DIR__/io_count.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 20000);
+
 # Logging starts after the writes so that only the reads below are counted
 statement ok
 CALL enable_logging('FileSystem');
@@ -41,5 +46,17 @@ SELECT sum(c0 + c1 + c2 + c3 + c4 + c5 + c6 + c7) FROM read_arrow('__TEST_DIR__/
 query I
 SELECT sum(bytes) > 1000000 FROM duckdb_logs_parsed('FileSystem')
 WHERE op = 'READ' AND path LIKE '%io_all.arrows%';
+----
+true
+
+query I
+SELECT count(*) FROM read_arrow('__TEST_DIR__/io_count.arrows');
+----
+20000
+
+# Counting reads the message headers only, where one column alone is 160 KB
+query I
+SELECT sum(bytes) < 40000 FROM duckdb_logs_parsed('FileSystem')
+WHERE op = 'READ' AND path LIKE '%io_count.arrows%';
 ----
 true

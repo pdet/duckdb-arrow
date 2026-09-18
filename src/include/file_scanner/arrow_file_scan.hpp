@@ -71,6 +71,11 @@ class ArrowFileScan : public BaseFileReader {
   const idx_t scan_id;
   vector<ArrowIpcFileBlock> blocks;
   vector<BlockRange> claims;
+  //! Whether a scan that reads no file column can count rows from the headers
+  bool count_without_bodies = false;
+  idx_t file_size = 0;
+  //! Where the sequential scan has got to, written by whichever reader it moved into
+  shared_ptr<atomic<idx_t>> progress_offset = make_shared_ptr<atomic<idx_t>>(0);
   //! Handed out under the multi file lock, read without it for progress
   atomic<idx_t> next_claim{0};
 };
