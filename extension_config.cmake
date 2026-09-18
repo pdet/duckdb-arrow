@@ -8,5 +8,6 @@ duckdb_extension_load(nanoarrow
                       LINKED_LIBS
                       "../../_deps/nanoarrow-build/lib*.a")
 
-# Any extra extensions that should be built
-# e.g.: duckdb_extension_load(json)
+# The TPC tests generate their data and check their answers with these
+duckdb_extension_load(tpch)
+duckdb_extension_load(tpcds)

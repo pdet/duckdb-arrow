@@ -1,0 +1,45 @@
+# name: test/sql/tpcds_sf1.test_slow
+# description: TPC-DS at scale factor 1 over Arrow IPC files
+# group: [sql]
+
+require nanoarrow
+
+require tpcds
+
+# The answers come from postgres, which sorts NULLs last
+statement ok
+PRAGMA default_null_order='NULLS LAST'
+
+statement ok
+CREATE SCHEMA tpcds;
+
+statement ok
+CALL dsdgen(sf=1, schema='tpcds');
+
+foreach tbl call_center catalog_page catalog_returns catalog_sales customer customer_demographics customer_address date_dim household_demographics inventory income_band item promotion reason ship_mode store store_returns store_sales time_dim warehouse web_page web_returns web_sales web_site
+
+statement ok
+COPY tpcds.{tbl} TO '{TEST_DIR}/{tbl}.arrow' (FORMAT ARROW);
+
+statement ok
+CREATE VIEW {tbl} AS FROM read_arrow('{TEST_DIR}/{tbl}.arrow');
+
+endloop
+
+loop i 1 9
+
+query I
+PRAGMA tpcds({i})
+----
+<FILE>:duckdb/extension/tpcds/dsdgen/answers/sf1/0{i}.csv
+
+endloop
+
+loop i 10 100
+
+query I
+PRAGMA tpcds({i})
+----
+<FILE>:duckdb/extension/tpcds/dsdgen/answers/sf1/{i}.csv
+
+endloop
