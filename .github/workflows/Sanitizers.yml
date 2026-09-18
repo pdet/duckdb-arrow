@@ -1,0 +1,73 @@
+name: Sanitizers
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sanitizer:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # FORCE_ASSERT turns on the address and undefined behavior sanitizers
+          - name: Address sanitizer
+            target: relassert
+            threadsan: 0
+          - name: Thread sanitizer
+            target: reldebug
+            threadsan: 1
+    env:
+      GEN: ninja
+      THREADSAN: ${{ matrix.threadsan }}
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+      LSAN_OPTIONS: suppressions=${{ github.workspace }}/duckdb/.sanitizer-leak-suppressions.txt
+      TSAN_OPTIONS: suppressions=${{ github.workspace }}/duckdb/.sanitizer-thread-suppressions.txt
+    steps:
+      - name: Install Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      # The thread sanitizer runtime cannot map memory with the default 32 bits of ASLR entropy
+      - name: Lower ASLR entropy
+        if: ${{ matrix.threadsan == 1 }}
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
+        with:
+          vcpkgGitCommitId: 84bab45d415d22042bd0b9081aea57f362da3f35
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: sanitizer-${{ matrix.target }}-${{ matrix.threadsan }}
+          max-size: 2G
+
+      - name: Build
+        run: make ${{ matrix.target }}
+
+      - name: Test
+        run: build/${{ matrix.target }}/test/unittest "test/*"
