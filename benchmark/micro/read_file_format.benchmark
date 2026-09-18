@@ -1,0 +1,19 @@
+# name: benchmark/micro/read_file_format.benchmark
+# description: Scan every column of one file with a footer, which threads read in parallel
+# group: [micro]
+
+name Read file format
+group micro
+
+require nanoarrow
+
+cache_file nanoarrow_file_format.arrow
+
+load
+COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(4000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_file_format.arrow' (FORMAT ARROW);
+
+run
+SELECT sum(id), sum(k), sum(v), max(d), max(s) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_file_format.arrow');
+
+result IIIII
+7999998000000	1998000000	200003890152	571428.4285714285	item_9999

@@ -1,3 +1,4 @@
+benchmark/micro/read_file_format.benchmark
 benchmark/micro/read_join.benchmark
 benchmark/micro/read_large_batches.benchmark
 benchmark/micro/read_lz4.benchmark
