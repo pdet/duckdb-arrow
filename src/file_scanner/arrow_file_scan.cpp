@@ -52,7 +52,10 @@ void ArrowFileScan::PrepareScan(ClientContext& context,
   auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
   lstate.local_arrow_function_data = make_uniq<ArrowScanFunctionData>(
       &FileIPCStreamFactory::Produce, reinterpret_cast<uintptr_t>(factory.get()));
-  lstate.local_arrow_function_data->schema_root = schema_root;
+  // A memberwise copy shares the release pointer, so a second scan would free it twice
+  NANOARROW_THROW_NOT_OK(
+      ArrowSchemaDeepCopy(&schema_root.arrow_schema,
+                          &lstate.local_arrow_function_data->schema_root.arrow_schema));
   lstate.local_arrow_function_data->arrow_table = arrow_table;
   // Global column indexes and projection ids do not address this file's schema
   auto local_column_indexes = column_indexes;

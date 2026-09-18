@@ -26,12 +26,25 @@ class IPCFileStreamReader final : public IPCStreamReader {
   //! The size of the file being read, for estimating a row count without a footer
   idx_t FileSize() { return file_reader.FileSize(); }
 
+  //! Reads the footer once, false when the file has none and the scan stays sequential
+  bool TryReadFooter();
+  //! The record batch blocks named by the footer, empty when there is no footer
+  const vector<ArrowIpcFileBlock>& RecordBatchBlocks() const {
+    return record_batch_blocks;
+  }
+  //! Dictionaries are decoded in stream order, so those files keep one reader
+  bool HasDictionaryBlocks() const { return has_dictionary_blocks; }
+
  private:
   BufferedFileReader file_reader;
   AllocatedData message_header;
   shared_ptr<AllocatedData> message_body;
   //! Pipes and character devices must keep the sequential read
   bool regular_file = false;
+  //! Blocks copied out of the decoder, which frees its own copy on the next message
+  vector<ArrowIpcFileBlock> record_batch_blocks;
+  bool has_dictionary_blocks = false;
+  bool footer_read = false;
 
   void EnsureInputStreamAligned();
   //! Whether the body can be read with one positional read instead of the buffered reader

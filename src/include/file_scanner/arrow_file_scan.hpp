@@ -20,10 +20,8 @@ namespace ext_nanoarrow {
 class ArrowFileScan : public BaseFileReader {
  public:
   explicit ArrowFileScan(ClientContext& context, const string& file_name);
-  ~ArrowFileScan() override {
-    // Release is done by the arrow scanner
-    schema_root.arrow_schema.release = nullptr;
-  };
+  //! Each scan takes a deep copy of the schema, so this one releases its own
+  ~ArrowFileScan() override = default;
 
   //! Factory of this stream
   unique_ptr<FileIPCStreamFactory> factory;
