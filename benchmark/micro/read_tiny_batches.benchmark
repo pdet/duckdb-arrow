@@ -1,0 +1,19 @@
+# name: benchmark/micro/read_tiny_batches.benchmark
+# description: Scan one file of batches whose 2 KB bodies fit in the buffered reader
+# group: [micro]
+
+name Read tiny batches
+group micro
+
+require nanoarrow
+
+cache_file nanoarrow_tiny_batches.arrows
+
+load
+COPY (SELECT (i % 100)::TINYINT AS i FROM range(20000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_tiny_batches.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 2048);
+
+run
+SELECT sum(i) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_tiny_batches.arrows');
+
+result I
+990000000
