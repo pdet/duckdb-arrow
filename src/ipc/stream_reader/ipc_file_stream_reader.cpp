@@ -78,6 +78,31 @@ bool HasDictionary(const ArrowSchema& schema) {
   return false;
 }
 
+//! Copies blocks out of the decoder, which frees its own copy on the next message
+bool CopyFooterBlocks(const ArrowBuffer& source, idx_t file_size,
+                      vector<ArrowIpcFileBlock>& blocks) {
+  const auto count = static_cast<idx_t>(source.size_bytes) / sizeof(ArrowIpcFileBlock);
+  blocks.resize(count);
+  if (count > 0) {
+    std::memcpy(blocks.data(), source.data, count * sizeof(ArrowIpcFileBlock));
+  }
+  // A block naming bytes outside the file would send a positional read anywhere
+  for (const auto& block : blocks) {
+    // Messages start aligned after the leading magic, and a scan seeks straight to them
+    if (block.offset < static_cast<int64_t>(kArrowIPCFileHeaderSize) ||
+        block.offset % 8 != 0 || block.metadata_length <= 0 || block.body_length < 0) {
+      return false;
+    }
+    const auto end = static_cast<idx_t>(block.offset) +
+                     static_cast<idx_t>(block.metadata_length) +
+                     static_cast<idx_t>(block.body_length);
+    if (end > file_size) {
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle,
                                          Allocator& allocator)
@@ -134,29 +159,11 @@ bool IPCFileStreamReader::TryReadFooter() {
   }
 
   const auto& footer = *scratch->footer;
-  has_dictionary_blocks = footer.dictionary_blocks.size_bytes > 0;
-  const auto count = static_cast<idx_t>(footer.record_batch_blocks.size_bytes) /
-                     sizeof(ArrowIpcFileBlock);
-  record_batch_blocks.resize(count);
-  if (count > 0) {
-    std::memcpy(record_batch_blocks.data(), footer.record_batch_blocks.data,
-                count * sizeof(ArrowIpcFileBlock));
-  }
-  // A block naming bytes outside the file would send a positional read anywhere
-  for (const auto& block : record_batch_blocks) {
-    // Messages start aligned after the leading magic, and a scan seeks straight to them
-    if (block.offset < static_cast<int64_t>(kArrowIPCFileHeaderSize) ||
-        block.offset % 8 != 0 || block.metadata_length <= 0 || block.body_length < 0) {
-      record_batch_blocks.clear();
-      return false;
-    }
-    const auto end = static_cast<idx_t>(block.offset) +
-                     static_cast<idx_t>(block.metadata_length) +
-                     static_cast<idx_t>(block.body_length);
-    if (end > file_size) {
-      record_batch_blocks.clear();
-      return false;
-    }
+  if (!CopyFooterBlocks(footer.record_batch_blocks, file_size, record_batch_blocks) ||
+      !CopyFooterBlocks(footer.dictionary_blocks, file_size, dictionary_blocks)) {
+    record_batch_blocks.clear();
+    dictionary_blocks.clear();
+    return false;
   }
   return !record_batch_blocks.empty();
 }
@@ -382,6 +389,18 @@ bool IPCFileStreamReader::NextBatchLength(idx_t& length) {
   }
   length = static_cast<idx_t>(view->length);
   return true;
+}
+
+void IPCFileStreamReader::LoadDictionaries(const vector<ArrowIpcFileBlock>& blocks) {
+  if (blocks.empty()) {
+    return;
+  }
+  SetBlocks(blocks.data(), blocks.data() + blocks.size());
+  // Only dictionary blocks are named, so the read decodes them all and reaches the end
+  nanoarrow::UniqueArray none;
+  if (GetNextBatch(none.get())) {
+    throw IOException("Arrow IPC footer names a record batch as a dictionary block");
+  }
 }
 
 void IPCFileStreamReader::SetBlocks(const ArrowIpcFileBlock* begin,

@@ -70,6 +70,7 @@ class ArrowFileScan : public BaseFileReader {
   //! Tells readers apart in reused scan states, where an address could repeat
   const idx_t scan_id;
   vector<ArrowIpcFileBlock> blocks;
+  vector<ArrowIpcFileBlock> dictionary_blocks;
   vector<BlockRange> claims;
   //! Whether a scan that reads no file column can count rows from the headers
   bool count_without_bodies = false;

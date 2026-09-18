@@ -34,9 +34,9 @@ ArrowFileScan::ArrowFileScan(ClientContext& context, const string& file_name)
   file_size = reader.FileSize();
   reader.TrackProgress(progress_offset);
   count_without_bodies = reader.CanCountWithoutBodies();
-  // Dictionaries must be decoded in stream order, so those files keep one scan
-  if (reader.TryReadFooter() && !reader.HasDictionaryBlocks()) {
+  if (reader.TryReadFooter()) {
     PlanClaims(reader.RecordBatchBlocks());
+    dictionary_blocks = reader.DictionaryBlocks();
   }
 }
 
@@ -172,6 +172,10 @@ void ArrowFileScan::PrepareScan(ClientContext& context,
     lstate.block_reader = factory->OpenReader();
     // The schema is read in stream order, before the reader seeks to any block
     lstate.block_reader->GetBaseSchema();
+    // Each reader decodes the dictionaries once, since a file cannot replace them
+    if (!count_only) {
+      lstate.block_reader->LoadDictionaries(dictionary_blocks);
+    }
     lstate.block_reader_projected = false;
     InitializeScanData(lstate, &ArrowFileScan::ProduceBlocks,
                        reinterpret_cast<uintptr_t>(&lstate));
