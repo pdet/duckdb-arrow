@@ -160,6 +160,11 @@ idx_t ColumnDataCollectionSerializer::Serialize(ArrowAppender& appender) {
 
   THROW_NOT_OK(duckdb::InternalException, &error,
                ArrowArrayViewSetArray(chunk_view.get(), array.get(), &error));
+  if (compression.type == NANOARROW_IPC_COMPRESSION_TYPE_NONE) {
+    // One exact allocation, where growing buffer by buffer doubles and keeps the peaks
+    NANOARROW_THROW_NOT_OK(
+        ArrowBufferReserve(body.get(), PaddedBodySize(*chunk_view.get())));
+  }
   THROW_NOT_OK(InternalException, &error,
                ArrowIpcEncoderEncodeSimpleRecordBatch(encoder.get(), chunk_view.get(),
                                                       body.get(), &error));
