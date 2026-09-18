@@ -37,6 +37,10 @@ class IPCFileStreamReader final : public IPCStreamReader {
   bool HasDictionaryBlocks() const { return has_dictionary_blocks; }
   //! Reads only the record batches of these footer blocks, then reports the end
   void SetBlocks(const ArrowIpcFileBlock* begin, const ArrowIpcFileBlock* end);
+  //! Whether batch lengths can be read from the headers alone
+  bool CanCountWithoutBodies();
+  //! Reads the length of the next record batch and skips its body, false at the end
+  bool NextBatchLength(idx_t& length);
 
  private:
   BufferedFileReader file_reader;
@@ -52,6 +56,10 @@ class IPCFileStreamReader final : public IPCStreamReader {
   //! The claimed blocks still to read, both null outside a block scan
   const ArrowIpcFileBlock* next_block = nullptr;
   const ArrowIpcFileBlock* end_block = nullptr;
+  //! Counting reads headers only, so regular files seek past the bodies
+  bool skip_bodies = false;
+  //! The flat index of the field whose view gives the batch length, negative when none
+  int64_t count_field = -1;
 
   void EnsureInputStreamAligned();
   //! Whether the body can be read with one positional read instead of the buffered reader
