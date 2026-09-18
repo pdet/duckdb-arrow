@@ -10,6 +10,7 @@
 
 #include "duckdb/common/multi_file/multi_file_function.hpp"
 #include "duckdb/function/table/arrow.hpp"
+#include "ipc/stream_reader/ipc_file_stream_reader.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
@@ -23,6 +24,15 @@ class ArrowFileScan;
 //! This is done by calling the Arrow Scan directly on one file.
 struct ArrowFileLocalState : public LocalTableFunctionState {
  public:
+  //! Reads claimed blocks, declared first so the scan that borrows it is destroyed first
+  unique_ptr<IPCFileStreamReader> block_reader;
+  //! The file scan that block_reader and the scan data belong to, zero for none
+  idx_t block_scan_id = 0;
+  //! Whether the projection was already pushed into block_reader
+  bool block_reader_projected = false;
+  //! The claim that TryInitializeScan handed to this state
+  idx_t claim_index = 0;
+
   //! Factory Pointer
   shared_ptr<ArrowFileScan> file_scan;
 

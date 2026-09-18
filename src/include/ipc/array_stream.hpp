@@ -15,6 +15,8 @@ namespace ext_nanoarrow {
 class IpcArrayStream {
  public:
   explicit IpcArrayStream(unique_ptr<IPCStreamReader> reader);
+  //! Streams from a reader that the caller keeps alive for longer than the stream
+  explicit IpcArrayStream(IPCStreamReader& borrowed_reader);
 
   IPCStreamReader& Reader() const;
 
@@ -48,7 +50,8 @@ class IpcArrayStream {
   }
 
  private:
-  unique_ptr<IPCStreamReader> reader;
+  unique_ptr<IPCStreamReader> owned_reader;
+  IPCStreamReader* reader;
   string last_msg;
 };
 }  // namespace ext_nanoarrow

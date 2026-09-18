@@ -131,7 +131,9 @@ bool IPCFileStreamReader::TryReadFooter() {
   }
   // A block naming bytes outside the file would send a positional read anywhere
   for (const auto& block : record_batch_blocks) {
-    if (block.offset < 0 || block.metadata_length <= 0 || block.body_length < 0) {
+    // Messages start aligned after the leading magic, and a scan seeks straight to them
+    if (block.offset < static_cast<int64_t>(kArrowIPCFileHeaderSize) ||
+        block.offset % 8 != 0 || block.metadata_length <= 0 || block.body_length < 0) {
       record_batch_blocks.clear();
       return false;
     }
@@ -312,7 +314,22 @@ data_ptr_t IPCFileStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
   return ptr;
 }
 
+void IPCFileStreamReader::SetBlocks(const ArrowIpcFileBlock* begin,
+                                    const ArrowIpcFileBlock* end) {
+  next_block = begin;
+  end_block = end;
+  finished = false;
+}
+
 ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
+  if (next_block) {
+    if (next_block == end_block) {
+      return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+    }
+    // TryReadFooter checked that the block lies inside the file on an aligned offset
+    file_reader.Seek(static_cast<idx_t>(next_block->offset));
+    next_block++;
+  }
   if (finished) {
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
   }

@@ -34,6 +34,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
   }
   //! Dictionaries are decoded in stream order, so those files keep one reader
   bool HasDictionaryBlocks() const { return has_dictionary_blocks; }
+  //! Reads only the record batches of these footer blocks, then reports the end
+  void SetBlocks(const ArrowIpcFileBlock* begin, const ArrowIpcFileBlock* end);
 
  private:
   BufferedFileReader file_reader;
@@ -45,6 +47,9 @@ class IPCFileStreamReader final : public IPCStreamReader {
   vector<ArrowIpcFileBlock> record_batch_blocks;
   bool has_dictionary_blocks = false;
   bool footer_read = false;
+  //! The claimed blocks still to read, both null outside a block scan
+  const ArrowIpcFileBlock* next_block = nullptr;
+  const ArrowIpcFileBlock* end_block = nullptr;
 
   void EnsureInputStreamAligned();
   //! Whether the body can be read with one positional read instead of the buffered reader
