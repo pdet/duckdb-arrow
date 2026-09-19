@@ -29,6 +29,12 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: true
     steps:
+      # Each binary gets its own copy of the benchmark data, about 10 GB, next to both builds
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
       - name: Install Ninja
         run: |
           sudo apt-get update

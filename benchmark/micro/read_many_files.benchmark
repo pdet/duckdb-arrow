@@ -8,13 +8,13 @@ group micro
 require nanoarrow
 
 # One partition file stands in for the whole directory
-cache_file nanoarrow_many_files_8m/p=63/data_0.arrows
+cache_file nanoarrow_many_files_40m/p=63/data_0.arrows
 
 load
-COPY (SELECT *, id % 64 AS p FROM (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(8000000) t(i))) TO '${BENCHMARK_DIR}/nanoarrow_many_files_8m' (FORMAT ARROWS, PARTITION_BY (p));
+COPY (SELECT *, id % 64 AS p FROM (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(40000000) t(i))) TO '${BENCHMARK_DIR}/nanoarrow_many_files_40m' (FORMAT ARROWS, PARTITION_BY (p));
 
 run
-SELECT sum(id), sum(k), sum(v), max(d), max(s) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_many_files_8m/*/*.arrows');
+SELECT sum(id), sum(k), sum(v), max(d), max(s) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_many_files_40m/*/*.arrows');
 
 result IIIII
-31999996000000	3996000000	400008010490	1142857.0	item_9999
+799999980000000	19980000000	2000040059614	5714285.571428572	item_9999

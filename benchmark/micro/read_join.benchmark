@@ -8,14 +8,14 @@ group micro
 require nanoarrow
 
 # The small file is written last, so it marks both files as cached
-cache_file nanoarrow_join_small_10m.arrows
+cache_file nanoarrow_join_small_50m.arrows
 
 load
-COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v FROM range(10000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_join_large_10m.arrows' (FORMAT ARROWS);
-COPY (SELECT i AS k, 'name_' || i AS name FROM range(1000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_join_small_10m.arrows' (FORMAT ARROWS);
+COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v FROM range(50000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_join_large_50m.arrows' (FORMAT ARROWS);
+COPY (SELECT i AS k, 'name_' || i AS name FROM range(1000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_join_small_50m.arrows' (FORMAT ARROWS);
 
 run
-SELECT count(*), sum(l.v), max(s.name) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_join_small_10m.arrows') s JOIN read_arrow('${BENCHMARK_DIR}/nanoarrow_join_large_10m.arrows') l ON l.k = s.k;
+SELECT count(*), sum(l.v), max(s.name) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_join_small_50m.arrows') s JOIN read_arrow('${BENCHMARK_DIR}/nanoarrow_join_large_50m.arrows') l ON l.k = s.k;
 
 result III
-10000000	500009931972	name_999
+50000000	2500049946062	name_999

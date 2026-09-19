@@ -7,13 +7,13 @@ group micro
 
 require nanoarrow
 
-cache_file nanoarrow_file_format_8m.arrow
+cache_file nanoarrow_file_format_40m.arrow
 
 load
-COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(8000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_file_format_8m.arrow' (FORMAT ARROW);
+COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(40000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_file_format_40m.arrow' (FORMAT ARROW);
 
 run
-SELECT sum(id), sum(k), sum(v), max(d), max(s) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_file_format_8m.arrow');
+SELECT sum(id), sum(k), sum(v), max(d), max(s) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_file_format_40m.arrow');
 
 result IIIII
-31999996000000	3996000000	400008010490	1142857.0	item_9999
+799999980000000	19980000000	2000040059614	5714285.571428572	item_9999

@@ -7,13 +7,13 @@ group micro
 
 require nanoarrow
 
-cache_file nanoarrow_large_batches.arrows
+cache_file nanoarrow_large_batches_20m.arrows
 
 load
-COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(4000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_large_batches.arrows' (FORMAT ARROWS);
+COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(20000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_large_batches_20m.arrows' (FORMAT ARROWS);
 
 run
-SELECT sum(id), sum(k), sum(v), max(d), max(s) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_large_batches.arrows');
+SELECT sum(id), sum(k), sum(v), max(d), max(s) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_large_batches_20m.arrows');
 
 result IIIII
-7999998000000	1998000000	200003890152	571428.4285714285	item_9999
+199999990000000	9990000000	1000019852563	2857142.714285714	item_9999

@@ -7,14 +7,14 @@ group micro
 
 require nanoarrow
 
-cache_file nanoarrow_small_batches.arrows
+cache_file nanoarrow_small_batches_150m.arrows
 
 # One integer column in batches of one vector keeps every body at 8 KB
 load
-COPY (SELECT i::INTEGER AS i FROM range(30000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_small_batches.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 2048);
+COPY (SELECT i::INTEGER AS i FROM range(150000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_small_batches_150m.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 2048);
 
 run
-SELECT sum(i) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_small_batches.arrows');
+SELECT sum(i) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_small_batches_150m.arrows');
 
 result I
-449999985000000
+11249999925000000
