@@ -22,6 +22,10 @@ COPY (SELECT i AS id, i % 7 AS k FROM range(200000) t(i))
 TO '{DATA_PATH}/many' (FORMAT ARROW, ROW_GROUP_SIZE 20480, ROW_GROUPS_PER_FILE 2);
 
 statement ok
+COPY (SELECT i AS id, i % 7 AS k FROM range(2000000) t(i))
+TO '{DATA_PATH}/narrow.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 20480);
+
+statement ok
 SET logging_storage = 'memory';
 
 statement ok
@@ -86,13 +90,27 @@ true
 statement ok
 CALL truncate_duckdb_logs();
 
-# A stream has no footer, so counting it never reads the end of the file for one
+# A stream has no footer, so counting it reads ahead from its start and never its end
 query I
 SELECT count(*) FROM read_arrow('{DATA_PATH}/wide.arrows');
 ----
 2000000
 
 query I
-SELECT count(*) <= 3 FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
+SELECT count(*) <= 4 FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
+----
+true
+
+statement ok
+CALL truncate_duckdb_logs();
+
+# A stream of about a hundred batches took two requests per batch, the read ahead takes few
+query I
+SELECT sum(k) FROM read_arrow('{DATA_PATH}/narrow.arrows');
+----
+5999995
+
+query I
+SELECT count(*) <= 9 FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
 ----
 true

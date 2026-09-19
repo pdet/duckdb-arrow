@@ -79,6 +79,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
   bool remote = false;
   //! Runs the reads of a remote file at the same time, none for a local one
   optional_ptr<TaskScheduler> scheduler;
+  //! Fetches a remote stream ahead of the sequential reads, made on the first one
+  unique_ptr<RemoteReadAhead> read_ahead;
   //! The claimed blocks in memory, empty until FetchBlocks runs
   vector<FetchedBlock> fetched_blocks;
   idx_t fetched_index = 0;
@@ -129,6 +131,10 @@ class IPCFileStreamReader final : public IPCStreamReader {
                                          const FetchedBlock& fetched);
 
   data_ptr_t ReadData(data_ptr_t ptr, idx_t size) override;
+  //! Reads the stream in order, through the read ahead for remote files
+  void SequentialRead(data_ptr_t target, idx_t size);
+  idx_t SequentialOffset();
+  void SequentialSeek(idx_t location);
   bool DecodeHeader(idx_t message_header_size) override;
   void DecodeBody() override;
   nanoarrow::UniqueBuffer GetUniqueBuffer() override;
