@@ -68,6 +68,7 @@ void ArrowStreamWriter::InitSchema(const ArrowSchema& schema_p,
 
 ArrowStreamWriter::~ArrowStreamWriter() {
   // Finalize closes the handle, so an open one here means the output is incomplete
+  // The async writer aborts its own unfinished output when it is destroyed
   if (!writer || !writer->handle) {
     return;
   }
@@ -83,24 +84,30 @@ void ArrowStreamWriter::InitOutputFile(FileSystem& fs, const string& file_path) 
   if (!fs.FileExists(file_path) && !fs.IsPipe(file_path)) {
     flags |= FileFlags::FILE_FLAGS_EXCLUSIVE_CREATE;
   }
-  writer = make_uniq<BufferedFileWriter>(fs, file_path.c_str(), flags);
-  // WriteFooter patches offset 8 of a new regular file, fsspec needs OnDiskFile first
-  if (size_metadata && (!writer->handle->OnDiskFile() ||
-                        writer->handle->GetType() != FileType::FILE_TYPE_REGULAR ||
-                        writer->handle->GetFileSize() != 0)) {
-    throw IOException(
-        "SIZE_METADATA requires a seekable local output to update the schema");
+  // Remote outputs upload parts at once through the async writer, local ones buffer
+  if (size_metadata || !FileSystem::IsRemoteFile(file_path)) {
+    writer = make_uniq<BufferedFileWriter>(fs, file_path.c_str(), flags);
+    // WriteFooter patches offset 8 of a new regular file, fsspec needs OnDiskFile first
+    if (size_metadata && (!writer->handle->OnDiskFile() ||
+                          writer->handle->GetType() != FileType::FILE_TYPE_REGULAR ||
+                          writer->handle->GetFileSize() != 0)) {
+      throw IOException(
+          "SIZE_METADATA requires a seekable local output to update the schema");
+    }
+  } else {
+    async_writer =
+        make_uniq<AsyncFileWriter>(*options.client_context, fs, file_path, flags);
   }
   if (file_format) {
-    writer->WriteData(const_data_ptr_cast(kArrowIPCFileMagic), kArrowIPCFileHeaderSize);
+    WriteBytes(const_data_ptr_cast(kArrowIPCFileMagic), kArrowIPCFileHeaderSize);
   }
 }
 
 void ArrowStreamWriter::WriteSchema() {
   auto serializer = NewSerializer();
   serializer->SerializeSchema(schema.get());
-  schema_message_size = serializer->Flush(*writer).metadata_length;
-  file_size = writer->GetTotalWritten();
+  schema_message_size = WriteMessage(*serializer).metadata_length;
+  file_size = TotalWritten();
 }
 
 unique_ptr<ColumnDataCollectionSerializer> ArrowStreamWriter::NewSerializer() const {
@@ -112,7 +119,7 @@ unique_ptr<ColumnDataCollectionSerializer> ArrowStreamWriter::NewSerializer() co
 
 void ArrowStreamWriter::Flush(ColumnDataCollectionSerializer& serializer) {
   lock_guard<mutex> guard(lock);
-  auto block = serializer.Flush(*writer);
+  auto block = WriteMessage(serializer);
   if (file_format) {
     blocks.push_back(block);
   }
@@ -121,18 +128,39 @@ void ArrowStreamWriter::Flush(ColumnDataCollectionSerializer& serializer) {
     total_uncompressed_size += serializer.UncompressedBodySize();
   }
   ++row_group_count;
-  file_size = writer->GetTotalWritten();
+  file_size = TotalWritten();
 }
 
 void ArrowStreamWriter::Finalize() {
   uint8_t end_of_stream[] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00};
   lock_guard<mutex> guard(lock);
-  writer->WriteData(end_of_stream, sizeof(end_of_stream));
+  WriteBytes(end_of_stream, sizeof(end_of_stream));
   if (file_format) {
     WriteFooter();
   }
-  file_size = writer->GetTotalWritten();
-  writer->Close();
+  file_size = TotalWritten();
+  if (async_writer) {
+    async_writer->Close();
+  } else {
+    writer->Close();
+  }
+}
+
+void ArrowStreamWriter::WriteBytes(const_data_ptr_t data, idx_t size) {
+  if (async_writer) {
+    async_writer->WriteData(data, size);
+  } else {
+    writer->WriteData(data, size);
+  }
+}
+
+ArrowIpcFileBlock ArrowStreamWriter::WriteMessage(
+    ColumnDataCollectionSerializer& serializer) {
+  return async_writer ? serializer.Flush(*async_writer) : serializer.Flush(*writer);
+}
+
+idx_t ArrowStreamWriter::TotalWritten() const {
+  return async_writer ? async_writer->GetTotalWritten() : writer->GetTotalWritten();
 }
 
 void ArrowStreamWriter::WriteFooter() {
@@ -156,10 +184,10 @@ void ArrowStreamWriter::WriteFooter() {
   }
   serializer->SerializeFooter(std::move(footer_schema), blocks);
   auto footer = serializer->GetHeader();
-  auto footer_size = NumericCast<int32_t>(footer->size_bytes);
-  writer->WriteData(footer->data, footer->size_bytes);
-  writer->Write<int32_t>(BSwapIfBE(footer_size));
-  writer->WriteData(const_data_ptr_cast(kArrowIPCFileMagic), kArrowIPCFileMagicSize);
+  const auto footer_size = BSwapIfBE(NumericCast<int32_t>(footer->size_bytes));
+  WriteBytes(footer->data, footer->size_bytes);
+  WriteBytes(const_data_ptr_cast(&footer_size), sizeof(footer_size));
+  WriteBytes(const_data_ptr_cast(kArrowIPCFileMagic), kArrowIPCFileMagicSize);
 }
 
 bool ArrowStreamWriter::IsSizeMetadataKey(const string& key) {

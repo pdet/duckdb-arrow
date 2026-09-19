@@ -53,6 +53,10 @@ struct ArrowStreamWriter {
 
  private:
   void WriteFooter();
+  //! Appends to whichever writer the output uses
+  void WriteBytes(const_data_ptr_t data, idx_t size);
+  ArrowIpcFileBlock WriteMessage(ColumnDataCollectionSerializer& serializer);
+  idx_t TotalWritten() const;
 
   ClientProperties options;
   Allocator& allocator;
@@ -61,6 +65,9 @@ struct ArrowStreamWriter {
   bool file_format;
   bool size_metadata;
   mutex lock;
+  //! Writes on the async pool, so a remote output uploads several parts at once
+  unique_ptr<AsyncFileWriter> async_writer;
+  //! Local outputs, and SIZE_METADATA which patches the opening schema in place
   unique_ptr<BufferedFileWriter> writer;
   vector<ArrowIpcFileBlock> blocks;
   idx_t schema_message_size = 0;
