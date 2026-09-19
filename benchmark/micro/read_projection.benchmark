@@ -7,13 +7,13 @@ group micro
 
 require nanoarrow
 
-cache_file nanoarrow_projection_20m.arrows
+cache_file nanoarrow_projection_100m.arrows
 
 load
-COPY (SELECT i + 0 AS c0, i + 1 AS c1, i + 2 AS c2, i + 3 AS c3 FROM range(20000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_projection_20m.arrows' (FORMAT ARROWS);
+COPY (SELECT i + 0 AS c0, i + 1 AS c1, i + 2 AS c2, i + 3 AS c3 FROM range(100000000) t(i)) TO '${BENCHMARK_DIR}/nanoarrow_projection_100m.arrows' (FORMAT ARROWS);
 
 run
-SELECT sum(c2) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_projection_20m.arrows');
+SELECT sum(c2) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_projection_100m.arrows');
 
 result I
-200000030000000
+5000000150000000

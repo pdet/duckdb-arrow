@@ -8,11 +8,11 @@ group micro
 require nanoarrow
 
 load
-CREATE TABLE wide AS SELECT i + 0 AS c0, i + 1 AS c1, i + 2 AS c2, i + 3 AS c3, i + 4 AS c4, i + 5 AS c5, i + 6 AS c6, i + 7 AS c7, i + 8 AS c8, i + 9 AS c9, i + 10 AS c10, i + 11 AS c11, i + 12 AS c12, i + 13 AS c13, i + 14 AS c14, i + 15 AS c15, i + 16 AS c16, i + 17 AS c17, i + 18 AS c18, i + 19 AS c19, i + 20 AS c20, i + 21 AS c21, i + 22 AS c22, i + 23 AS c23, i + 24 AS c24, i + 25 AS c25, i + 26 AS c26, i + 27 AS c27, i + 28 AS c28, i + 29 AS c29, i + 30 AS c30, i + 31 AS c31 FROM range(4000000) t(i);
+CREATE TABLE wide AS SELECT i + 0 AS c0, i + 1 AS c1, i + 2 AS c2, i + 3 AS c3, i + 4 AS c4, i + 5 AS c5, i + 6 AS c6, i + 7 AS c7, i + 8 AS c8, i + 9 AS c9, i + 10 AS c10, i + 11 AS c11, i + 12 AS c12, i + 13 AS c13, i + 14 AS c14, i + 15 AS c15, i + 16 AS c16, i + 17 AS c17, i + 18 AS c18, i + 19 AS c19, i + 20 AS c20, i + 21 AS c21, i + 22 AS c22, i + 23 AS c23, i + 24 AS c24, i + 25 AS c25, i + 26 AS c26, i + 27 AS c27, i + 28 AS c28, i + 29 AS c29, i + 30 AS c30, i + 31 AS c31 FROM range(20000000) t(i);
 
 # The runner's disk would dominate the timing, so the output goes nowhere
 run
 COPY wide TO '/dev/null' (FORMAT ARROWS);
 
 result I
-4000000
+20000000
