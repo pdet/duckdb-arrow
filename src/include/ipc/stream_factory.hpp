@@ -61,13 +61,14 @@ class BufferIPCStreamFactory final : public ArrowIPCStreamFactory {
 
 class FileIPCStreamFactory final : public ArrowIPCStreamFactory {
  public:
-  explicit FileIPCStreamFactory(ClientContext& context, string src_string);
+  //! The file info from the glob keeps its size, so opening it needs no request
+  FileIPCStreamFactory(ClientContext& context, OpenFileInfo file);
   void InitReader() override;
   //! Opens another reader with its own handle, for a scan that keeps its own position
   unique_ptr<IPCFileStreamReader> OpenReader() const;
 
   FileSystem& fs;
-  string src_string;
+  OpenFileInfo file;
 };
 }  // namespace ext_nanoarrow
 }  // namespace duckdb

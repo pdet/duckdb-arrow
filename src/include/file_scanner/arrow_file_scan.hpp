@@ -21,7 +21,7 @@ struct ArrowFileLocalState;
 //! This class refers to an Arrow File Scan
 class ArrowFileScan : public BaseFileReader {
  public:
-  explicit ArrowFileScan(ClientContext& context, const string& file_name);
+  ArrowFileScan(ClientContext& context, const OpenFileInfo& file);
   //! Each scan takes a deep copy of the schema, so this one releases its own
   ~ArrowFileScan() override = default;
 

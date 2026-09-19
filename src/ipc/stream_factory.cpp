@@ -66,10 +66,10 @@ void BufferIPCStreamFactory::InitReader() {
   reader = make_uniq<IPCBufferStreamReader>(buffers, allocator);
 }
 
-FileIPCStreamFactory::FileIPCStreamFactory(ClientContext& context, string src_string)
+FileIPCStreamFactory::FileIPCStreamFactory(ClientContext& context, OpenFileInfo file)
     : ArrowIPCStreamFactory(BufferAllocator::Get(context)),
       fs(FileSystem::GetFileSystem(context)),
-      src_string(std::move(src_string)) {}
+      file(std::move(file)) {}
 
 void FileIPCStreamFactory::InitReader() {
   if (reader) {
@@ -79,7 +79,7 @@ void FileIPCStreamFactory::InitReader() {
 }
 
 unique_ptr<IPCFileStreamReader> FileIPCStreamFactory::OpenReader() const {
-  unique_ptr<FileHandle> handle = fs.OpenFile(src_string, FileOpenFlags::FILE_FLAGS_READ);
+  unique_ptr<FileHandle> handle = fs.OpenFile(file, FileOpenFlags::FILE_FLAGS_READ);
   return make_uniq<IPCFileStreamReader>(fs, std::move(handle), allocator);
 }
 
