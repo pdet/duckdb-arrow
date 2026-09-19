@@ -1,0 +1,45 @@
+# name: benchmark/micro/read_dictionary.benchmark
+# description: Scan one file with a dictionary column, which threads read in parallel
+# group: [micro]
+
+name Read dictionary
+group micro
+
+require nanoarrow
+
+cache_file nanoarrow_dictionary_11m.arrow
+
+# COPY cannot write dictionaries, so this repeats the record batches of the pyarrow fixture 80 times
+# pyarrow writes the footer table, then the record batch blocks at byte 36, the dictionary blocks and the schema
+# So growing the record batch blocks only moves the schema and dictionary offsets at bytes 24 and 28
+load
+CREATE MACRO le(x, width) AS unhex(regexp_replace(reverse(lpad(to_hex(x), 2 * width, '0')), '(.)(.)', '\2\1', 'g'));
+CREATE MACRO read_le(bytes) AS ('0x' || regexp_replace(reverse(hex(bytes)), '(.)(.)', '\2\1', 'g'))::BIGINT;
+COPY (
+    WITH file AS (
+        SELECT b, n, b[n - 9 - read_le(b[n - 9:n - 6]):n - 10] AS footer
+        FROM (SELECT content AS b, octet_length(content) AS n FROM read_blob('data/dictionary_file.arrow'))
+    ), blocks AS (
+        SELECT j, read_le(footer[41 + 24 * j:48 + 24 * j]) AS pos, footer[49 + 24 * j:64 + 24 * j] AS rest,
+               read_le(footer[49 + 24 * j:52 + 24 * j]) + read_le(footer[57 + 24 * j:64 + 24 * j]) AS size
+        FROM (SELECT footer, unnest(range(read_le(footer[37:40]))) AS j FROM file)
+    ), span AS (
+        SELECT min(pos) AS first, max(pos + size) - min(pos) AS len, count(*) AS batches FROM blocks
+    ), new_footer AS (
+        SELECT footer[1:24] || le(read_le(footer[25:28]) + batches * 79 * 24, 4)
+               || le(read_le(footer[29:32]) + batches * 79 * 24, 4) || footer[33:36] || le(batches * 80, 4)
+               || (SELECT unhex(string_agg(hex(le(pos + k * len, 8) || rest), '' ORDER BY k, j))
+                   FROM blocks, range(80) t(k))
+               || footer[41 + 24 * batches:] AS f
+        FROM file, span
+    )
+    SELECT b[1:first] || repeat(b[first + 1:first + len], 80) || b[first + len + 1:n - 10 - octet_length(footer)]
+           || f || le(octet_length(f), 4) || b[n - 5:n]
+    FROM file, span, new_footer
+) TO '${BENCHMARK_DIR}/nanoarrow_dictionary_11m.arrow' (FORMAT BLOB);
+
+run
+SELECT count(*), max(d), sum(v) FROM read_arrow('${BENCHMARK_DIR}/nanoarrow_dictionary_11m.arrow');
+
+result III
+11200000	gamma	783994400000

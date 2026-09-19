@@ -33,8 +33,10 @@ class IPCFileStreamReader final : public IPCStreamReader {
   const vector<ArrowIpcFileBlock>& RecordBatchBlocks() const {
     return record_batch_blocks;
   }
-  //! Dictionaries are decoded in stream order, so those files keep one reader
-  bool HasDictionaryBlocks() const { return has_dictionary_blocks; }
+  //! The dictionary batch blocks named by the footer
+  const vector<ArrowIpcFileBlock>& DictionaryBlocks() const { return dictionary_blocks; }
+  //! Decodes these dictionary blocks, which the record batch blocks need first
+  void LoadDictionaries(const vector<ArrowIpcFileBlock>& blocks);
   //! Reads only the record batches of these footer blocks, then reports the end
   void SetBlocks(const ArrowIpcFileBlock* begin, const ArrowIpcFileBlock* end);
   //! Whether batch lengths can be read from the headers alone
@@ -49,9 +51,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
   //! Pipes and character devices must keep the sequential read
   bool regular_file = false;
   shared_ptr<atomic<idx_t>> progress_offset;
-  //! Blocks copied out of the decoder, which frees its own copy on the next message
   vector<ArrowIpcFileBlock> record_batch_blocks;
-  bool has_dictionary_blocks = false;
+  vector<ArrowIpcFileBlock> dictionary_blocks;
   bool footer_read = false;
   //! The claimed blocks still to read, both null outside a block scan
   const ArrowIpcFileBlock* next_block = nullptr;

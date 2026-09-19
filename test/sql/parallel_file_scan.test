@@ -38,3 +38,21 @@ query II
 SELECT count(*), max(s) FROM read_arrow('__TEST_DIR__/claims*.arrow');
 ----
 600000	fffffe98d0963d27015c198262d97221
+
+# Each claim decodes the footer's dictionaries first, the fixture comes from pyarrow in two claims
+statement ok
+CREATE TABLE dict AS FROM read_arrow('__WORKING_DIRECTORY__/data/dictionary_file.arrow');
+
+query III
+SELECT count(*), count(*) FILTER (WHERE v != rowid), count(DISTINCT d) FROM dict;
+----
+140000	0	5
+
+query II
+SELECT d, count(*) FROM read_arrow('__WORKING_DIRECTORY__/data/dictionary_file.arrow') GROUP BY d ORDER BY d;
+----
+alpha	28000
+beta	28000
+delta	28000
+epsilon	28000
+gamma	28000
