@@ -49,7 +49,7 @@ class IPCFileStreamReader final : public IPCStreamReader {
   AllocatedData message_header;
   shared_ptr<AllocatedData> message_body;
   //! Pipes and character devices must keep the sequential read
-  bool regular_file = false;
+  bool positional = false;
   shared_ptr<atomic<idx_t>> progress_offset;
   vector<ArrowIpcFileBlock> record_batch_blocks;
   vector<ArrowIpcFileBlock> dictionary_blocks;

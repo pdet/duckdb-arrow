@@ -107,8 +107,9 @@ bool CopyFooterBlocks(const ArrowBuffer& source, idx_t file_size,
 IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle,
                                          Allocator& allocator)
     : IPCStreamReader(allocator), file_reader(fs, std::move(handle)) {
-  // Only a regular file can be read at an offset, and the type cannot change later
-  regular_file = file_reader.handle->GetType() == FileType::FILE_TYPE_REGULAR;
+  // Regular and remote files read at an offset, and asking a remote one its type opens it
+  positional = FileSystem::IsRemoteFile(file_reader.handle->GetPath()) ||
+               file_reader.handle->GetType() == FileType::FILE_TYPE_REGULAR;
 }
 
 bool IPCFileStreamReader::TryReadFooter() {
@@ -116,7 +117,7 @@ bool IPCFileStreamReader::TryReadFooter() {
     return !record_batch_blocks.empty();
   }
   footer_read = true;
-  if (!regular_file) {
+  if (!positional) {
     return false;
   }
   // The tail of a file is the footer size as an int32 then the bare magic
@@ -217,7 +218,7 @@ bool IPCFileStreamReader::DecodeHeader(const idx_t message_header_size) {
 
 bool IPCFileStreamReader::CanReadBodyPositionally(idx_t body_start, idx_t body_size) {
   // CanSeek answers for the file system, not for this handle, so it lets pipes through
-  if (!regular_file) {
+  if (!positional) {
     return false;
   }
   // A body running past the end keeps the sequential read, which reports truncation
