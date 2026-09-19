@@ -13,6 +13,11 @@ COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, 'item_' || (i % 5
 TO '{DATA_PATH}/wide.arrow' (FORMAT ARROW, ROW_GROUP_SIZE 1000000);
 
 statement ok
+COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, 'item_' || (i % 50000) AS s
+      FROM range(2000000) t(i))
+TO '{DATA_PATH}/wide.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 1000000);
+
+statement ok
 SET logging_storage = 'memory';
 
 statement ok
@@ -24,9 +29,9 @@ SELECT max(COLUMNS(*)) FROM read_arrow('{DATA_PATH}/wide.arrow');
 ----
 1999999	999	100002	item_9999
 
-# Reading the 76 MB file in 4 KB requests took eighteen thousand of them
+# Reading the 76 MB file in 4 KB requests took eighteen thousand of them, and the footer takes one
 query I
-SELECT count(*) < 20 FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
+SELECT count(*) <= 8 FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
 ----
 true
 
@@ -57,5 +62,19 @@ SELECT count(*) FROM read_arrow('{DATA_PATH}/wide.arrow');
 query I
 SELECT coalesce(sum(response.headers['Content-Length']::BIGINT), 0) < 200000
 FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
+----
+true
+
+statement ok
+CALL truncate_duckdb_logs();
+
+# A stream has no footer, so counting it never reads the end of the file for one
+query I
+SELECT count(*) FROM read_arrow('{DATA_PATH}/wide.arrows');
+----
+2000000
+
+query I
+SELECT count(*) <= 3 FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
 ----
 true
