@@ -10,12 +10,6 @@ namespace ext_nanoarrow {
 
 namespace {
 
-//! A half open byte range inside a record batch body
-struct BodyRange {
-  idx_t begin;
-  idx_t end;
-};
-
 //! Ranges nearer than this are read together, sized for one seek on a local disk
 constexpr idx_t kCoalesceGapBytes = 64 * 1024;
 //! Small bodies are read whole, several reads cost more than the bytes they save
@@ -24,6 +18,8 @@ constexpr idx_t kMinBodyBytesForRanges = 1024 * 1024;
 constexpr double kMaxProjectedFraction = 0.8;
 //! Enough for the footer of most files, so reading it costs one request
 constexpr idx_t kFooterReadBytes = 64 * 1024;
+//! A remote request costs a round trip, which is worth about this many bytes of transfer
+constexpr idx_t kRemoteCoalesceGapBytes = 1024 * 1024;
 
 //! Makes the discovery decode take the uncompressed path, which only does arithmetic
 struct CodecOverride {
@@ -65,6 +61,11 @@ bool CollectFieldRanges(const ArrowArrayView& view, const_data_ptr_t base,
     }
   }
   return true;
+}
+
+IOException UnexpectedToken(uint32_t token) {
+  return IOException("Expected continuation token (0xFFFFFFFF) but got " +
+                     std::to_string(token));
 }
 
 //! Whether a field or any of its children is dictionary encoded
@@ -112,8 +113,8 @@ IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> 
                                          Allocator& allocator)
     : IPCStreamReader(allocator), file_reader(fs, std::move(handle)) {
   // Regular and remote files read at an offset, and asking a remote one its type opens it
-  positional = FileSystem::IsRemoteFile(file_reader.handle->GetPath()) ||
-               file_reader.handle->GetType() == FileType::FILE_TYPE_REGULAR;
+  remote = FileSystem::IsRemoteFile(file_reader.handle->GetPath());
+  positional = remote || file_reader.handle->GetType() == FileType::FILE_TYPE_REGULAR;
 }
 
 bool IPCFileStreamReader::TryReadFooter() {
@@ -185,37 +186,17 @@ bool IPCFileStreamReader::TryReadFooter() {
   return !record_batch_blocks.empty();
 }
 
-void IPCFileStreamReader::PopulateNames(vector<string>& names) {
-  GetBaseSchema();
-  for (int64_t i = 0; i < base_schema->n_children; i++) {
-    const ArrowSchema* column = base_schema->children[i];
-    if (!column->name) {
-      names.push_back("");
-    } else {
-      names.push_back(column->name);
-    }
-  }
-}
-
 void IPCFileStreamReader::TrackProgress(shared_ptr<atomic<idx_t>> offset) {
   progress_offset = std::move(offset);
 }
 
-void IPCFileStreamReader::DecodeArray(nanoarrow::ipc::UniqueDecoder& decoder,
-                                      ArrowArray* out, ArrowBufferView& body_view,
-                                      ArrowError* error) {
-  // Use the ArrowIpcSharedBuffer if we have thread safety (i.e., if this was
-  // compiled with a compiler that supports C11 atomics, i.e., not gcc 4.8 or
-  // MSVC)
-  nanoarrow::UniqueArray array;
-  THROW_NOT_OK(IOException, error,
-               ArrowIpcDecoderDecodeArray(decoder.get(), body_view, -1, array.get(),
-                                          NANOARROW_VALIDATION_LEVEL_FULL, error));
-  ArrowArrayMove(array.get(), out);
-}
-
 nanoarrow::UniqueBuffer IPCFileStreamReader::GetUniqueBuffer() {
-  return AllocatedDataToOwningBuffer(message_body);
+  // A fetched block shares its allocation with neighbours, so wrap where the body starts
+  nanoarrow::UniqueBuffer out;
+  if (message_body) {
+    nanoarrow::BufferInitWrapped(out.get(), message_body, cur_ptr, cur_size);
+  }
+  return out;
 }
 bool IPCFileStreamReader::DecodeHeader(const idx_t message_header_size) {
   if (message_header.GetSize() < message_header_size) {
@@ -258,7 +239,8 @@ void IPCFileStreamReader::ReadBodyPositionally(idx_t body_start, idx_t body_size
   file_reader.Seek(body_start + body_size);
 }
 
-bool IPCFileStreamReader::TryReadProjectedBody(idx_t body_start, idx_t body_size) {
+bool IPCFileStreamReader::ProjectedRanges(const_data_ptr_t base, idx_t body_size,
+                                          vector<BodyRange>& merged) {
   if (!HasProjection() || body_size < kMinBodyBytesForRanges) {
     return false;
   }
@@ -275,9 +257,7 @@ bool IPCFileStreamReader::TryReadProjectedBody(idx_t body_start, idx_t body_size
     return false;
   }
 
-  const auto base = const_data_ptr_cast(message_body->get());
   const auto body_view = AllocatedDataView(base, static_cast<int64_t>(body_size));
-
   vector<BodyRange> ranges;
   {
     // Compressed buffers are found at the same offsets, only their contents differ
@@ -300,9 +280,9 @@ bool IPCFileStreamReader::TryReadProjectedBody(idx_t body_start, idx_t body_size
 
   std::sort(ranges.begin(), ranges.end(),
             [](const BodyRange& a, const BodyRange& b) { return a.begin < b.begin; });
-  vector<BodyRange> merged;
+  const auto gap = CoalesceGap();
   for (const auto& range : ranges) {
-    if (!merged.empty() && range.begin <= merged.back().end + kCoalesceGapBytes) {
+    if (!merged.empty() && range.begin <= merged.back().end + gap) {
       if (range.end > merged.back().end) {
         merged.back().end = range.end;
       }
@@ -315,11 +295,15 @@ bool IPCFileStreamReader::TryReadProjectedBody(idx_t body_start, idx_t body_size
   for (const auto& range : merged) {
     projected_bytes += range.end - range.begin;
   }
-  if (static_cast<double>(projected_bytes) >
-      static_cast<double>(body_size) * kMaxProjectedFraction) {
+  return static_cast<double>(projected_bytes) <=
+         static_cast<double>(body_size) * kMaxProjectedFraction;
+}
+
+bool IPCFileStreamReader::TryReadProjectedBody(idx_t body_start, idx_t body_size) {
+  vector<BodyRange> merged;
+  if (!ProjectedRanges(message_body->get(), body_size, merged)) {
     return false;
   }
-
   for (const auto& range : merged) {
     file_reader.handle->Read(message_body->get() + range.begin, range.end - range.begin,
                              body_start + range.begin);
@@ -330,34 +314,41 @@ bool IPCFileStreamReader::TryReadProjectedBody(idx_t body_start, idx_t body_size
 
 void IPCFileStreamReader::DecodeBody() {
   message_body.reset();
-  if (decoder->body_size_bytes > 0) {
-    EnsureInputStreamAligned();
-    // The padding belongs to the previous message, so take the offset after it
-    const auto body_start = file_reader.CurrentOffset();
-    const auto body_size = static_cast<idx_t>(decoder->body_size_bytes);
-    message_body =
-        make_shared_ptr<AllocatedData>(allocator.Allocate(decoder->body_size_bytes));
-
-    // Seeking drops the buffer, so a body smaller than it is cheaper to read through it
-    if (skip_bodies && body_size >= FILE_BUFFER_SIZE && !NeedsEndianSwap() &&
-        CanReadBodyPositionally(body_start, body_size)) {
-      // A swap reads the buffers it rewrites, so only an unswapped body can stay unread
-      file_reader.Seek(body_start + body_size);
-    } else if (CanReadBodyPositionally(body_start, body_size)) {
-      if (!TryReadProjectedBody(body_start, body_size)) {
-        ReadBodyPositionally(body_start, body_size);
-      }
-    } else {
-      ReadData(message_body->get(), decoder->body_size_bytes);
+  cur_ptr = nullptr;
+  cur_size = 0;
+  if (decoder->body_size_bytes <= 0) {
+    return;
+  }
+  EnsureInputStreamAligned();
+  // The padding belongs to the previous message, so take the offset after it
+  const auto body_start = file_reader.CurrentOffset();
+  const auto body_size = static_cast<idx_t>(decoder->body_size_bytes);
+  // Seeking drops the buffer, so a body smaller than it is cheaper to read through it
+  if (skip_bodies && body_size >= FILE_BUFFER_SIZE && !NeedsEndianSwap() &&
+      CanReadBodyPositionally(body_start, body_size)) {
+    // A swap reads the buffers it rewrites, so only an unswapped body can stay unread
+    file_reader.Seek(body_start + body_size);
+    SetUnreadBody(body_size);
+    return;
+  }
+  message_body = make_shared_ptr<AllocatedData>(allocator.Allocate(body_size));
+  if (CanReadBodyPositionally(body_start, body_size)) {
+    if (!TryReadProjectedBody(body_start, body_size)) {
+      ReadBodyPositionally(body_start, body_size);
     }
-  }
-  if (message_body) {
-    cur_ptr = message_body->get();
-    cur_size = static_cast<int64_t>(message_body->GetSize());
   } else {
-    cur_ptr = nullptr;
-    cur_size = 0;
+    ReadData(message_body->get(), body_size);
   }
+  cur_ptr = message_body->get();
+  cur_size = static_cast<int64_t>(body_size);
+}
+
+void IPCFileStreamReader::SetUnreadBody(idx_t size) {
+  if (unread_body.GetSize() < size) {
+    unread_body = allocator.Allocate(size);
+  }
+  cur_ptr = unread_body.get();
+  cur_size = static_cast<int64_t>(size);
 }
 
 data_ptr_t IPCFileStreamReader::ReadData(data_ptr_t ptr, idx_t size) {
@@ -409,11 +400,152 @@ bool IPCFileStreamReader::NextBatchLength(idx_t& length) {
   return true;
 }
 
+idx_t IPCFileStreamReader::CoalesceGap() const {
+  return remote ? kRemoteCoalesceGapBytes : kCoalesceGapBytes;
+}
+
+void IPCFileStreamReader::FetchBlocks(bool whole) {
+  const auto count = static_cast<idx_t>(end_block - next_block);
+  // Blocks are published after every read succeeded, so a failed fetch leaves none
+  fetched_blocks.clear();
+  fetched_index = 0;
+  vector<FetchedBlock> fetched(count);
+  // Every column needs the whole body, which one read per run of blocks covers
+  const bool projected =
+      !whole && !skip_bodies && HasProjection() && !NeedsEndianSwap() &&
+      projected_fields.size() < static_cast<idx_t>(GetBaseSchema()->n_children);
+  vector<idx_t> whole_blocks;
+  vector<idx_t> ranged_blocks;
+  for (idx_t i = 0; i < count; i++) {
+    // Several reads of a small body cost more than the bytes they would save
+    if (projected &&
+        static_cast<idx_t>(next_block[i].body_length) >= kMinBodyBytesForRanges) {
+      ranged_blocks.push_back(i);
+    } else {
+      whole_blocks.push_back(i);
+    }
+  }
+  vector<FileRead> reads;
+  PlanRuns(whole_blocks, skip_bodies, fetched, reads);
+  // The header says where the projected buffers are, so it comes first
+  PlanRuns(ranged_blocks, true, fetched, reads);
+  ReadAll(reads);
+  reads.clear();
+  for (const auto i : ranged_blocks) {
+    PlanProjectedBlock(next_block[i], fetched[i], reads);
+  }
+  ReadAll(reads);
+  fetched_blocks = std::move(fetched);
+}
+
+void IPCFileStreamReader::PlanRuns(const vector<idx_t>& indexes, bool headers_only,
+                                   vector<FetchedBlock>& fetched,
+                                   vector<FileRead>& reads) {
+  const auto gap = CoalesceGap();
+  auto end_of = [&](const ArrowIpcFileBlock& block) {
+    auto end =
+        static_cast<idx_t>(block.offset) + static_cast<idx_t>(block.metadata_length);
+    return headers_only ? end : end + static_cast<idx_t>(block.body_length);
+  };
+  idx_t i = 0;
+  while (i < indexes.size()) {
+    // Blocks next to each other in the file are read together, gaps included
+    const auto begin = static_cast<idx_t>(next_block[indexes[i]].offset);
+    auto end = end_of(next_block[indexes[i]]);
+    idx_t j = i + 1;
+    for (; j < indexes.size(); j++) {
+      const auto& block = next_block[indexes[j]];
+      const auto offset = static_cast<idx_t>(block.offset);
+      if (offset < end || offset - end > gap) {
+        break;
+      }
+      end = end_of(block);
+    }
+    auto data = make_shared_ptr<AllocatedData>(allocator.Allocate(end - begin));
+    reads.push_back(FileRead{data->get(), end - begin, begin});
+    for (idx_t k = i; k < j; k++) {
+      const auto offset = static_cast<idx_t>(next_block[indexes[k]].offset);
+      fetched[indexes[k]] = FetchedBlock{data, data->get() + (offset - begin)};
+    }
+    i = j;
+  }
+}
+
+void IPCFileStreamReader::PlanProjectedBlock(const ArrowIpcFileBlock& block,
+                                             FetchedBlock& fetched,
+                                             vector<FileRead>& reads) {
+  const auto metadata_size = static_cast<idx_t>(block.metadata_length);
+  const auto body_size = static_cast<idx_t>(block.body_length);
+  auto data =
+      make_shared_ptr<AllocatedData>(allocator.Allocate(metadata_size + body_size));
+  std::memcpy(data->get(), fetched.ptr, metadata_size);
+  fetched = FetchedBlock{data, data->get()};
+
+  vector<BodyRange> ranges;
+  const auto body = data->get() + metadata_size;
+  // The header decodes here only to find the buffers, the scan decodes it again
+  if (!DecodeBlockHeader(block, fetched) || !ProjectedRanges(body, body_size, ranges)) {
+    ranges.clear();
+    ranges.push_back(BodyRange{0, body_size});
+  }
+  const auto body_start = static_cast<idx_t>(block.offset) + metadata_size;
+  for (const auto& range : ranges) {
+    reads.push_back(
+        FileRead{body + range.begin, range.end - range.begin, body_start + range.begin});
+  }
+}
+
+void IPCFileStreamReader::ReadAll(const vector<FileRead>& reads) {
+  for (const auto& read : reads) {
+    file_reader.handle->Read(read.target, read.size, read.location);
+  }
+}
+
+bool IPCFileStreamReader::DecodeBlockHeader(const ArrowIpcFileBlock& block,
+                                            const FetchedBlock& fetched) {
+  std::memcpy(&message_prefix, fetched.ptr, sizeof(message_prefix));
+  if (message_prefix.continuation_token != kContinuationToken) {
+    throw UnexpectedToken(message_prefix.continuation_token);
+  }
+  const auto header_size = DecodeMetadata();
+  if (header_size > static_cast<idx_t>(block.metadata_length)) {
+    throw IOException("Arrow IPC message header is larger than its footer block");
+  }
+  // An end of stream marker has no body, and a footer block should never name one
+  return !DecodeHeaderBuffer(AllocatedDataView(fetched.ptr, header_size));
+}
+
+ArrowIpcMessageType IPCFileStreamReader::DecodeFetchedBlock(
+    const ArrowIpcFileBlock& block, const FetchedBlock& fetched) {
+  if (!DecodeBlockHeader(block, fetched)) {
+    return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
+  }
+  message_body.reset();
+  cur_ptr = nullptr;
+  cur_size = 0;
+  if (decoder->body_size_bytes > 0) {
+    const auto body_size = static_cast<idx_t>(decoder->body_size_bytes);
+    if (body_size > static_cast<idx_t>(block.body_length)) {
+      throw IOException("Arrow IPC message body is larger than its footer block");
+    }
+    if (skip_bodies) {
+      SetUnreadBody(body_size);
+    } else {
+      message_body = fetched.data;
+      cur_ptr = fetched.ptr + block.metadata_length;
+      cur_size = static_cast<int64_t>(body_size);
+    }
+  }
+  return decoder->message_type;
+}
+
 void IPCFileStreamReader::LoadDictionaries(const vector<ArrowIpcFileBlock>& blocks) {
   if (blocks.empty()) {
     return;
   }
   SetBlocks(blocks.data(), blocks.data() + blocks.size());
+  // Dictionaries are decoded whole, so a projection has no ranges to read
+  FetchBlocks(true);
   // Only dictionary blocks are named, so the read decodes them all and reaches the end
   nanoarrow::UniqueArray none;
   if (GetNextBatch(none.get())) {
@@ -426,16 +558,25 @@ void IPCFileStreamReader::SetBlocks(const ArrowIpcFileBlock* begin,
   next_block = begin;
   end_block = end;
   finished = false;
+  fetched_blocks.clear();
+  fetched_index = 0;
 }
 
 ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
   if (next_block) {
     if (next_block == end_block) {
+      // The decoded arrays keep what they use, so the claim's buffers can go now
+      fetched_blocks.clear();
+      message_body.reset();
       return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
     }
+    // A scan that scheduled no reads ahead fetches its blocks on the first message
+    if (fetched_blocks.empty()) {
+      FetchBlocks();
+    }
     // TryReadFooter checked that the block lies inside the file on an aligned offset
-    file_reader.Seek(static_cast<idx_t>(next_block->offset));
-    next_block++;
+    const auto& block = *next_block++;
+    return DecodeFetchedBlock(block, fetched_blocks[fetched_index++]);
   }
   if (finished) {
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
@@ -465,8 +606,7 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
       file_reader.ReadData(reinterpret_cast<data_ptr_t>(&message_prefix.metadata_size),
                            sizeof(message_prefix.metadata_size));
     } else if (message_prefix.continuation_token != kContinuationToken) {
-      throw IOException(std::string("Expected continuation token (0xFFFFFFFF) but got " +
-                                    std::to_string(message_prefix.continuation_token)));
+      throw UnexpectedToken(message_prefix.continuation_token);
     }
   } catch (SerializationException& e) {
     // Only a stream that stops at a message boundary may omit the end of stream marker

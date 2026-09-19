@@ -264,16 +264,6 @@ ArrowBufferView IPCStreamReader::AllocatedDataView(const_data_ptr_t data, int64_
   return view;
 }
 
-nanoarrow::UniqueBuffer IPCStreamReader::AllocatedDataToOwningBuffer(
-    const shared_ptr<AllocatedData>& data) {
-  nanoarrow::UniqueBuffer out;
-  if (data) {
-    nanoarrow::BufferInitWrapped(out.get(), data, data->get(),
-                                 UnsafeNumericCast<int64_t>(data->GetSize()));
-  }
-  return out;
-}
-
 const char* IPCStreamReader::MessageTypeString(ArrowIpcMessageType message_type) {
   switch (message_type) {
     case NANOARROW_IPC_MESSAGE_TYPE_SCHEMA:

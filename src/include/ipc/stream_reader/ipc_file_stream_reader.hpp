@@ -13,6 +13,19 @@
 namespace duckdb {
 namespace ext_nanoarrow {
 
+//! A half open byte range inside a record batch body
+struct BodyRange {
+  idx_t begin;
+  idx_t end;
+};
+
+//! A read of the file into memory that a fetch planned
+struct FileRead {
+  data_ptr_t target;
+  idx_t size;
+  idx_t location;
+};
+
 //! IPC File
 class IPCFileStreamReader final : public IPCStreamReader {
  public:
@@ -39,17 +52,30 @@ class IPCFileStreamReader final : public IPCStreamReader {
   void LoadDictionaries(const vector<ArrowIpcFileBlock>& blocks);
   //! Reads only the record batches of these footer blocks, then reports the end
   void SetBlocks(const ArrowIpcFileBlock* begin, const ArrowIpcFileBlock* end);
+  //! Reads the blocks left to scan into memory from any thread, whole bodies if asked
+  void FetchBlocks(bool whole = false);
   //! Whether batch lengths can be read from the headers alone
   bool CanCountWithoutBodies();
   //! Reads the length of the next record batch and skips its body, false at the end
   bool NextBatchLength(idx_t& length);
 
  private:
+  //! Where one claimed block starts in memory once fetched
+  struct FetchedBlock {
+    shared_ptr<AllocatedData> data;
+    data_ptr_t ptr = nullptr;
+  };
+
   BufferedFileReader file_reader;
   AllocatedData message_header;
   shared_ptr<AllocatedData> message_body;
   //! Pipes and character devices must keep the sequential read
   bool positional = false;
+  //! Remote reads pay a round trip each, so they are merged over larger gaps
+  bool remote = false;
+  //! The claimed blocks in memory, empty until FetchBlocks runs
+  vector<FetchedBlock> fetched_blocks;
+  idx_t fetched_index = 0;
   shared_ptr<atomic<idx_t>> progress_offset;
   vector<ArrowIpcFileBlock> record_batch_blocks;
   vector<ArrowIpcFileBlock> dictionary_blocks;
@@ -61,6 +87,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
   const ArrowIpcFileBlock* end_block = nullptr;
   //! Counting reads headers only, so regular files seek past the bodies
   bool skip_bodies = false;
+  //! Stands in for bodies a count skips, whose views only need offsets inside it
+  AllocatedData unread_body;
   //! The flat index of the field whose view gives the batch length, negative when none
   int64_t count_field = -1;
 
@@ -71,14 +99,29 @@ class IPCFileStreamReader final : public IPCStreamReader {
   void ReadBodyPositionally(idx_t body_start, idx_t body_size);
   //! Reads only the buffers the projection needs, returns false to read the whole body
   bool TryReadProjectedBody(idx_t body_start, idx_t body_size);
+  //! The merged body ranges the projection needs, false when the whole body is cheaper
+  bool ProjectedRanges(const_data_ptr_t base, idx_t body_size, vector<BodyRange>& merged);
+  //! Ranges closer than this are read together
+  idx_t CoalesceGap() const;
+  //! Plans one read per run of neighbouring blocks, or of only their headers
+  void PlanRuns(const vector<idx_t>& indexes, bool headers_only,
+                vector<FetchedBlock>& fetched, vector<FileRead>& reads);
+  //! Plans the body ranges a projection needs once the block header is in memory
+  void PlanProjectedBlock(const ArrowIpcFileBlock& block, FetchedBlock& fetched,
+                          vector<FileRead>& reads);
+  //! Runs planned reads
+  void ReadAll(const vector<FileRead>& reads);
+  //! Points the current body at the scratch space a count reads no bytes into
+  void SetUnreadBody(idx_t size);
+  //! Decodes the header of a fetched block, false for an end of stream marker
+  bool DecodeBlockHeader(const ArrowIpcFileBlock& block, const FetchedBlock& fetched);
+  ArrowIpcMessageType DecodeFetchedBlock(const ArrowIpcFileBlock& block,
+                                         const FetchedBlock& fetched);
 
   data_ptr_t ReadData(data_ptr_t ptr, idx_t size) override;
-  static void DecodeArray(nanoarrow::ipc::UniqueDecoder& decoder, ArrowArray* out,
-                          ArrowBufferView& body_view, ArrowError* error);
   bool DecodeHeader(idx_t message_header_size) override;
   void DecodeBody() override;
   nanoarrow::UniqueBuffer GetUniqueBuffer() override;
-  void PopulateNames(vector<string>& names);
 };
 
 }  // namespace ext_nanoarrow
