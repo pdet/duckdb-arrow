@@ -203,6 +203,50 @@ idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buff
   return Serialize(appender);
 }
 
+namespace {
+//! Keeps an encoded buffer alive while the async writer writes a slice of it
+class ArrowWriteBuffer final : public AsyncWriteBuffer {
+ public:
+  ArrowWriteBuffer(shared_ptr<nanoarrow::UniqueBuffer> buffer_p, idx_t offset, idx_t size)
+      : buffer(std::move(buffer_p)), offset(offset), size(size) {}
+
+  data_ptr_t Ptr() override { return (*buffer)->data + offset; }
+  idx_t Size() const override { return size; }
+
+ private:
+  shared_ptr<nanoarrow::UniqueBuffer> buffer;
+  idx_t offset;
+  idx_t size;
+};
+
+//! Slices sized like parquet pages keep the async writer draining several at once
+constexpr idx_t kAsyncWriteSliceBytes = 4 * 1024 * 1024;
+
+void WriteSlices(AsyncFileWriter& writer, nanoarrow::UniqueBuffer buffer) {
+  const auto size = NumericCast<idx_t>(buffer->size_bytes);
+  auto shared = make_shared_ptr<nanoarrow::UniqueBuffer>(std::move(buffer));
+  for (idx_t offset = 0; offset < size; offset += kAsyncWriteSliceBytes) {
+    writer.WriteData(make_uniq<ArrowWriteBuffer>(
+        shared, offset, MinValue<idx_t>(kAsyncWriteSliceBytes, size - offset)));
+  }
+}
+}  // namespace
+
+ArrowIpcFileBlock ColumnDataCollectionSerializer::Flush(AsyncFileWriter& writer) {
+  ArrowIpcFileBlock block{NumericCast<int64_t>(writer.GetTotalWritten()),
+                          NumericCast<int32_t>(header->size_bytes), body->size_bytes};
+  // The message registers as one batch, so backpressure applies once, as parquet does
+  auto batch = writer.StartBatch();
+  WriteSlices(writer, GetHeader());
+  if (body->size_bytes > 0) {
+    auto result_body = std::move(body);
+    InitArrowDuckBuffer(body.get(), allocator);
+    WriteSlices(writer, std::move(result_body));
+  }
+  batch.Finish();
+  return block;
+}
+
 ArrowIpcFileBlock ColumnDataCollectionSerializer::Flush(BufferedFileWriter& writer) {
   ArrowIpcFileBlock block{NumericCast<int64_t>(writer.GetTotalWritten()),
                           NumericCast<int32_t>(header->size_bytes), body->size_bytes};

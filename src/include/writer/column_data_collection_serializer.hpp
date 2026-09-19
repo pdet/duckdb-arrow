@@ -9,6 +9,7 @@
 
 #include "duckdb/common/arrow/arrow_converter.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/serializer/async_file_writer.hpp"
 #include "duckdb/common/serializer/buffered_file_writer.hpp"
 #include "duckdb/common/types/column/column_data_collection.hpp"
 #include "duckdb/function/table/arrow/arrow_duck_schema.hpp"
@@ -40,6 +41,8 @@ class ColumnDataCollectionSerializer {
   idx_t Serialize(const ColumnDataCollection& buffer);
 
   ArrowIpcFileBlock Flush(BufferedFileWriter& writer);
+  //! Hands the message to the async writer, which frees it once written
+  ArrowIpcFileBlock Flush(AsyncFileWriter& writer);
 
   int64_t UncompressedBodySize() const { return uncompressed_body_size; }
 
