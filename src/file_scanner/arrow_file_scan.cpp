@@ -13,9 +13,9 @@ constexpr idx_t kMinClaimBodyBytes = 1024 * 1024;
 atomic<idx_t> next_scan_id{1};
 }  // namespace
 
-ArrowFileScan::ArrowFileScan(ClientContext& context, const string& file_name)
-    : BaseFileReader(OpenFileInfo(file_name)), scan_id(next_scan_id++) {
-  factory = make_uniq<FileIPCStreamFactory>(context, file_name);
+ArrowFileScan::ArrowFileScan(ClientContext& context, const OpenFileInfo& file)
+    : BaseFileReader(file), scan_id(next_scan_id++) {
+  factory = make_uniq<FileIPCStreamFactory>(context, file);
 
   factory->InitReader();
   factory->GetFileSchema(schema_root);

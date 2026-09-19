@@ -1,0 +1,28 @@
+# name: test/sql/glob_open.test
+# description: Globbed Arrow files open with the size the glob found, so remote ones need no HEAD request
+# group: [sql]
+
+require nanoarrow
+
+test-env DATA_PATH {TEST_DIR}
+
+statement ok
+COPY (SELECT i AS id, i % 7 AS k FROM range(200000) t(i))
+TO '{DATA_PATH}/many' (FORMAT ARROW, ROW_GROUP_SIZE 20480, ROW_GROUPS_PER_FILE 2);
+
+statement ok
+SET logging_storage = 'memory';
+
+statement ok
+CALL enable_logging('HTTP');
+
+query II
+SELECT count(*), sum(k) FROM read_arrow('{DATA_PATH}/many/*.arrow');
+----
+200000	599994
+
+# Local files send no requests, so this only bites on the MinIO config
+query I
+SELECT count(*) FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'HEAD';
+----
+0

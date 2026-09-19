@@ -112,19 +112,19 @@ unique_ptr<LocalTableFunctionState> ArrowMultiFileInfo::InitializeLocalState(
 shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
     ClientContext& context, GlobalTableFunctionState& gstate_p, BaseUnionData& union_data,
     const MultiFileBindData& bind_data) {
-  return make_shared_ptr<ArrowFileScan>(context, union_data.GetFileName());
+  return make_shared_ptr<ArrowFileScan>(context, OpenFileInfo(union_data.GetFileName()));
 }
 
 shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
     ClientContext& context, GlobalTableFunctionState& gstate_p,
     const OpenFileInfo& file_info, idx_t file_idx, const MultiFileBindData& bind_data) {
-  return make_shared_ptr<ArrowFileScan>(context, file_info.path);
+  return make_shared_ptr<ArrowFileScan>(context, file_info);
 }
 
 shared_ptr<BaseFileReader> ArrowMultiFileInfo::CreateReader(
     ClientContext& context, const OpenFileInfo& file, BaseFileReaderOptions& options,
     const MultiFileOptions& file_options) {
-  return make_shared_ptr<ArrowFileScan>(context, file.path);
+  return make_shared_ptr<ArrowFileScan>(context, file);
 }
 
 void ArrowMultiFileInfo::FinishReading(ClientContext& context,
