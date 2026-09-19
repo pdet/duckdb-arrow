@@ -1,0 +1,18 @@
+# name: benchmark/micro/write_nested.benchmark
+# description: Write lists, structs and columns with NULLs
+# group: [micro]
+
+name Write nested
+group micro
+
+require nanoarrow
+
+load
+CREATE TABLE nested AS SELECT i, CASE WHEN i % 3 = 0 THEN NULL ELSE i END AS n, [i, i + 1, NULL] AS l, {'a': i, 'b': 'item_' || (i % 1000)} AS st FROM range(4000000) t(i);
+
+# The runner's disk would dominate the timing, so the output goes nowhere
+run
+COPY nested TO '/dev/null' (FORMAT ARROWS);
+
+result I
+4000000

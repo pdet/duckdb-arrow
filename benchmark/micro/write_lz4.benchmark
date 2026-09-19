@@ -1,8 +1,8 @@
-# name: benchmark/micro/write.benchmark
-# description: Write one uncompressed file
+# name: benchmark/micro/write_lz4.benchmark
+# description: Write one file compressed with lz4
 # group: [micro]
 
-name Write
+name Write lz4
 group micro
 
 require nanoarrow
@@ -12,7 +12,7 @@ CREATE TABLE mixed AS SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i
 
 # The runner's disk would dominate the timing, so the output goes nowhere
 run
-COPY mixed TO '/dev/null' (FORMAT ARROWS);
+COPY mixed TO '/dev/null' (FORMAT ARROWS, COMPRESSION 'lz4');
 
 result I
 8000000
