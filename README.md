@@ -255,13 +255,14 @@ build/release/benchmark/benchmark_runner benchmark/micro/read_large_batches.benc
 
 The `Regression` workflow builds the runner for the base branch and for the pull
 request, then runs the benchmarks in `.github/regression/micro.csv` with DuckDB's
-`scripts/regression/test_runner.py`. It reports every benchmark that is 10%
-slower, and fails when a benchmark errors or returns a wrong result or when the
-geometric mean of all of them is 10% slower. The same comparison runs locally
-against two runners built from different checkouts.
+`scripts/regression/test_runner.py` through `.github/regression/run.py`. It fails
+when a benchmark errors or returns a wrong result, when the geometric mean of all
+of them is 10% slower, or when a single benchmark is 10% slower in two runs in a
+row, since the second run filters out runner noise. The same comparison runs
+locally against two runners built from different checkouts.
 
 ``` shell
-python3 duckdb/scripts/regression/test_runner.py \
+python3 .github/regression/run.py \
   --old ../base/build/release/benchmark/benchmark_runner \
   --new build/release/benchmark/benchmark_runner \
   --benchmarks .github/regression/micro.csv
