@@ -28,8 +28,6 @@ struct ArrowFileLocalState : public LocalTableFunctionState {
   unique_ptr<IPCFileStreamReader> block_reader;
   //! The file scan that block_reader and the scan data belong to, zero for none
   idx_t block_scan_id = 0;
-  //! Whether the projection was already pushed into block_reader
-  bool block_reader_projected = false;
   //! The claim that TryInitializeScan handed to this state
   idx_t claim_index = 0;
   //! Set when no file column is read, so the scan only counts rows from the headers
@@ -38,6 +36,8 @@ struct ArrowFileLocalState : public LocalTableFunctionState {
   unique_ptr<IPCFileStreamReader> count_owned_reader;
   //! Rows of the current batch that the counting scan has not emitted yet
   idx_t count_rows_left = 0;
+  //! Whether Scan has started the scan that PrepareScan set up
+  bool scan_started = false;
 
   //! Factory Pointer
   shared_ptr<ArrowFileScan> file_scan;
@@ -100,6 +100,11 @@ struct ArrowMultiFileInfo : MultiFileReaderInterface {
   optional_idx MaxThreads(const MultiFileBindData& bind_data_p,
                           const MultiFileGlobalState& global_state,
                           FileExpandResult expand_result) override;
+
+  //! Claims fetch in ScheduleIO and files open on their own, so jobs can run ahead
+  bool SupportsReadAhead(const MultiFileBindData& bind_data) const override {
+    return true;
+  }
 
   unique_ptr<GlobalTableFunctionState> InitializeGlobalState(
       ClientContext& context, MultiFileBindData& bind_data,
