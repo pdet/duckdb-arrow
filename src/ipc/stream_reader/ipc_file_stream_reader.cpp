@@ -90,13 +90,15 @@ bool CopyFooterBlocks(const ArrowBuffer& source, idx_t file_size,
   for (const auto& block : blocks) {
     // Messages start aligned after the leading magic, and a scan seeks straight to them
     if (block.offset < static_cast<int64_t>(kArrowIPCFileHeaderSize) ||
-        block.offset % 8 != 0 || block.metadata_length <= 0 || block.body_length < 0) {
+        block.offset % 8 != 0 || block.body_length < 0 ||
+        block.metadata_length < static_cast<int32_t>(sizeof(ArrowIpcMessagePrefix))) {
       return false;
     }
-    const auto end = static_cast<idx_t>(block.offset) +
-                     static_cast<idx_t>(block.metadata_length) +
-                     static_cast<idx_t>(block.body_length);
-    if (end > file_size) {
+    // Each length is bounded by what is left, so their sum cannot wrap around
+    const auto offset = static_cast<idx_t>(block.offset);
+    const auto metadata_length = static_cast<idx_t>(block.metadata_length);
+    if (offset > file_size || metadata_length > file_size - offset ||
+        static_cast<idx_t>(block.body_length) > file_size - offset - metadata_length) {
       return false;
     }
   }
@@ -139,9 +141,11 @@ bool IPCFileStreamReader::TryReadFooter() {
                                 &footer_error) != NANOARROW_OK) {
     return false;
   }
-  // Verification adds the tail to this size in int32, so bound it in 64 bits first
+  // Verification adds the tail to this size in int32, so the sum must fit there too
   const auto footer_size = static_cast<int64_t>(scratch->header_size_bytes);
-  if (footer_size <= 0 || static_cast<idx_t>(footer_size) > file_size - kFooterTailSize) {
+  if (footer_size <= 0 || static_cast<idx_t>(footer_size) > file_size - kFooterTailSize ||
+      footer_size >
+          NumericLimits<int32_t>::Maximum() - static_cast<int64_t>(kFooterTailSize)) {
     return false;
   }
 
