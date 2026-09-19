@@ -2,6 +2,7 @@
 
 #include <inttypes.h>
 
+#include "file_scanner/arrow_file_scan.hpp"
 #include "file_scanner/arrow_multi_file_info.hpp"
 #include "zstd.h"
 
@@ -83,6 +84,11 @@ void RegisterReadArrowStream(ExtensionLoader& loader) {
   loader.RegisterFunction(function);
   auto& config = DBConfig::GetConfig(loader.GetDatabaseInstance());
   config.replacement_scans.emplace_back(ReadArrowStream::ScanReplacement);
+  config.AddExtensionOption(
+      kDebugClaimBytesSetting,
+      "Closes each parallel claim of an Arrow file once it holds this "
+      "many body bytes, 0 keeps the default",
+      LogicalType::UBIGINT, Value::UBIGINT(0), nullptr, SetScope::GLOBAL, true);
 }
 
 }  // namespace ext_nanoarrow

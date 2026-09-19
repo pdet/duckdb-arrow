@@ -39,6 +39,8 @@ class ColumnDataCollectionSerializer {
   idx_t Serialize(ArrowAppender& appender);
 
   idx_t Serialize(const ColumnDataCollection& buffer);
+  //! Encodes the chunk rows starting at from and stopping before to as one record batch
+  idx_t Serialize(DataChunk& chunk, idx_t from, idx_t to);
 
   ArrowIpcFileBlock Flush(BufferedFileWriter& writer);
   //! Hands the message to the async writer, which frees it once written

@@ -203,6 +203,12 @@ idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buff
   return Serialize(appender);
 }
 
+idx_t ColumnDataCollectionSerializer::Serialize(DataChunk& chunk, idx_t from, idx_t to) {
+  ArrowAppender appender(chunk.GetTypes(), to - from, options, extension_types);
+  appender.Append(chunk, from, to, chunk.size());
+  return Serialize(appender);
+}
+
 namespace {
 //! Keeps an encoded buffer alive while the async writer writes a slice of it
 class ArrowWriteBuffer final : public AsyncWriteBuffer {

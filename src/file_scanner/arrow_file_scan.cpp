@@ -35,17 +35,24 @@ ArrowFileScan::ArrowFileScan(ClientContext& context, const OpenFileInfo& file)
   reader.TrackProgress(progress_offset);
   count_without_bodies = reader.CanCountWithoutBodies();
   if (reader.TryReadFooter()) {
-    PlanClaims(reader.RecordBatchBlocks());
+    auto min_claim_bytes = kMinClaimBodyBytes;
+    Value debug_claim_bytes;
+    if (context.TryGetCurrentSetting(kDebugClaimBytesSetting, debug_claim_bytes) &&
+        debug_claim_bytes.GetValue<uint64_t>() > 0) {
+      min_claim_bytes = debug_claim_bytes.GetValue<uint64_t>();
+    }
+    PlanClaims(reader.RecordBatchBlocks(), min_claim_bytes);
     dictionary_blocks = reader.DictionaryBlocks();
   }
 }
 
-void ArrowFileScan::PlanClaims(const vector<ArrowIpcFileBlock>& file_blocks) {
+void ArrowFileScan::PlanClaims(const vector<ArrowIpcFileBlock>& file_blocks,
+                               idx_t min_claim_bytes) {
   idx_t begin = 0;
   idx_t body_bytes = 0;
   for (idx_t i = 0; i < file_blocks.size(); i++) {
     body_bytes += static_cast<idx_t>(file_blocks[i].body_length);
-    if (body_bytes >= kMinClaimBodyBytes) {
+    if (body_bytes >= min_claim_bytes) {
       claims.push_back(BlockRange{begin, i + 1});
       begin = i + 1;
       body_bytes = 0;

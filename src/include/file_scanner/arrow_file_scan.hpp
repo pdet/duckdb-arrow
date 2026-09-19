@@ -18,6 +18,9 @@ namespace ext_nanoarrow {
 
 struct ArrowFileLocalState;
 
+//! Stresses parallel scans with claims of a few blocks, for the test config that sets it
+constexpr const char* kDebugClaimBytesSetting = "arrow_debug_claim_bytes";
+
 //! This class refers to an Arrow File Scan
 class ArrowFileScan : public BaseFileReader {
  public:
@@ -58,7 +61,7 @@ class ArrowFileScan : public BaseFileReader {
   };
 
   //! Groups the footer blocks into claims, leaving none when one scan reads the file
-  void PlanClaims(const vector<ArrowIpcFileBlock>& file_blocks);
+  void PlanClaims(const vector<ArrowIpcFileBlock>& file_blocks, idx_t min_claim_bytes);
   void InitializeScanData(ArrowFileLocalState& lstate, stream_factory_produce_t producer,
                           uintptr_t producer_data);
   void StartScan(ClientContext& context, ArrowFileLocalState& lstate);

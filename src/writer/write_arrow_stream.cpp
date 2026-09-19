@@ -31,7 +31,12 @@ struct ArrowWriteBindData : public TableFunctionData {
   bool file_format = true;
   bool size_metadata = false;
   idx_t row_group_size = 122880;
+  //! Rows per record batch the debug setting asks for, 0 keeps each batch whole
+  idx_t debug_batch_rows = 0;
 };
+
+//! Stresses readers with many small batches, for the test config that sets it
+constexpr const char* kDebugBatchRowsSetting = "arrow_debug_batch_rows";
 
 struct ArrowWriteGlobalState : public GlobalFunctionData {
   unique_ptr<ArrowStreamWriter> writer;
@@ -150,6 +155,10 @@ unique_ptr<FunctionData> ArrowWriteBind(ClientContext& context,
   }
 
   bind_data->sql_types = sql_types;
+  Value debug_batch_rows;
+  if (context.TryGetCurrentSetting(kDebugBatchRowsSetting, debug_batch_rows)) {
+    bind_data->debug_batch_rows = debug_batch_rows.GetValue<uint64_t>();
+  }
 
   return std::move(bind_data);
 }
@@ -208,6 +217,8 @@ idx_t ArrowWriteFileSizeBytes(GlobalFunctionData& gstate) {
 
 struct ArrowWriteBatchData : public PreparedBatchData {
   unique_ptr<ColumnDataCollectionSerializer> serializer;
+  //! The rows the flush cuts into small batches, when the debug setting is on
+  unique_ptr<ColumnDataCollection> collection;
 };
 
 // Batch preparation runs concurrently and only reads the shared schema.
@@ -217,6 +228,11 @@ unique_ptr<PreparedBatchData> ArrowWritePrepareBatch(
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
 
   auto batch = make_uniq<ArrowWriteBatchData>();
+  // Small batches are encoded in the flush, so one serializer at a time holds them
+  if (bind_data.Cast<ArrowWriteBindData>().debug_batch_rows > 0) {
+    batch->collection = std::move(collection);
+    return std::move(batch);
+  }
   batch->serializer = global_state.writer->NewSerializer();
   batch->serializer->Serialize(*collection);
   collection->Reset();
@@ -228,12 +244,30 @@ void ArrowWriteFlushBatch(ClientContext& context, FunctionData& bind_data,
                           GlobalFunctionData& gstate, PreparedBatchData& batch_p) {
   auto& global_state = gstate.Cast<ArrowWriteGlobalState>();
   auto& batch = batch_p.Cast<ArrowWriteBatchData>();
-  global_state.writer->Flush(*batch.serializer);
+  if (!batch.collection) {
+    global_state.writer->Flush(*batch.serializer);
+    return;
+  }
+  const auto rows = bind_data.Cast<ArrowWriteBindData>().debug_batch_rows;
+  auto serializer = global_state.writer->NewSerializer();
+  for (auto& chunk : batch.collection->Chunks()) {
+    for (idx_t from = 0; from < chunk.size(); from += rows) {
+      serializer->Serialize(chunk, from, MinValue<idx_t>(chunk.size(), from + rows));
+      global_state.writer->Flush(*serializer);
+    }
+  }
 }
 
 }  // namespace
 
 void RegisterArrowStreamCopyFunction(ExtensionLoader& loader) {
+  DBConfig::GetConfig(loader.GetDatabaseInstance())
+      .AddExtensionOption(kDebugBatchRowsSetting,
+                          "Cuts every chunk COPY writes to Arrow into record batches of "
+                          "this many rows, 0 keeps whole batches",
+                          LogicalType::UBIGINT, Value::UBIGINT(0), nullptr,
+                          SetScope::GLOBAL, true);
+
   CopyFunction function("arrows");
   function.copy_to_bind = ArrowWriteBind;
   function.copy_to_initialize_global = ArrowWriteInitializeGlobal;

@@ -1,0 +1,22 @@
+{
+  "description": "Write record batches of two rows and claim them 1 KB of body at a time, so scans read thousands of footer blocks in thousands of parallel claims.",
+  "on_new_connection": "LOAD nanoarrow; SET GLOBAL arrow_debug_batch_rows = 2; SET GLOBAL arrow_debug_claim_bytes = 1024;",
+  "skip_tests": [
+    {
+      "reason": "Sizes, bytes read, request counts and compression gains are asserted for batches of normal size.",
+      "paths": [
+        "test/sql/compression.test",
+        "test/sql/projection_io.test",
+        "test/sql/remote_requests.test",
+        "test/sql/size_metadata.test",
+        "test/sql/write_arrow_file.test"
+      ]
+    },
+    {
+      "reason": "The extension is loaded before the test checks it is not.",
+      "paths": [
+        "test/sql/nanoarrow.test"
+      ]
+    }
+  ]
+}

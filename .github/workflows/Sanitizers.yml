@@ -71,3 +71,7 @@ jobs:
 
       - name: Test
         run: build/${{ matrix.target }}/test/unittest "test/*"
+
+      # Two row batches in 1 KB claims make scans read thousands of footer blocks on many threads
+      - name: Test small batches
+        run: build/${{ matrix.target }}/test/unittest --test-config test/configs/small_batches.json "~[.]test/*"
