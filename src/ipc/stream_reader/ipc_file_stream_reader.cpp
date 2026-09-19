@@ -14,6 +14,8 @@ namespace {
 constexpr idx_t kCoalesceGapBytes = 64 * 1024;
 //! Small bodies are read whole, several reads cost more than the bytes they save
 constexpr idx_t kMinBodyBytesForRanges = 1024 * 1024;
+//! A remote header read is a round trip, which costs more than this many unneeded bytes
+constexpr idx_t kRemoteMinBodyBytesForRanges = 8 * 1024 * 1024;
 //! Reading most of the body is the whole body read with extra system calls
 constexpr double kMaxProjectedFraction = 0.8;
 //! Enough for the footer of most files, so reading it costs one request
@@ -110,11 +112,15 @@ bool CopyFooterBlocks(const ArrowBuffer& source, idx_t file_size,
 
 }  // namespace
 IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle,
-                                         Allocator& allocator)
+                                         Allocator& allocator,
+                                         optional_ptr<TaskScheduler> scheduler)
     : IPCStreamReader(allocator), file_reader(fs, std::move(handle)) {
   // Regular and remote files read at an offset, and asking a remote one its type opens it
   remote = FileSystem::IsRemoteFile(file_reader.handle->GetPath());
   positional = remote || file_reader.handle->GetType() == FileType::FILE_TYPE_REGULAR;
+  if (remote) {
+    this->scheduler = scheduler;
+  }
 }
 
 bool IPCFileStreamReader::TryReadFooter() {
@@ -416,10 +422,11 @@ void IPCFileStreamReader::FetchBlocks(bool whole) {
       projected_fields.size() < static_cast<idx_t>(GetBaseSchema()->n_children);
   vector<idx_t> whole_blocks;
   vector<idx_t> ranged_blocks;
+  const auto min_ranged_body =
+      remote ? kRemoteMinBodyBytesForRanges : kMinBodyBytesForRanges;
   for (idx_t i = 0; i < count; i++) {
     // Several reads of a small body cost more than the bytes they would save
-    if (projected &&
-        static_cast<idx_t>(next_block[i].body_length) >= kMinBodyBytesForRanges) {
+    if (projected && static_cast<idx_t>(next_block[i].body_length) >= min_ranged_body) {
       ranged_blocks.push_back(i);
     } else {
       whole_blocks.push_back(i);
@@ -496,6 +503,11 @@ void IPCFileStreamReader::PlanProjectedBlock(const ArrowIpcFileBlock& block,
 }
 
 void IPCFileStreamReader::ReadAll(const vector<FileRead>& reads) {
+  // Local reads are cheap one after another, remote ones each wait a round trip
+  if (scheduler && reads.size() > 1) {
+    ReadConcurrently(*scheduler, *file_reader.handle, reads);
+    return;
+  }
   for (const auto& read : reads) {
     file_reader.handle->Read(read.target, read.size, read.location);
   }

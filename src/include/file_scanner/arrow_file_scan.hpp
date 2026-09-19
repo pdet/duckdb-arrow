@@ -57,8 +57,8 @@ class ArrowFileScan : public BaseFileReader {
     idx_t end;
   };
 
-  //! Groups the footer blocks into claims, leaving none when one scan reads the file
-  void PlanClaims(const vector<ArrowIpcFileBlock>& file_blocks);
+  //! Groups the footer blocks into claims of at least this many body bytes
+  void PlanClaims(const vector<ArrowIpcFileBlock>& file_blocks, idx_t min_claim_bytes);
   void InitializeScanData(ArrowFileLocalState& lstate, stream_factory_produce_t producer,
                           uintptr_t producer_data);
   void StartScan(ClientContext& context, ArrowFileLocalState& lstate);

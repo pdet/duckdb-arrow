@@ -18,6 +18,10 @@ COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, 'item_' || (i % 5
 TO '{DATA_PATH}/wide.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 1000000);
 
 statement ok
+COPY (SELECT i AS id, i % 7 AS k FROM range(200000) t(i))
+TO '{DATA_PATH}/many' (FORMAT ARROW, ROW_GROUP_SIZE 20480, ROW_GROUPS_PER_FILE 2);
+
+statement ok
 SET logging_storage = 'memory';
 
 statement ok
@@ -62,6 +66,20 @@ SELECT count(*) FROM read_arrow('{DATA_PATH}/wide.arrow');
 query I
 SELECT coalesce(sum(response.headers['Content-Length']::BIGINT), 0) < 200000
 FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
+----
+true
+
+statement ok
+CALL truncate_duckdb_logs();
+
+# Each of the five files is one claim, fetched at once instead of batch by batch
+query II
+SELECT count(*), sum(k) FROM read_arrow('{DATA_PATH}/many/*.arrow');
+----
+200000	599994
+
+query I
+SELECT count(*) <= 21 FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
 ----
 true
 

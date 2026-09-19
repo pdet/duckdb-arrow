@@ -68,6 +68,7 @@ class FileIPCStreamFactory final : public ArrowIPCStreamFactory {
   unique_ptr<IPCFileStreamReader> OpenReader() const;
 
   FileSystem& fs;
+  TaskScheduler& scheduler;
   OpenFileInfo file;
 };
 }  // namespace ext_nanoarrow

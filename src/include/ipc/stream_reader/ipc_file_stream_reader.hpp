@@ -9,6 +9,7 @@
 #pragma once
 
 #include "ipc/stream_reader/base_stream_reader.hpp"
+#include "ipc/stream_reader/concurrent_reads.hpp"
 
 namespace duckdb {
 namespace ext_nanoarrow {
@@ -19,18 +20,12 @@ struct BodyRange {
   idx_t end;
 };
 
-//! A read of the file into memory that a fetch planned
-struct FileRead {
-  data_ptr_t target;
-  idx_t size;
-  idx_t location;
-};
-
 //! IPC File
 class IPCFileStreamReader final : public IPCStreamReader {
  public:
-  IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle,
-                      Allocator& allocator);
+  //! A scheduler lets the reads of one fetch of a remote file run at the same time
+  IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle, Allocator& allocator,
+                      optional_ptr<TaskScheduler> scheduler = nullptr);
 
   ArrowIpcMessageType ReadNextMessage() override;
 
@@ -39,6 +34,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
 
   //! The size of the file being read, for estimating a row count without a footer
   idx_t FileSize() { return file_reader.FileSize(); }
+  //! Remote reads pay a round trip each, so they are merged and fetched differently
+  bool IsRemote() const { return remote; }
 
   //! Reads the footer once, false when the file has none and the scan stays sequential
   bool TryReadFooter();
@@ -71,8 +68,9 @@ class IPCFileStreamReader final : public IPCStreamReader {
   shared_ptr<AllocatedData> message_body;
   //! Pipes and character devices must keep the sequential read
   bool positional = false;
-  //! Remote reads pay a round trip each, so they are merged over larger gaps
   bool remote = false;
+  //! Runs the reads of a remote file at the same time, none for a local one
+  optional_ptr<TaskScheduler> scheduler;
   //! The claimed blocks in memory, empty until FetchBlocks runs
   vector<FetchedBlock> fetched_blocks;
   idx_t fetched_index = 0;
@@ -109,7 +107,7 @@ class IPCFileStreamReader final : public IPCStreamReader {
   //! Plans the body ranges a projection needs once the block header is in memory
   void PlanProjectedBlock(const ArrowIpcFileBlock& block, FetchedBlock& fetched,
                           vector<FileRead>& reads);
-  //! Runs planned reads
+  //! Runs planned reads, at the same time when the file is remote
   void ReadAll(const vector<FileRead>& reads);
   //! Points the current body at the scratch space a count reads no bytes into
   void SetUnreadBody(idx_t size);

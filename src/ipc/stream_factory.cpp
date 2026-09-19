@@ -69,6 +69,7 @@ void BufferIPCStreamFactory::InitReader() {
 FileIPCStreamFactory::FileIPCStreamFactory(ClientContext& context, OpenFileInfo file)
     : ArrowIPCStreamFactory(BufferAllocator::Get(context)),
       fs(FileSystem::GetFileSystem(context)),
+      scheduler(TaskScheduler::GetScheduler(context)),
       file(std::move(file)) {}
 
 void FileIPCStreamFactory::InitReader() {
@@ -80,7 +81,7 @@ void FileIPCStreamFactory::InitReader() {
 
 unique_ptr<IPCFileStreamReader> FileIPCStreamFactory::OpenReader() const {
   unique_ptr<FileHandle> handle = fs.OpenFile(file, FileOpenFlags::FILE_FLAGS_READ);
-  return make_uniq<IPCFileStreamReader>(fs, std::move(handle), allocator);
+  return make_uniq<IPCFileStreamReader>(fs, std::move(handle), allocator, &scheduler);
 }
 
 }  // namespace ext_nanoarrow
