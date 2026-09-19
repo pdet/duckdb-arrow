@@ -78,8 +78,6 @@ class IPCStreamReader {
   bool NeedsEndianSwap() const;
 
   static ArrowBufferView AllocatedDataView(const_data_ptr_t data, int64_t size);
-  static nanoarrow::UniqueBuffer AllocatedDataToOwningBuffer(
-      const shared_ptr<AllocatedData>& data);
 
   static const char* MessageTypeString(ArrowIpcMessageType message_type);
 
