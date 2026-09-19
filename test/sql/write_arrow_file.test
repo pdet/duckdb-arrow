@@ -4,28 +4,30 @@
 
 require nanoarrow
 
+test-env DATA_PATH {TEST_DIR}
+
 statement ok
 CREATE TABLE test AS SELECT i, (i % 7)::VARCHAR AS s FROM range(100000) t(i);
 
 statement ok
-COPY test TO '__TEST_DIR__/test.arrow';
+COPY test TO '{DATA_PATH}/test.arrow';
 
 query II
-SELECT content[1:8] = 'ARROW1\x00\x00'::BLOB, content[-6:] = 'ARROW1'::BLOB FROM read_blob('__TEST_DIR__/test.arrow');
+SELECT content[1:8] = 'ARROW1\x00\x00'::BLOB, content[-6:] = 'ARROW1'::BLOB FROM read_blob('{DATA_PATH}/test.arrow');
 ----
 true	true
 
 query I
-SELECT count(*) FROM (FROM test EXCEPT ALL FROM read_arrow('__TEST_DIR__/test.arrow'));
+SELECT count(*) FROM (FROM test EXCEPT ALL FROM read_arrow('{DATA_PATH}/test.arrow'));
 ----
 0
 
 # Empty output still has a schema and a footer, with no record batches.
 statement ok
-COPY (FROM test WHERE false) TO '__TEST_DIR__/empty.arrow';
+COPY (FROM test WHERE false) TO '{DATA_PATH}/empty.arrow';
 
 query I
-SELECT count(*) FROM read_arrow('__TEST_DIR__/empty.arrow');
+SELECT count(*) FROM read_arrow('{DATA_PATH}/empty.arrow');
 ----
 0
 
@@ -36,10 +38,10 @@ statement ok
 SET preserve_insertion_order=false;
 
 statement ok
-COPY test TO '__TEST_DIR__/rotate' (FORMAT ARROW, ROW_GROUP_SIZE 4096, ROW_GROUPS_PER_FILE 5);
+COPY test TO '{DATA_PATH}/rotate' (FORMAT ARROW, ROW_GROUP_SIZE 4096, ROW_GROUPS_PER_FILE 5);
 
 query III
-SELECT (SELECT count(*) > 1 FROM glob('__TEST_DIR__/rotate/*.arrow')), count(*), (SELECT count(*) FROM (FROM test EXCEPT ALL FROM read_arrow('__TEST_DIR__/rotate/*.arrow'))) FROM read_arrow('__TEST_DIR__/rotate/*.arrow');
+SELECT (SELECT count(*) > 1 FROM glob('{DATA_PATH}/rotate/*.arrow')), count(*), (SELECT count(*) FROM (FROM test EXCEPT ALL FROM read_arrow('{DATA_PATH}/rotate/*.arrow'))) FROM read_arrow('{DATA_PATH}/rotate/*.arrow');
 ----
 true	100000	0
 
@@ -48,12 +50,12 @@ statement ok
 CREATE TYPE mood AS ENUM ('happy', 'sad');
 
 statement error
-COPY (SELECT 'happy'::mood AS m WHERE false) TO '__TEST_DIR__/enum.arrow';
+COPY (SELECT 'happy'::mood AS m WHERE false) TO '{DATA_PATH}/enum.arrow';
 ----
 Not implemented Error: Arrow IPC output does not support ENUM values in column "m"
 
 statement error
-COPY (SELECT [{'m': 'happy'::mood}] AS nested) TO '__TEST_DIR__/enum.arrow';
+COPY (SELECT [{'m': 'happy'::mood}] AS nested) TO '{DATA_PATH}/enum.arrow';
 ----
 column "nested"
 
@@ -64,7 +66,7 @@ Not implemented Error: Arrow IPC output does not support ENUM values in column "
 
 # The bind error leaves the database usable
 query I
-SELECT count(*) FROM read_arrow('__TEST_DIR__/empty.arrow');
+SELECT count(*) FROM read_arrow('{DATA_PATH}/empty.arrow');
 ----
 0
 
@@ -73,10 +75,10 @@ statement ok
 SET threads=1;
 
 statement ok
-COPY (SELECT i FROM range(5000) t(i)) TO '__TEST_DIR__/tiny' (FORMAT ARROW, FILE_SIZE_BYTES 50, ROW_GROUP_SIZE 1);
+COPY (SELECT i FROM range(5000) t(i)) TO '{DATA_PATH}/tiny' (FORMAT ARROW, FILE_SIZE_BYTES 50, ROW_GROUP_SIZE 1);
 
 query II
-SELECT (SELECT count(*) > 1 FROM glob('__TEST_DIR__/tiny/*.arrow')), count(*) FROM read_arrow('__TEST_DIR__/tiny/*.arrow');
+SELECT (SELECT count(*) > 1 FROM glob('{DATA_PATH}/tiny/*.arrow')), count(*) FROM read_arrow('{DATA_PATH}/tiny/*.arrow');
 ----
 true	5000
 
@@ -85,7 +87,7 @@ statement ok
 SET arrow_output_version='1.4';
 
 statement error
-COPY (SELECT 'a'::BLOB AS b) TO '__TEST_DIR__/view.arrow';
+COPY (SELECT 'a'::BLOB AS b) TO '{DATA_PATH}/view.arrow';
 ----
 Not implemented Error: Arrow IPC output does not support the Arrow view type "vz" in column "b"
 
@@ -99,20 +101,20 @@ RESET arrow_output_version;
 
 # NUL bytes in metadata values are rejected
 statement error
-COPY (SELECT 1 AS x) TO '__TEST_DIR__/nul.arrow' (KV_METADATA {'k': 'ab\x00cd'::BLOB});
+COPY (SELECT 1 AS x) TO '{DATA_PATH}/nul.arrow' (KV_METADATA {'k': 'ab\x00cd'::BLOB});
 ----
 Metadata value for key "k" must not contain NUL bytes
 
 # A column without NULLs has no validity bitmap, which would double these 10 KB
 statement ok
-COPY (SELECT i % 2 = 0 AS a FROM range(80000) t(i)) TO '__TEST_DIR__/no_validity.arrows' (FORMAT ARROWS);
+COPY (SELECT i % 2 = 0 AS a FROM range(80000) t(i)) TO '{DATA_PATH}/no_validity.arrows' (FORMAT ARROWS);
 
 query II
-SELECT count(*), count(*) FILTER (WHERE a) FROM read_arrow('__TEST_DIR__/no_validity.arrows');
+SELECT count(*), count(*) FILTER (WHERE a) FROM read_arrow('{DATA_PATH}/no_validity.arrows');
 ----
 80000	40000
 
 query I
-SELECT size < 15000 FROM read_blob('__TEST_DIR__/no_validity.arrows');
+SELECT size < 15000 FROM read_blob('{DATA_PATH}/no_validity.arrows');
 ----
 true

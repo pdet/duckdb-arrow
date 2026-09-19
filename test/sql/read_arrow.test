@@ -5,29 +5,31 @@
 # Require statement will ensure this test is run with this extension loaded
 require nanoarrow
 
+test-env DATA_PATH {TEST_DIR}
+
 # Check a basic roundtrip
 statement ok
-COPY (SELECT 42 as foofy, 'string' as stringy) TO "__TEST_DIR__/test.arrows" (FORMAT ARROWS);
+COPY (SELECT 42 as foofy, 'string' as stringy) TO "{DATA_PATH}/test.arrows" (FORMAT ARROWS);
 
 query II
-SELECT * FROM read_arrow('__TEST_DIR__/test.arrows');
+SELECT * FROM read_arrow('{DATA_PATH}/test.arrows');
 ----
 42	string
 
 # Check that the replacement scan works
 query II
-SELECT * FROM "__TEST_DIR__/test.arrows";
+SELECT * FROM "{DATA_PATH}/test.arrows";
 ----
 42	string
 
 # Make sure these project correctly
 query I
-SELECT foofy FROM read_arrow('__TEST_DIR__/test.arrows')
+SELECT foofy FROM read_arrow('{DATA_PATH}/test.arrows')
 ----
 42
 
 query I
-SELECT stringy FROM read_arrow('__TEST_DIR__/test.arrows')
+SELECT stringy FROM read_arrow('{DATA_PATH}/test.arrows')
 ----
 string
 

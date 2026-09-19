@@ -5,6 +5,8 @@
 # Require statement will ensure this test is run with this extension loaded
 require nanoarrow
 
+test-env DATA_PATH {TEST_DIR}
+
 statement ok
 CREATE TABLE test AS
 SELECT i, (i % 7)::VARCHAR AS s, CASE WHEN i % 11 = 0 THEN NULL ELSE i END AS n
@@ -13,15 +15,15 @@ FROM range(1024) t(i);
 foreach compression zstd lz4 uncompressed
 
 statement ok
-COPY test TO '__TEST_DIR__/test_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}');
+COPY test TO '{DATA_PATH}/test_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}');
 
 query I
-SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_${compression}.arrows'));
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('{DATA_PATH}/test_${compression}.arrows'));
 ----
 0
 
 query I
-SELECT count(*) FROM (SELECT * FROM read_arrow('__TEST_DIR__/test_${compression}.arrows') EXCEPT ALL SELECT * FROM test);
+SELECT count(*) FROM (SELECT * FROM read_arrow('{DATA_PATH}/test_${compression}.arrows') EXCEPT ALL SELECT * FROM test);
 ----
 0
 
@@ -29,12 +31,12 @@ endloop
 
 # Compressed files are smaller than the uncompressed one
 query I
-SELECT (SELECT size FROM read_blob('__TEST_DIR__/test_zstd.arrows')) < (SELECT size FROM read_blob('__TEST_DIR__/test_uncompressed.arrows'));
+SELECT (SELECT size FROM read_blob('{DATA_PATH}/test_zstd.arrows')) < (SELECT size FROM read_blob('{DATA_PATH}/test_uncompressed.arrows'));
 ----
 true
 
 query I
-SELECT (SELECT size FROM read_blob('__TEST_DIR__/test_lz4.arrows')) < (SELECT size FROM read_blob('__TEST_DIR__/test_uncompressed.arrows'));
+SELECT (SELECT size FROM read_blob('{DATA_PATH}/test_lz4.arrows')) < (SELECT size FROM read_blob('{DATA_PATH}/test_uncompressed.arrows'));
 ----
 true
 
@@ -42,10 +44,10 @@ true
 foreach compression LZ4_FRAME None
 
 statement ok
-COPY test TO '__TEST_DIR__/test_alias.arrows' (FORMAT ARROWS, COMPRESSION '${compression}');
+COPY test TO '{DATA_PATH}/test_alias.arrows' (FORMAT ARROWS, COMPRESSION '${compression}');
 
 query I
-SELECT count(*) FROM read_arrow('__TEST_DIR__/test_alias.arrows');
+SELECT count(*) FROM read_arrow('{DATA_PATH}/test_alias.arrows');
 ----
 1024
 
@@ -58,17 +60,17 @@ foreach compression zstd lz4
 foreach level 1 9
 
 statement ok
-COPY test TO '__TEST_DIR__/test_${compression}_${level}.arrows' (FORMAT ARROWS, COMPRESSION_LEVEL ${level}, COMPRESSION '${compression}');
+COPY test TO '{DATA_PATH}/test_${compression}_${level}.arrows' (FORMAT ARROWS, COMPRESSION_LEVEL ${level}, COMPRESSION '${compression}');
 
 endloop
 
 query I
-SELECT (SELECT content FROM read_blob('__TEST_DIR__/test_${compression}_1.arrows')) <> (SELECT content FROM read_blob('__TEST_DIR__/test_${compression}_9.arrows'));
+SELECT (SELECT content FROM read_blob('{DATA_PATH}/test_${compression}_1.arrows')) <> (SELECT content FROM read_blob('{DATA_PATH}/test_${compression}_9.arrows'));
 ----
 true
 
 query I
-SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_${compression}_9.arrows'));
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('{DATA_PATH}/test_${compression}_9.arrows'));
 ----
 0
 
@@ -76,36 +78,36 @@ endloop
 
 # Option errors
 statement error
-COPY test TO '__TEST_DIR__/test_error.arrows' (FORMAT ARROWS, COMPRESSION 'snappy');
+COPY test TO '{DATA_PATH}/test_error.arrows' (FORMAT ARROWS, COMPRESSION 'snappy');
 ----
 Unsupported compression type "snappy"
 
 statement error
-COPY test TO '__TEST_DIR__/test_error.arrows' (FORMAT ARROWS, COMPRESSION_LEVEL 3);
+COPY test TO '{DATA_PATH}/test_error.arrows' (FORMAT ARROWS, COMPRESSION_LEVEL 3);
 ----
 COMPRESSION_LEVEL requires COMPRESSION
 
 statement error
-COPY test TO '__TEST_DIR__/test_error.arrows' (FORMAT ARROWS, COMPRESSION 'uncompressed', COMPRESSION_LEVEL 3);
+COPY test TO '{DATA_PATH}/test_error.arrows' (FORMAT ARROWS, COMPRESSION 'uncompressed', COMPRESSION_LEVEL 3);
 ----
 COMPRESSION_LEVEL requires COMPRESSION
 
 statement error
-COPY test TO '__TEST_DIR__/test_error.arrows' (FORMAT ARROWS, COMPRESSION 'zstd', COMPRESSION_LEVEL 1000);
+COPY test TO '{DATA_PATH}/test_error.arrows' (FORMAT ARROWS, COMPRESSION 'zstd', COMPRESSION_LEVEL 1000);
 ----
 Compression level for zstd must be between
 
 statement error
-COPY test TO '__TEST_DIR__/test_error.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', COMPRESSION_LEVEL 13);
+COPY test TO '{DATA_PATH}/test_error.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', COMPRESSION_LEVEL 13);
 ----
 Compression level for lz4 must be between -65536 and 12
 
 # Negative lz4 levels select an acceleration and are valid
 statement ok
-COPY test TO '__TEST_DIR__/test_lz4_fast.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', COMPRESSION_LEVEL -1);
+COPY test TO '{DATA_PATH}/test_lz4_fast.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', COMPRESSION_LEVEL -1);
 
 query I
-SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_lz4_fast.arrows'));
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('{DATA_PATH}/test_lz4_fast.arrows'));
 ----
 0
 
@@ -126,39 +128,39 @@ FROM range(20000) t(i);
 foreach compression zstd lz4
 
 statement ok
-COPY various TO '__TEST_DIR__/various_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}', ROW_GROUP_SIZE 4096);
+COPY various TO '{DATA_PATH}/various_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}', ROW_GROUP_SIZE 4096);
 
 query I
-SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/various_${compression}.arrows'));
+SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow('{DATA_PATH}/various_${compression}.arrows'));
 ----
 0
 
 query I
-SELECT count(*) FROM (SELECT * FROM read_arrow('__TEST_DIR__/various_${compression}.arrows') EXCEPT ALL SELECT * FROM various);
+SELECT count(*) FROM (SELECT * FROM read_arrow('{DATA_PATH}/various_${compression}.arrows') EXCEPT ALL SELECT * FROM various);
 ----
 0
 
 # Projection pushdown over a compressed file
 query II
-SELECT sum(i), count(s) FROM read_arrow('__TEST_DIR__/various_${compression}.arrows');
+SELECT sum(i), count(s) FROM read_arrow('{DATA_PATH}/various_${compression}.arrows');
 ----
 199990000	20000
 
 # Buffers that grow when compressed are stored uncompressed within the compressed batch
 statement ok
-COPY (SELECT 42 AS i, 'x' AS s) TO '__TEST_DIR__/tiny_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}');
+COPY (SELECT 42 AS i, 'x' AS s) TO '{DATA_PATH}/tiny_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}');
 
 query II
-FROM read_arrow('__TEST_DIR__/tiny_${compression}.arrows');
+FROM read_arrow('{DATA_PATH}/tiny_${compression}.arrows');
 ----
 42	x
 
 # Empty result
 statement ok
-COPY (SELECT 42 AS i WHERE false) TO '__TEST_DIR__/empty_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}');
+COPY (SELECT 42 AS i WHERE false) TO '{DATA_PATH}/empty_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}');
 
 query I
-SELECT count(*) FROM read_arrow('__TEST_DIR__/empty_${compression}.arrows');
+SELECT count(*) FROM read_arrow('{DATA_PATH}/empty_${compression}.arrows');
 ----
 0
 
@@ -167,10 +169,10 @@ statement ok
 SET preserve_insertion_order = false;
 
 statement ok
-COPY various TO '__TEST_DIR__/various_parallel_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}', ROW_GROUP_SIZE 4096);
+COPY various TO '{DATA_PATH}/various_parallel_${compression}.arrows' (FORMAT ARROWS, COMPRESSION '${compression}', ROW_GROUP_SIZE 4096);
 
 query I
-SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/various_parallel_${compression}.arrows'));
+SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow('{DATA_PATH}/various_parallel_${compression}.arrows'));
 ----
 0
 
@@ -181,30 +183,30 @@ endloop
 
 # Every file of a multi file write declares the compression in its own schema message
 statement ok
-COPY various TO '__TEST_DIR__/various_files' (FORMAT ARROWS, COMPRESSION 'zstd', ROW_GROUP_SIZE 4096, ROW_GROUPS_PER_FILE 4);
+COPY various TO '{DATA_PATH}/various_files' (FORMAT ARROWS, COMPRESSION 'zstd', ROW_GROUP_SIZE 4096, ROW_GROUPS_PER_FILE 4);
 
 query I
-SELECT count(*) > 1 FROM glob('__TEST_DIR__/various_files/*.arrows');
+SELECT count(*) > 1 FROM glob('{DATA_PATH}/various_files/*.arrows');
 ----
 true
 
 query I
-SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/various_files/*.arrows'));
+SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow('{DATA_PATH}/various_files/*.arrows'));
 ----
 0
 
 # Files with different codecs are read together, each with its own decoder
 query II
-SELECT count(*), sum(i) FROM read_arrow(['__TEST_DIR__/various_zstd.arrows', '__TEST_DIR__/various_lz4.arrows', '__TEST_DIR__/various_files/*.arrows']);
+SELECT count(*), sum(i) FROM read_arrow(['{DATA_PATH}/various_zstd.arrows', '{DATA_PATH}/various_lz4.arrows', '{DATA_PATH}/various_files/*.arrows']);
 ----
 60000	599970000
 
 # Metadata and the compression flag share the schema message
 statement ok
-COPY test TO '__TEST_DIR__/test_meta.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', KV_METADATA {'origin': 'duckdb'});
+COPY test TO '{DATA_PATH}/test_meta.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', KV_METADATA {'origin': 'duckdb'});
 
 query I
-SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/test_meta.arrows'));
+SELECT count(*) FROM (SELECT * FROM test EXCEPT ALL SELECT * FROM read_arrow('{DATA_PATH}/test_meta.arrows'));
 ----
 0
 
@@ -213,7 +215,7 @@ statement ok
 CREATE TABLE various_copy AS SELECT * FROM various WHERE false;
 
 statement ok
-COPY various_copy FROM '__TEST_DIR__/various_zstd.arrows';
+COPY various_copy FROM '{DATA_PATH}/various_zstd.arrows';
 
 query I
 SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM various_copy);
@@ -222,10 +224,10 @@ SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM various_cop
 
 # Columns without buffers or with empty buffers
 statement ok
-COPY (SELECT NULL AS n, NULL::INT AS ni, '' AS e, []::INT[] AS l) TO '__TEST_DIR__/empty_buffers.arrows' (FORMAT ARROWS, COMPRESSION 'zstd');
+COPY (SELECT NULL AS n, NULL::INT AS ni, '' AS e, []::INT[] AS l) TO '{DATA_PATH}/empty_buffers.arrows' (FORMAT ARROWS, COMPRESSION 'zstd');
 
 query IIIII
-SELECT count(*), count(n), count(ni), count(e), count(l) FROM read_arrow('__TEST_DIR__/empty_buffers.arrows');
+SELECT count(*), count(n), count(ni), count(e), count(l) FROM read_arrow('{DATA_PATH}/empty_buffers.arrows');
 ----
 1	0	0	1	1
 
@@ -236,10 +238,10 @@ statement ok
 SET ${setting} = true;
 
 statement ok
-COPY various TO '__TEST_DIR__/various_setting.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', ROW_GROUP_SIZE 4096);
+COPY various TO '{DATA_PATH}/various_setting.arrows' (FORMAT ARROWS, COMPRESSION 'lz4', ROW_GROUP_SIZE 4096);
 
 query I
-SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow('__TEST_DIR__/various_setting.arrows'));
+SELECT count(*) FROM (SELECT * FROM various EXCEPT ALL SELECT * FROM read_arrow('{DATA_PATH}/various_setting.arrows'));
 ----
 0
 

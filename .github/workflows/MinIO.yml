@@ -1,0 +1,60 @@
+name: MinIO
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  minio:
+    name: Tests on MinIO
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GEN: ninja
+      # Adds httpfs to the build, see FULL_TEST_EXTENSION_DEPS in the Makefile
+      BUILD_EXTENSION_TEST_DEPS: full
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+    steps:
+      - name: Install Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
+        with:
+          vcpkgGitCommitId: 84bab45d415d22042bd0b9081aea57f362da3f35
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: minio
+          max-size: 2G
+
+      - name: Build
+        run: make release
+
+      - name: Start MinIO
+        run: ./scripts/start-minio.sh
+
+      # The slow TPC tests never touch DATA_PATH, so they are left out
+      - name: Test
+        run: build/release/test/unittest --test-config test/configs/minio.json "~[.]test/*"

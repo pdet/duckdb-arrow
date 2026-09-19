@@ -4,6 +4,8 @@
 
 require nanoarrow
 
+test-env DATA_PATH {TEST_DIR}
+
 # Bodies must be well over a megabyte, smaller ones are read whole on purpose
 statement ok
 CREATE TABLE wide AS
@@ -16,18 +18,18 @@ SELECT i,
 FROM range(100000) t(i);
 
 statement ok
-COPY wide TO '__TEST_DIR__/wide.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 50000);
+COPY wide TO '{DATA_PATH}/wide.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 50000);
 
 # Each field alone, so the first, a nested one and the last are each projected
 foreach col i h l st n h2
 
 query I
-SELECT count(*) FROM (SELECT ${col} FROM read_arrow('__TEST_DIR__/wide.arrows') EXCEPT ALL SELECT ${col} FROM wide);
+SELECT count(*) FROM (SELECT ${col} FROM read_arrow('{DATA_PATH}/wide.arrows') EXCEPT ALL SELECT ${col} FROM wide);
 ----
 0
 
 query I
-SELECT count(*) FROM (SELECT ${col} FROM wide EXCEPT ALL SELECT ${col} FROM read_arrow('__TEST_DIR__/wide.arrows'));
+SELECT count(*) FROM (SELECT ${col} FROM wide EXCEPT ALL SELECT ${col} FROM read_arrow('{DATA_PATH}/wide.arrows'));
 ----
 0
 
@@ -35,13 +37,13 @@ endloop
 
 # Two fields at opposite ends, with unread buffers between them
 query I
-SELECT count(*) FROM (SELECT i, h2 FROM read_arrow('__TEST_DIR__/wide.arrows') EXCEPT ALL SELECT i, h2 FROM wide);
+SELECT count(*) FROM (SELECT i, h2 FROM read_arrow('{DATA_PATH}/wide.arrows') EXCEPT ALL SELECT i, h2 FROM wide);
 ----
 0
 
 # Every field, which reads the whole body anyway
 query I
-SELECT count(*) FROM (FROM read_arrow('__TEST_DIR__/wide.arrows') EXCEPT ALL FROM wide);
+SELECT count(*) FROM (FROM read_arrow('{DATA_PATH}/wide.arrows') EXCEPT ALL FROM wide);
 ----
 0
 
@@ -49,10 +51,10 @@ SELECT count(*) FROM (FROM read_arrow('__TEST_DIR__/wide.arrows') EXCEPT ALL FRO
 foreach compression zstd lz4
 
 statement ok
-COPY wide TO '__TEST_DIR__/wide_${compression}.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 50000, COMPRESSION '${compression}');
+COPY wide TO '{DATA_PATH}/wide_${compression}.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 50000, COMPRESSION '${compression}');
 
 query I
-SELECT count(*) FROM (SELECT i, h2 FROM read_arrow('__TEST_DIR__/wide_${compression}.arrows') EXCEPT ALL SELECT i, h2 FROM wide);
+SELECT count(*) FROM (SELECT i, h2 FROM read_arrow('{DATA_PATH}/wide_${compression}.arrows') EXCEPT ALL SELECT i, h2 FROM wide);
 ----
 0
 
@@ -65,13 +67,13 @@ statement ok
 SET ${setting} = true;
 
 statement ok
-COPY wide TO '__TEST_DIR__/layout_${setting}.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 50000);
+COPY wide TO '{DATA_PATH}/layout_${setting}.arrows' (FORMAT ARROWS, ROW_GROUP_SIZE 50000);
 
 statement ok
 SET ${setting} = false;
 
 query I
-SELECT count(*) FROM (SELECT l, h2 FROM read_arrow('__TEST_DIR__/layout_${setting}.arrows') EXCEPT ALL SELECT l, h2 FROM wide);
+SELECT count(*) FROM (SELECT l, h2 FROM read_arrow('{DATA_PATH}/layout_${setting}.arrows') EXCEPT ALL SELECT l, h2 FROM wide);
 ----
 0
 
@@ -104,10 +106,10 @@ endloop
 
 # Columns whose buffers are empty or absent have no offset to take
 statement ok
-COPY (SELECT NULL AS n, NULL::INT AS ni, '' AS e, []::INT[] AS l) TO '__TEST_DIR__/empty_buffers.arrows' (FORMAT ARROWS);
+COPY (SELECT NULL AS n, NULL::INT AS ni, '' AS e, []::INT[] AS l) TO '{DATA_PATH}/empty_buffers.arrows' (FORMAT ARROWS);
 
 query IIIII
-SELECT count(*), count(n), count(ni), count(e), count(l) FROM read_arrow('__TEST_DIR__/empty_buffers.arrows');
+SELECT count(*), count(n), count(ni), count(e), count(l) FROM read_arrow('{DATA_PATH}/empty_buffers.arrows');
 ----
 1	0	0	1	1
 

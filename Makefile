@@ -6,6 +6,13 @@ EXT_CONFIG=${PROJ_DIR}extension_config.cmake
 
 # Built for the TPC tests only, which generate data and check answers with them
 DEFAULT_TEST_EXTENSION_DEPS=tpch;tpcds
+# Built for the MinIO tests only, which read and write Arrow files on S3
+FULL_TEST_EXTENSION_DEPS=httpfs
+
+# httpfs has vcpkg dependencies, so its manifest is merged with ours
+ifeq (${BUILD_EXTENSION_TEST_DEPS}, full)
+	USE_MERGED_VCPKG_MANIFEST:=1
+endif
 
 # Include the Makefile from extension-ci-tools
 include extension-ci-tools/makefiles/duckdb_extension.Makefile
