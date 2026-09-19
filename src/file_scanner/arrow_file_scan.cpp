@@ -10,6 +10,8 @@ namespace ext_nanoarrow {
 namespace {
 //! Claims below this many body bytes would spend more on setup than on decoding
 constexpr idx_t kMinClaimBodyBytes = 1024 * 1024;
+//! A remote claim is fetched with few requests, so it holds more to keep them large
+constexpr idx_t kRemoteMinClaimBodyBytes = 16 * 1024 * 1024;
 atomic<idx_t> next_scan_id{1};
 }  // namespace
 
@@ -35,17 +37,19 @@ ArrowFileScan::ArrowFileScan(ClientContext& context, const OpenFileInfo& file)
   reader.TrackProgress(progress_offset);
   count_without_bodies = reader.CanCountWithoutBodies();
   if (reader.TryReadFooter()) {
-    PlanClaims(reader.RecordBatchBlocks());
+    PlanClaims(reader.RecordBatchBlocks(),
+               reader.IsRemote() ? kRemoteMinClaimBodyBytes : kMinClaimBodyBytes);
     dictionary_blocks = reader.DictionaryBlocks();
   }
 }
 
-void ArrowFileScan::PlanClaims(const vector<ArrowIpcFileBlock>& file_blocks) {
+void ArrowFileScan::PlanClaims(const vector<ArrowIpcFileBlock>& file_blocks,
+                               idx_t min_claim_bytes) {
   idx_t begin = 0;
   idx_t body_bytes = 0;
   for (idx_t i = 0; i < file_blocks.size(); i++) {
     body_bytes += static_cast<idx_t>(file_blocks[i].body_length);
-    if (body_bytes >= kMinClaimBodyBytes) {
+    if (body_bytes >= min_claim_bytes) {
       claims.push_back(BlockRange{begin, i + 1});
       begin = i + 1;
       body_bytes = 0;
@@ -54,10 +58,7 @@ void ArrowFileScan::PlanClaims(const vector<ArrowIpcFileBlock>& file_blocks) {
   if (begin < file_blocks.size()) {
     claims.push_back(BlockRange{begin, file_blocks.size()});
   }
-  if (claims.size() < 2) {
-    claims.clear();
-    return;
-  }
+  // Even one claim reads its blocks with few large reads instead of following the stream
   blocks = file_blocks;
 }
 

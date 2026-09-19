@@ -107,7 +107,7 @@ void Function(ClientContext& context, TableFunctionInput& input, DataChunk& outp
     state.file_name = file.path;
     state.rows.clear();
     state.next_row = 0;
-    FileIPCStreamFactory factory(context, file.path);
+    FileIPCStreamFactory factory(context, file);
     factory.InitReader();
     vector<Value> path;
     CollectMetadata(factory.reader->GetBaseSchema(), path, state.rows);
