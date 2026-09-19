@@ -1,0 +1,32 @@
+# name: test/sql/corrupt_footers.test
+# description: A footer that cannot be trusted falls back to the stream the file carries
+# group: [sql]
+
+require nanoarrow
+
+test-env DATA_PATH {TEST_DIR}
+
+# The first block wraps around when its offset and body length are summed
+query III
+SELECT count(*), sum(i), sum(j) FROM read_arrow('{WORKING_DIRECTORY}/data/corrupt/footer_block_overflow.arrow');
+----
+1000	499500	999000
+
+# The first block is too short to hold a message prefix
+query III
+SELECT count(*), sum(i), sum(j) FROM read_arrow('{WORKING_DIRECTORY}/data/corrupt/footer_short_metadata.arrow');
+----
+1000	499500	999000
+
+# A remote file checks its footer blocks the same way
+foreach file footer_block_overflow footer_short_metadata
+
+statement ok
+COPY (SELECT content FROM read_blob('{WORKING_DIRECTORY}/data/corrupt/{file}.arrow')) TO '{DATA_PATH}/{file}.arrow' (FORMAT BLOB);
+
+query III
+SELECT count(*), sum(i), sum(j) FROM read_arrow('{DATA_PATH}/{file}.arrow');
+----
+1000	499500	999000
+
+endloop
