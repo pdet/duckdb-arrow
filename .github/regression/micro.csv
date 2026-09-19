@@ -1,4 +1,5 @@
 benchmark/micro/read_count.benchmark
+benchmark/micro/read_dictionary.benchmark
 benchmark/micro/read_file_format.benchmark
 benchmark/micro/read_join.benchmark
 benchmark/micro/read_large_batches.benchmark
