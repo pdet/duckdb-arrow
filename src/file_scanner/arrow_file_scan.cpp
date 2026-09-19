@@ -1,4 +1,5 @@
 #include "duckdb/function/table/arrow.hpp"
+#include "duckdb/parallel/callback_async_task.hpp"
 
 #include "file_scanner/arrow_file_scan.hpp"
 #include "file_scanner/arrow_multi_file_info.hpp"
@@ -123,15 +124,8 @@ void ArrowFileScan::StartScan(ClientContext& context, ArrowFileLocalState& lstat
 
 unique_ptr<ArrowArrayStreamWrapper> ArrowFileScan::ProduceBlocks(
     uintptr_t local_state, ArrowStreamParameters& parameters) {
+  // PrepareScan already gave the reader the projection these parameters carry
   auto& lstate = *reinterpret_cast<ArrowFileLocalState*>(local_state);
-  // Every claim of one file projects the same columns, so the reader keeps the first
-  if (!lstate.block_reader_projected) {
-    const auto column_indexes = ArrowIPCStreamFactory::ProjectedColumnIndexes(parameters);
-    if (!column_indexes.empty()) {
-      lstate.block_reader->SetColumnProjection(column_indexes);
-    }
-    lstate.block_reader_projected = true;
-  }
   auto out = make_uniq<ArrowArrayStreamWrapper>();
   IpcArrayStream(*lstate.block_reader).ToArrayStream(&out->arrow_array_stream);
   return out;
@@ -140,8 +134,9 @@ unique_ptr<ArrowArrayStreamWrapper> ArrowFileScan::ProduceBlocks(
 void ArrowFileScan::PrepareScan(ClientContext& context,
                                 GlobalTableFunctionState& gstate_p,
                                 LocalTableFunctionState& lstate_p) {
-  // The global lock is released before this runs, so the first batch decodes here
+  // Reading waits for Scan, so ScheduleIO can fetch the claim on the async pool first
   auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
+  lstate.scan_started = false;
   lstate.count_reader = nullptr;
   lstate.count_owned_reader.reset();
   lstate.count_rows_left = 0;
@@ -160,7 +155,6 @@ void ArrowFileScan::PrepareScan(ClientContext& context,
     }
     InitializeScanData(lstate, &FileIPCStreamFactory::Produce,
                        reinterpret_cast<uintptr_t>(factory.get()));
-    StartScan(context, lstate);
     return;
   }
   // A state keeps its reader for the next claim of the same file
@@ -177,27 +171,59 @@ void ArrowFileScan::PrepareScan(ClientContext& context,
     if (!count_only) {
       lstate.block_reader->LoadDictionaries(dictionary_blocks);
     }
-    lstate.block_reader_projected = false;
     InitializeScanData(lstate, &ArrowFileScan::ProduceBlocks,
                        reinterpret_cast<uintptr_t>(&lstate));
+    // The fetch needs the projection before the scan that would push it starts
+    if (!count_only) {
+      vector<idx_t> projection;
+      for (const auto column_id : lstate.init_input->column_ids) {
+        if (column_id != COLUMN_IDENTIFIER_ROW_ID) {
+          projection.push_back(column_id);
+        }
+      }
+      if (!projection.empty()) {
+        lstate.block_reader->SetColumnProjection(projection);
+      }
+    }
     lstate.block_scan_id = scan_id;
   }
   const auto& claim = claims[lstate.claim_index];
   lstate.block_reader->SetBlocks(blocks.data() + claim.begin, blocks.data() + claim.end);
   if (count_only) {
+    lstate.block_reader->CountOnly();
     lstate.count_reader = lstate.block_reader.get();
-    return;
   }
-  StartScan(context, lstate);
+}
+
+AsyncResult ArrowFileScan::ScheduleIO(ClientContext& context,
+                                      GlobalTableFunctionState& gstate_p,
+                                      LocalTableFunctionState& lstate_p) {
+  auto& lstate = lstate_p.Cast<ArrowFileLocalState>();
+  // Without a footer the reads follow the stream, so they cannot be planned ahead
+  if (claims.empty()) {
+    return SourceResultType::HAVE_MORE_OUTPUT;
+  }
+  auto& reader = *lstate.block_reader;
+  vector<unique_ptr<AsyncTask>> io_tasks;
+  io_tasks.push_back(make_uniq<CallbackAsyncTask>([&reader] { reader.FetchBlocks(); },
+                                                  reader.BlockBytes()));
+  return AsyncResult::FromTasks(std::move(io_tasks), TaskSchedulerType::ASYNC);
 }
 
 AsyncResult ArrowFileScan::Scan(ClientContext& context,
                                 GlobalTableFunctionState& global_state,
                                 LocalTableFunctionState& local_state, DataChunk& chunk) {
   auto& lstate = local_state.Cast<ArrowFileLocalState>();
+  if (!lstate.scan_started) {
+    lstate.scan_started = true;
+    if (!lstate.count_reader) {
+      StartScan(context, lstate);
+    }
+  }
   if (lstate.count_reader) {
     while (lstate.count_rows_left == 0) {
       if (!lstate.count_reader->NextBatchLength(lstate.count_rows_left)) {
+        FinishClaim(lstate);
         return SourceResultType::FINISHED;
       }
     }
@@ -208,9 +234,19 @@ AsyncResult ArrowFileScan::Scan(ClientContext& context,
   }
   ArrowTableFunction::ArrowScanFunction(context, *lstate.table_function_input, chunk);
   if (chunk.size() == 0) {
+    FinishClaim(lstate);
     return SourceResultType::FINISHED;
   }
   return SourceResultType::HAVE_MORE_OUTPUT;
+}
+
+void ArrowFileScan::FinishClaim(ArrowFileLocalState& lstate) {
+  // A finished state can wait in a pool, so the last batch it scanned is freed here
+  lstate.table_function_input.reset();
+  lstate.local_arrow_local_state.reset();
+  lstate.local_arrow_global_state.reset();
+  lstate.count_reader = nullptr;
+  lstate.count_owned_reader.reset();
 }
 
 double ArrowFileScan::GetProgressInFile(ClientContext& context) {

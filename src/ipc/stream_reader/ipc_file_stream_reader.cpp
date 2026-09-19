@@ -376,11 +376,15 @@ bool IPCFileStreamReader::CanCountWithoutBodies() {
   return false;
 }
 
-bool IPCFileStreamReader::NextBatchLength(idx_t& length) {
+void IPCFileStreamReader::CountOnly() {
   if (count_field < 0 && !CanCountWithoutBodies()) {
     throw InternalException("NextBatchLength needs a field without dictionaries");
   }
   skip_bodies = true;
+}
+
+bool IPCFileStreamReader::NextBatchLength(idx_t& length) {
+  CountOnly();
   ArrowIpcMessageType message_type;
   do {
     message_type =
@@ -408,6 +412,17 @@ bool IPCFileStreamReader::NextBatchLength(idx_t& length) {
 
 idx_t IPCFileStreamReader::CoalesceGap() const {
   return remote ? kRemoteCoalesceGapBytes : kCoalesceGapBytes;
+}
+
+idx_t IPCFileStreamReader::BlockBytes() const {
+  idx_t bytes = 0;
+  for (auto block = next_block; block != end_block; block++) {
+    bytes += static_cast<idx_t>(block->metadata_length);
+    if (!skip_bodies) {
+      bytes += static_cast<idx_t>(block->body_length);
+    }
+  }
+  return bytes;
 }
 
 void IPCFileStreamReader::FetchBlocks(bool whole) {

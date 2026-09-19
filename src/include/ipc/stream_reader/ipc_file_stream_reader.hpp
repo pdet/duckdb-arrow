@@ -51,8 +51,12 @@ class IPCFileStreamReader final : public IPCStreamReader {
   void SetBlocks(const ArrowIpcFileBlock* begin, const ArrowIpcFileBlock* end);
   //! Reads the blocks left to scan into memory from any thread, whole bodies if asked
   void FetchBlocks(bool whole = false);
+  //! The most bytes FetchBlocks reads, for budgeting reads scheduled ahead
+  idx_t BlockBytes() const;
   //! Whether batch lengths can be read from the headers alone
   bool CanCountWithoutBodies();
+  //! Reads only headers from here on, so fetching skips the bodies
+  void CountOnly();
   //! Reads the length of the next record batch and skips its body, false at the end
   bool NextBatchLength(idx_t& length);
 

@@ -39,6 +39,9 @@ class ArrowFileScan : public BaseFileReader {
                          LocalTableFunctionState& lstate) override;
   void PrepareScan(ClientContext& context, GlobalTableFunctionState& gstate,
                    LocalTableFunctionState& lstate) override;
+  //! Fetches the blocks of a claim on the async pool, before Scan decodes them
+  AsyncResult ScheduleIO(ClientContext& context, GlobalTableFunctionState& gstate,
+                         LocalTableFunctionState& lstate) override;
   AsyncResult Scan(ClientContext& context, GlobalTableFunctionState& global_state,
                    LocalTableFunctionState& local_state, DataChunk& chunk) override;
   double GetProgressInFile(ClientContext& context) override;
@@ -62,6 +65,7 @@ class ArrowFileScan : public BaseFileReader {
   void InitializeScanData(ArrowFileLocalState& lstate, stream_factory_produce_t producer,
                           uintptr_t producer_data);
   void StartScan(ClientContext& context, ArrowFileLocalState& lstate);
+  static void FinishClaim(ArrowFileLocalState& lstate);
   static unique_ptr<ArrowArrayStreamWrapper> ProduceBlocks(
       uintptr_t local_state, ArrowStreamParameters& parameters);
 
