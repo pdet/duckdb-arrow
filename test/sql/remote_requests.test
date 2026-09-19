@@ -1,0 +1,61 @@
+# name: test/sql/remote_requests.test
+# description: Remote Arrow files are read at offsets with few requests, counted on the MinIO config
+# group: [sql]
+
+require nanoarrow
+
+test-env DATA_PATH {TEST_DIR}
+
+# Blocks of 38 MB are large enough for a projection to read only its ranges
+statement ok
+COPY (SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, 'item_' || (i % 50000) AS s
+      FROM range(2000000) t(i))
+TO '{DATA_PATH}/wide.arrow' (FORMAT ARROW, ROW_GROUP_SIZE 1000000);
+
+statement ok
+SET logging_storage = 'memory';
+
+statement ok
+CALL enable_logging('HTTP');
+
+# Local files send no requests, so the bounds below only bite on the MinIO config
+query IIII
+SELECT max(COLUMNS(*)) FROM read_arrow('{DATA_PATH}/wide.arrow');
+----
+1999999	999	100002	item_9999
+
+# Reading the 76 MB file in 4 KB requests took eighteen thousand of them
+query I
+SELECT count(*) < 20 FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
+----
+true
+
+statement ok
+CALL truncate_duckdb_logs();
+
+# One column of four reads only its ranges of each body
+query I
+SELECT sum(v) FROM read_arrow('{DATA_PATH}/wide.arrow');
+----
+100001891302
+
+query I
+SELECT coalesce(sum(response.headers['Content-Length']::BIGINT), 0) < 30000000
+FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
+----
+true
+
+statement ok
+CALL truncate_duckdb_logs();
+
+# Counting reads the message headers, which are a few KB of the file
+query I
+SELECT count(*) FROM read_arrow('{DATA_PATH}/wide.arrow');
+----
+2000000
+
+query I
+SELECT coalesce(sum(response.headers['Content-Length']::BIGINT), 0) < 200000
+FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
+----
+true
