@@ -16,6 +16,9 @@ namespace duckdb {
 namespace ext_nanoarrow {
 
 //! How the bodies of RecordBatch messages are compressed when writing Arrow IPC
+//! The zstd level used when COMPRESSION_LEVEL is not given
+constexpr int64_t kDefaultZstdLevel = 1;
+
 struct ArrowIpcCompressionOptions {
   ArrowIpcCompressionType type = NANOARROW_IPC_COMPRESSION_TYPE_NONE;
   //! Codec specific level passed to nanoarrow unchanged

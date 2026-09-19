@@ -69,10 +69,15 @@ nanoarrow::ipc::UniqueDecoder NewDuckDBArrowDecoder() {
 void SetArrowIpcEncoderCompression(ArrowIpcEncoder& encoder,
                                    const ArrowIpcCompressionOptions& options) {
   // Installs nanoarrow's serial compressor, ArrowIpcEncoderSetCompressor takes others
+  auto level = options.level;
+  // Level 1 is what Arrow C++ writes, about twice as fast as zstd's own default of 3
+  if (options.type == NANOARROW_IPC_COMPRESSION_TYPE_ZSTD && !options.level_set) {
+    level = kDefaultZstdLevel;
+  }
   ArrowError error{};
   THROW_NOT_OK(InternalException, &error,
                ArrowIpcEncoderSetCompression(&encoder, options.type,
-                                             static_cast<int>(options.level), &error));
+                                             static_cast<int>(level), &error));
 }
 
 }  // namespace ext_nanoarrow

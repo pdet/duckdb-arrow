@@ -1,5 +1,5 @@
 # name: benchmark/micro/write_zstd.benchmark
-# description: Write one file compressed with zstd
+# description: Write TPCH lineitem compressed with zstd at the default level
 # group: [micro]
 
 name Write zstd
@@ -7,12 +7,14 @@ group micro
 
 require nanoarrow
 
+require tpch
+
 load
-CREATE TABLE mixed AS SELECT i AS id, i % 1000 AS k, (i * 7919) % 100003 AS v, i / 7 AS d, 'item_' || (i % 50000) AS s FROM range(4000000) t(i);
+CALL dbgen(sf=0.2);
 
 # The runner's disk would dominate the timing, so the output goes nowhere
 run
-COPY mixed TO '/dev/null' (FORMAT ARROWS, COMPRESSION 'zstd');
+COPY lineitem TO '/dev/null' (FORMAT ARROWS, COMPRESSION 'zstd');
 
 result I
-4000000
+1199969
