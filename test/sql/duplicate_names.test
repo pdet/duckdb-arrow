@@ -4,25 +4,27 @@
 
 require nanoarrow
 
+test-env DATA_PATH {TEST_DIR}
+
 # to_arrow_ipc keeps the original names, so this stream has two fields named a
 statement ok
-COPY (SELECT ipc FROM to_arrow_ipc((SELECT 1 AS a, 10 AS a))) TO '{TEST_DIR}/dup.arrows' (FORMAT BLOB);
+COPY (SELECT ipc FROM to_arrow_ipc((SELECT 1 AS a, 10 AS a))) TO '{DATA_PATH}/dup.arrows' (FORMAT BLOB);
 
 query II
-SELECT * FROM '{TEST_DIR}/dup.arrows';
+SELECT * FROM '{DATA_PATH}/dup.arrows';
 ----
 1	10
 
 query I
-SELECT a_1 FROM '{TEST_DIR}/dup.arrows';
+SELECT a_1 FROM '{DATA_PATH}/dup.arrows';
 ----
 10
 
 # Names that only differ in case
 statement ok
-COPY (SELECT ipc FROM to_arrow_ipc((SELECT 1 AS id, 10 AS ID))) TO '{TEST_DIR}/case.arrows' (FORMAT BLOB);
+COPY (SELECT ipc FROM to_arrow_ipc((SELECT 1 AS id, 10 AS ID))) TO '{DATA_PATH}/case.arrows' (FORMAT BLOB);
 
 query II
-SELECT * FROM '{TEST_DIR}/case.arrows';
+SELECT * FROM '{DATA_PATH}/case.arrows';
 ----
 1	10

@@ -5,17 +5,19 @@
 # Require statement will ensure this test is run with this extension loaded
 require nanoarrow
 
+test-env DATA_PATH {TEST_DIR}
+
 statement ok
 CREATE TABLE test AS SELECT * FROM read_arrow('__WORKING_DIRECTORY__/data/test.arrows');
 
 statement ok
-COPY test TO '__TEST_DIR__/test.arrows' (FORMAT ARROWS, BATCH_SIZE 100)
+COPY test TO '{DATA_PATH}/test.arrows' (FORMAT ARROWS, BATCH_SIZE 100)
 
 statement ok
-CREATE OR REPLACE TABLE written AS SELECT * FROM read_arrow('__TEST_DIR__/test.arrows');
+CREATE OR REPLACE TABLE written AS SELECT * FROM read_arrow('{DATA_PATH}/test.arrows');
 
 query I
-SELECT count(*) FROM read_arrow('__TEST_DIR__/test.arrows');
+SELECT count(*) FROM read_arrow('{DATA_PATH}/test.arrows');
 ----
 15487
 
@@ -29,7 +31,7 @@ statement ok
 CREATE TYPE mood AS ENUM ('happy', 'sad');
 
 statement error
-COPY (SELECT 'happy'::mood AS m) TO '__TEST_DIR__/enum.arrows' (FORMAT ARROWS, COMPRESSION ZSTD);
+COPY (SELECT 'happy'::mood AS m) TO '{DATA_PATH}/enum.arrows' (FORMAT ARROWS, COMPRESSION ZSTD);
 ----
 Arrow IPC output does not support ENUM values
 
@@ -46,7 +48,7 @@ statement ok
 SET produce_arrow_string_view = true;
 
 statement error
-COPY (SELECT 'abc' AS s) TO '__TEST_DIR__/string_view.arrows' (FORMAT ARROWS);
+COPY (SELECT 'abc' AS s) TO '{DATA_PATH}/string_view.arrows' (FORMAT ARROWS);
 ----
 Not implemented Error
 
