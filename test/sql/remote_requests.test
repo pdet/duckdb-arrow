@@ -29,9 +29,9 @@ SELECT max(COLUMNS(*)) FROM read_arrow('{DATA_PATH}/wide.arrow');
 ----
 1999999	999	100002	item_9999
 
-# Reading the 76 MB file in 4 KB requests took eighteen thousand of them, and the footer takes one
+# Reading in 4 KB requests took eighteen thousand, the footer and each block now take one
 query I
-SELECT count(*) <= 8 FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
+SELECT count(*) <= 6 FROM duckdb_logs_parsed('HTTP') WHERE request.type = 'GET';
 ----
 true
 
