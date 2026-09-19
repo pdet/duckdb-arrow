@@ -54,6 +54,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
   vector<ArrowIpcFileBlock> record_batch_blocks;
   vector<ArrowIpcFileBlock> dictionary_blocks;
   bool footer_read = false;
+  //! Whether the file starts with the magic of the file format, which has a footer
+  bool file_magic = false;
   //! The claimed blocks still to read, both null outside a block scan
   const ArrowIpcFileBlock* next_block = nullptr;
   const ArrowIpcFileBlock* end_block = nullptr;

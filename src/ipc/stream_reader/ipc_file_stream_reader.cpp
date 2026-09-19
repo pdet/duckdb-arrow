@@ -22,6 +22,8 @@ constexpr idx_t kCoalesceGapBytes = 64 * 1024;
 constexpr idx_t kMinBodyBytesForRanges = 1024 * 1024;
 //! Reading most of the body is the whole body read with extra system calls
 constexpr double kMaxProjectedFraction = 0.8;
+//! Enough for the footer of most files, so reading it costs one request
+constexpr idx_t kFooterReadBytes = 64 * 1024;
 
 //! Makes the discovery decode take the uncompressed path, which only does arithmetic
 struct CodecOverride {
@@ -117,7 +119,9 @@ bool IPCFileStreamReader::TryReadFooter() {
     return !record_batch_blocks.empty();
   }
   footer_read = true;
-  if (!positional) {
+  // Only the file format has a footer, and the schema read checks its leading magic
+  GetBaseSchema();
+  if (!positional || !file_magic) {
     return false;
   }
   // The tail of a file is the footer size as an int32 then the bare magic
@@ -127,16 +131,19 @@ bool IPCFileStreamReader::TryReadFooter() {
     return false;
   }
 
+  // One read usually holds the whole footer, which saves a round trip on remote files
+  const auto end_size = MinValue<idx_t>(file_size, kFooterReadBytes);
   // A mismatch is reported by formatting the end of the buffer, so keep a NUL past it
-  auto tail = allocator.Allocate(kFooterTailSize + 1);
-  std::memset(tail.get(), 0, kFooterTailSize + 1);
-  file_reader.handle->Read(tail.get(), kFooterTailSize, file_size - kFooterTailSize);
+  auto end = allocator.Allocate(end_size + 1);
+  end.get()[end_size] = 0;
+  file_reader.handle->Read(end.get(), end_size, file_size - end_size);
 
   auto scratch = NewDuckDBArrowDecoder();
   ArrowError footer_error{};
-  if (ArrowIpcDecoderPeekFooter(scratch.get(),
-                                AllocatedDataView(tail.get(), kFooterTailSize),
-                                &footer_error) != NANOARROW_OK) {
+  if (ArrowIpcDecoderPeekFooter(
+          scratch.get(),
+          AllocatedDataView(end.get() + end_size - kFooterTailSize, kFooterTailSize),
+          &footer_error) != NANOARROW_OK) {
     return false;
   }
   // Verification adds the tail to this size in int32, so bound it in 64 bits first
@@ -147,9 +154,14 @@ bool IPCFileStreamReader::TryReadFooter() {
 
   // Verification rejects a window that is not the footer plus the tail
   const auto window_size = static_cast<idx_t>(footer_size) + kFooterTailSize;
+  // The verifier checks alignment, so the window gets its own allocation
   auto window = allocator.Allocate(window_size + 1);
   window.get()[window_size] = 0;
-  file_reader.handle->Read(window.get(), window_size, file_size - window_size);
+  if (window_size <= end_size) {
+    std::memcpy(window.get(), end.get() + end_size - window_size, window_size);
+  } else {
+    file_reader.handle->Read(window.get(), window_size, file_size - window_size);
+  }
   const auto window_view =
       AllocatedDataView(window.get(), static_cast<int64_t>(window_size));
   if (ArrowIpcDecoderVerifyFooter(scratch.get(), window_view, &footer_error) !=
@@ -439,6 +451,7 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
     // Read the embedded stream after the file header.
     if (file_reader.CurrentOffset() == kArrowIPCFileHeaderSize &&
         std::memcmp(kArrowIPCFileMagic, &message_prefix, kArrowIPCFileHeaderSize) == 0) {
+      file_magic = true;
       uint32_t token;
       do {
         file_reader.ReadData(reinterpret_cast<data_ptr_t>(&token), sizeof(token));
