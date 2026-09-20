@@ -103,8 +103,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
   int64_t count_field = -1;
 
   void EnsureInputStreamAligned();
-  //! Whether the body can be read with one positional read instead of the buffered reader
-  bool CanReadBodyPositionally(idx_t body_start, idx_t body_size);
+  //! Rejects a message part that runs past the end of a file whose size is known
+  void CheckInFile(idx_t start, idx_t size);
   //! Reads a whole body, small ones through the buffer and large ones positionally
   void ReadBodyPositionally(idx_t body_start, idx_t body_size);
   //! Reads only the buffers the projection needs, returns false to read the whole body

@@ -57,6 +57,31 @@ FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/zero_body.arrows');
 ----
 body has size 0
 
+# A body or header longer than the rest of the file is rejected before it is allocated
+statement ok
+SET memory_limit='100MB';
+
+statement error
+SELECT count(*) FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/huge_body.arrows');
+----
+Arrow IPC stream is truncated
+
+statement error
+FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/huge_body.arrows');
+----
+Arrow IPC stream is truncated
+
+statement ok
+COPY (SELECT unhex('FFFFFFFFF0FFFF7F')) TO '{DATA_PATH}/huge_header.arrows' (FORMAT BLOB);
+
+statement error
+FROM read_arrow('{DATA_PATH}/huge_header.arrows');
+----
+Arrow IPC stream is truncated
+
+statement ok
+RESET memory_limit;
+
 # The errors above leave the database usable
 query I
 SELECT 42;
