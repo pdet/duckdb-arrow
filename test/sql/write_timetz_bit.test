@@ -1,0 +1,47 @@
+# name: test/sql/write_timetz_bit.test
+# description: TIMETZ and BIT are written as text, since Arrow has no type that holds them whole
+# group: [sql]
+
+require nanoarrow
+
+test-env DATA_PATH {TEST_DIR}
+
+# A TIMETZ lost its offset and a BIT came back as DuckDB's internal bytes
+statement ok
+COPY (SELECT '12:34:56+02'::TIMETZ AS tz, '0101'::BIT AS b, [{'t': '01:02:03-05'::TIMETZ}] AS n) TO '{DATA_PATH}/timetz_bit.arrow' (FORMAT arrow);
+
+query III
+SELECT tz, b, n FROM read_arrow('{DATA_PATH}/timetz_bit.arrow');
+----
+12:34:56+02	0101	[{'t': '01:02:03-05'}]
+
+query II
+SELECT column_name, column_type FROM (DESCRIBE FROM read_arrow('{DATA_PATH}/timetz_bit.arrow')) WHERE column_name <> 'n';
+----
+tz	VARCHAR
+b	VARCHAR
+
+# The in memory stream writes the same bytes as the text columns would
+query I
+SELECT (SELECT list(ipc) FROM to_arrow_ipc((SELECT '12:34:56+02'::TIMETZ AS tz, '0101'::BIT AS b)))
+     = (SELECT list(ipc) FROM to_arrow_ipc((SELECT '12:34:56+02'::VARCHAR AS tz, '0101'::VARCHAR AS b)));
+----
+true
+
+# The exported text casts back into the declared columns on import
+statement ok
+CREATE TABLE tzb AS SELECT '12:34:56+02'::TIMETZ AS tz, '0101'::BIT AS b;
+
+statement ok
+EXPORT DATABASE '{TEST_DIR}/export' (FORMAT arrow);
+
+statement ok
+DROP TABLE tzb;
+
+statement ok
+IMPORT DATABASE '{TEST_DIR}/export';
+
+query II
+SELECT tz::VARCHAR, b::VARCHAR FROM tzb;
+----
+12:34:56+02	0101

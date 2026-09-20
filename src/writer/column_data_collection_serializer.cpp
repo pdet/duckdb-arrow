@@ -45,7 +45,15 @@ inline void InitArrowDuckBuffer(ArrowBuffer* buffer, Allocator& duck_allocator) 
 
 //! Whether Arrow has no exact type for a value of this type
 static bool IsLossy(const LogicalType& type) {
-  return type.id() == LogicalTypeId::HUGEINT || type.id() == LogicalTypeId::UHUGEINT;
+  switch (type.id()) {
+    case LogicalTypeId::HUGEINT:
+    case LogicalTypeId::UHUGEINT:
+    case LogicalTypeId::TIME_TZ:
+    case LogicalTypeId::BIT:
+      return true;
+    default:
+      return false;
+  }
 }
 
 //! The type a value is written as, which rebuilds only the types that hold a lossy one
@@ -58,6 +66,10 @@ static LogicalType WrittenType(const LogicalType& type) {
     case LogicalTypeId::UHUGEINT:
       // The decimal128 the schema declared anyway, with a cast that checks the range
       return LogicalType::DECIMAL(38, 0);
+    case LogicalTypeId::TIME_TZ:
+    case LogicalTypeId::BIT:
+      // Arrow has no time with an offset and no bit string, and text keeps both whole
+      return LogicalType::VARCHAR;
     case LogicalTypeId::LIST:
       return LogicalType::LIST(WrittenType(ListType::GetChildType(type)));
     case LogicalTypeId::ARRAY:
