@@ -709,8 +709,8 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
       throw UnexpectedToken(message_prefix.continuation_token);
     }
   } catch (SerializationException& e) {
-    // Only a stream that stops at a message boundary may omit the end of stream marker
-    if (message_start < file_reader.FileSize()) {
+    // A stream may stop at a message boundary, but a pipe has no size to compare against
+    if (SequentialOffset() > message_start || message_start < file_reader.FileSize()) {
       throw IOException("Arrow IPC stream is truncated, it ends inside a message prefix");
     }
     finished = true;
