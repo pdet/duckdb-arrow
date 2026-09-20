@@ -110,24 +110,6 @@ bool CopyFooterBlocks(const ArrowBuffer& source, idx_t file_size,
   return true;
 }
 
-//! Whether two schemas decode the same buffers, which names and flags do not change
-bool SameLayout(const ArrowSchema& left, const ArrowSchema& right) {
-  if (std::strcmp(left.format, right.format) != 0 ||
-      left.n_children != right.n_children ||
-      (left.dictionary == nullptr) != (right.dictionary == nullptr)) {
-    return false;
-  }
-  if (left.dictionary && !SameLayout(*left.dictionary, *right.dictionary)) {
-    return false;
-  }
-  for (int64_t i = 0; i < left.n_children; i++) {
-    if (!SameLayout(*left.children[i], *right.children[i])) {
-      return false;
-    }
-  }
-  return true;
-}
-
 }  // namespace
 IPCFileStreamReader::IPCFileStreamReader(FileSystem& fs, unique_ptr<FileHandle> handle,
                                          Allocator& allocator,
@@ -149,20 +131,24 @@ bool IPCFileStreamReader::TryReadFooter() {
   if (!positional) {
     return false;
   }
-  // The footer holds the schema too, so a remote file with one skips reading its start
-  const bool footer_first =
-      remote && !base_schema->release &&
-      !StringUtil::EndsWith(file_reader.handle->GetPath(), ".arrows");
-  if (!footer_first) {
-    // Only the file format has a footer, and the schema read checks its leading magic
-    GetBaseSchema();
-    if (!file_magic) {
-      return false;
-    }
-  }
   const auto file_size = file_reader.FileSize();
   if (file_size < kArrowIPCFileHeaderSize + kArrowIPCFileFooterTailSize) {
     return false;
+  }
+  // A remote file pays a round trip per read, so its name says whether it is a stream
+  if (remote) {
+    if (StringUtil::EndsWith(file_reader.handle->GetPath(), ".arrows")) {
+      return false;
+    }
+  } else {
+    char magic[kArrowIPCFileMagicSize];
+    file_reader.handle->Read(magic, kArrowIPCFileMagicSize, 0);
+    if (std::memcmp(magic, kArrowIPCFileMagic, kArrowIPCFileMagicSize) != 0) {
+      return false;
+    }
+  }
+  if (base_schema->release) {
+    throw InternalException("TryReadFooter must run before the schema is read");
   }
 
   // One read usually holds the whole footer, which saves a round trip on remote files
@@ -207,10 +193,6 @@ bool IPCFileStreamReader::TryReadFooter() {
   }
 
   const auto& footer = *scratch->footer;
-  // Claims decode with the footer schema, so it must match the schema the scan bound
-  if (base_schema->release && !SameLayout(*base_schema.get(), footer.schema)) {
-    return false;
-  }
   if (!CopyFooterBlocks(footer.record_batch_blocks, file_size, record_batch_blocks) ||
       !CopyFooterBlocks(footer.dictionary_blocks, file_size, dictionary_blocks) ||
       record_batch_blocks.empty()) {
@@ -219,9 +201,8 @@ bool IPCFileStreamReader::TryReadFooter() {
     return false;
   }
   footer_window = std::move(window);
-  if (!base_schema->release) {
-    LoadFooter(FooterWindow());
-  }
+  // The footer is the schema of record of a file, as other readers of the format take it
+  LoadFooter(FooterWindow());
   return true;
 }
 
@@ -716,7 +697,6 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
     // Read the embedded stream after the file header.
     if (SequentialOffset() == kArrowIPCFileHeaderSize &&
         std::memcmp(kArrowIPCFileMagic, &message_prefix, kArrowIPCFileHeaderSize) == 0) {
-      file_magic = true;
       uint32_t token;
       do {
         SequentialRead(reinterpret_cast<data_ptr_t>(&token), sizeof(token));

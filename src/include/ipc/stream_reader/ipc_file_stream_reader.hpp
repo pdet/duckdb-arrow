@@ -90,8 +90,6 @@ class IPCFileStreamReader final : public IPCStreamReader {
   bool footer_read = false;
   //! The footer, its size and the magic, for claim readers to take the schema from
   AllocatedData footer_window;
-  //! Whether the file starts with the magic of the file format, which has a footer
-  bool file_magic = false;
   //! The claimed blocks still to read, both null outside a block scan
   const ArrowIpcFileBlock* next_block = nullptr;
   const ArrowIpcFileBlock* end_block = nullptr;

@@ -18,11 +18,11 @@ SELECT count(*), sum(i), sum(j) FROM read_arrow('{WORKING_DIRECTORY}/data/corrup
 ----
 1000	499500	999000
 
-# The footer schema has one column where the schema message has two
-query I
-SELECT j FROM read_arrow('{WORKING_DIRECTORY}/data/corrupt/footer_schema_mismatch.arrow') WHERE i = 999;
+# The footer is the schema of record, so one spliced from another file fails as it does in pyarrow
+statement error
+SELECT count(*) FROM read_arrow('{WORKING_DIRECTORY}/data/corrupt/footer_schema_mismatch.arrow');
 ----
-1998
+Expected continuation token
 
 # A remote file reads its footer first, so the same checks keep it on the stream
 foreach file footer_block_overflow footer_short_metadata
