@@ -29,12 +29,13 @@ FROM check_arrow_testing_file('1.0.0-littleendian/generated_dictionary_unsigned'
 statement ok
 FROM check_arrow_testing_file('1.0.0-littleendian/generated_decimal')
 
-# This test will fail,because the struct created in this arrow file does not have names on their children
-# This is not supported by DuckDB.
-statement error
-FROM check_arrow_testing_file('1.0.0-littleendian/generated_duplicate_fieldnames')
+# The children of this struct have no names, so they are named like unnamed columns
+query II
+SELECT column_name, column_type FROM (DESCRIBE FROM check_arrow_testing_file('1.0.0-littleendian/generated_duplicate_fieldnames'));
 ----
-Struct remap can only remap named structs
+ints	TINYINT
+ints_1	INTEGER
+struct	STRUCT(v0 INTEGER, v1 VARCHAR)
 
 statement ok
 FROM check_arrow_testing_file('1.0.0-littleendian/generated_map_non_canonical')

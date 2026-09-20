@@ -1,4 +1,5 @@
 #include "duckdb/function/table/arrow.hpp"
+#include "duckdb/main/query_result.hpp"
 #include "duckdb/parallel/callback_async_task.hpp"
 
 #include "file_scanner/arrow_file_scan.hpp"
@@ -14,6 +15,26 @@ constexpr idx_t kMinClaimBodyBytes = 1024 * 1024;
 //! A remote claim is fetched with few requests, so it holds more to keep them large
 constexpr idx_t kRemoteMinClaimBodyBytes = 16 * 1024 * 1024;
 atomic<idx_t> next_scan_id{1};
+
+//! Names children as DuckDB names columns, which the multi file reader maps by name
+void DeduplicateChildNames(ArrowSchema& schema) {
+  vector<string> names;
+  for (int64_t i = 0; i < schema.n_children; i++) {
+    const auto name = schema.children[i]->name;
+    names.push_back(name && name[0] ? name : "v" + to_string(i));
+  }
+  QueryResult::DeduplicateColumns(names);
+  for (int64_t i = 0; i < schema.n_children; i++) {
+    auto& child = *schema.children[i];
+    if (!child.name || names[i] != child.name) {
+      NANOARROW_THROW_NOT_OK(ArrowSchemaSetName(&child, names[i].c_str()));
+    }
+    DeduplicateChildNames(child);
+  }
+  if (schema.dictionary) {
+    DeduplicateChildNames(*schema.dictionary);
+  }
+}
 }  // namespace
 
 ArrowFileScan::ArrowFileScan(ClientContext& context, const OpenFileInfo& file)
@@ -25,6 +46,7 @@ ArrowFileScan::ArrowFileScan(ClientContext& context, const OpenFileInfo& file)
   // A remote footer carries the schema, so reading it first skips the start of the file
   const bool has_footer = reader.TryReadFooter();
   factory->GetFileSchema(schema_root);
+  DeduplicateChildNames(schema_root.arrow_schema);
   ArrowTableFunction::PopulateArrowTableSchema(context, arrow_table,
                                                schema_root.arrow_schema);
   names = arrow_table.GetNames();

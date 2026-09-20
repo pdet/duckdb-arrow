@@ -28,3 +28,19 @@ query II
 SELECT * FROM '{DATA_PATH}/case.arrows';
 ----
 1	10
+
+# Struct children with the same name, or the same name in another case, are told apart like columns
+query I
+SELECT s FROM read_arrow('data/struct_duplicate_children.arrow');
+----
+{'x': 1, 'x_1': a}
+
+query I
+SELECT s FROM read_arrow('data/struct_case_children.arrow');
+----
+{'id': 1, 'ID_1': 100}
+
+query I
+SELECT s.x_1 FROM read_arrow('data/struct_duplicate_children.arrow');
+----
+a
