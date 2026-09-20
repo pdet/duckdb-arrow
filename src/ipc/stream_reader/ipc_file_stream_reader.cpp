@@ -70,6 +70,12 @@ IOException UnexpectedToken(uint32_t token) {
                      std::to_string(token));
 }
 
+//! Whether bytes end with the magic that closes every file, which a cut file lacks
+bool EndsWithMagic(const_data_ptr_t end) {
+  return std::memcmp(end - kArrowIPCFileMagicSize, kArrowIPCFileMagic,
+                     kArrowIPCFileMagicSize) == 0;
+}
+
 //! Whether a field or any of its children is dictionary encoded
 bool HasDictionary(const ArrowSchema& schema) {
   if (schema.dictionary) {
@@ -133,6 +139,8 @@ bool IPCFileStreamReader::TryReadFooter() {
   }
   const auto file_size = file_reader.FileSize();
   if (file_size < kArrowIPCFileHeaderSize + kArrowIPCFileFooterTailSize) {
+    file_end_read = true;
+    missing_footer = true;
     return false;
   }
   // A remote file pays a round trip per read, so its name says whether it is a stream
@@ -157,6 +165,12 @@ bool IPCFileStreamReader::TryReadFooter() {
   auto end = allocator.Allocate(end_size + 1);
   end.get()[end_size] = 0;
   file_reader.handle->Read(end.get(), end_size, file_size - end_size);
+  file_end_read = true;
+  // The footer size may be corrupt, but a whole file always ends with the magic
+  if (!EndsWithMagic(end.get() + end_size)) {
+    missing_footer = true;
+    return false;
+  }
 
   auto scratch = NewDuckDBArrowDecoder();
   ArrowError footer_error{};
@@ -232,6 +246,20 @@ void IPCFileStreamReader::LoadFooter(ArrowBufferView window) {
     throw InternalException("LoadFooter needs a footer that TryReadFooter decoded");
   }
   SchemaFromFooter();
+}
+
+void IPCFileStreamReader::ReadFileEnd() {
+  file_end_read = true;
+  const auto file_size = file_reader.FileSize();
+  if (file_size < kArrowIPCFileHeaderSize + kArrowIPCFileFooterTailSize) {
+    missing_footer = true;
+    return;
+  }
+  char magic[kArrowIPCFileMagicSize];
+  file_reader.handle->Read(magic, kArrowIPCFileMagicSize,
+                           file_size - kArrowIPCFileMagicSize);
+  missing_footer =
+      !EndsWithMagic(reinterpret_cast<const_data_ptr_t>(magic) + kArrowIPCFileMagicSize);
 }
 
 void IPCFileStreamReader::TrackProgress(shared_ptr<atomic<idx_t>> offset) {
@@ -697,6 +725,14 @@ ArrowIpcMessageType IPCFileStreamReader::ReadNextMessage() {
     // Read the embedded stream after the file header.
     if (SequentialOffset() == kArrowIPCFileHeaderSize &&
         std::memcmp(kArrowIPCFileMagic, &message_prefix, kArrowIPCFileHeaderSize) == 0) {
+      // A file ends with its footer, so one without it is a partial copy
+      if (positional && !file_end_read) {
+        ReadFileEnd();
+      }
+      if (missing_footer) {
+        throw IOException("Arrow IPC file \"%s\" is truncated, it has no footer",
+                          file_reader.handle->GetPath());
+      }
       uint32_t token;
       do {
         SequentialRead(reinterpret_cast<data_ptr_t>(&token), sizeof(token));
