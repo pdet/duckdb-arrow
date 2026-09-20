@@ -4,6 +4,11 @@
 
 require nanoarrow
 
+# Writing these files peaks near 9 GB, and near 12 GB under the thread sanitizer
+require nothreadsan
+
+require ram 12GB
+
 # One BIGINT column of 2^28 + 4096 rows is a body 32 KB past 2^31, and writing it peaks near 9 GB
 foreach format arrow arrows
 
