@@ -1,0 +1,51 @@
+# name: test/sql/write_hugeint.test
+# description: HUGEINT and UHUGEINT are written as decimal128(38,0), and a value that does not fit is refused
+# group: [sql]
+
+require nanoarrow
+
+test-env DATA_PATH {TEST_DIR}
+
+statement ok
+COPY (SELECT 99999999999999999999999999999999999999::UHUGEINT AS u, [-1::HUGEINT] AS l) TO '{DATA_PATH}/hugeint.arrow' (FORMAT arrow);
+
+query II
+SELECT u, l FROM read_arrow('{DATA_PATH}/hugeint.arrow');
+----
+99999999999999999999999999999999999999	[-1]
+
+# A UHUGEINT past 2^127 came back negative, and 2^127 itself as a file no query could read
+statement error
+COPY (SELECT md5_number('hello') AS u) TO '{DATA_PATH}/huge.arrow' (FORMAT arrow);
+----
+Could not cast value 195090637673866227529774941829999903069 to DECIMAL(38,0)
+
+statement error
+COPY (SELECT {'x': 170141183460469231731687303715884105728::UHUGEINT} AS s) TO '{DATA_PATH}/huge.arrows' (FORMAT arrows);
+----
+to DECIMAL(38,0)
+
+statement error
+SELECT * FROM to_arrow_ipc((SELECT 170141183460469231731687303715884105727::HUGEINT AS h));
+----
+to DECIMAL(38,0)
+
+statement error
+COPY (SELECT row(md5_number('hello')) AS t) TO '{DATA_PATH}/tuple.arrow' (FORMAT arrow);
+----
+to DECIMAL(38,0)
+
+# The lossless conversion keeps the exact value in an extension type
+statement ok
+SET arrow_lossless_conversion = true;
+
+statement ok
+COPY (SELECT md5_number('hello') AS u) TO '{DATA_PATH}/lossless.arrow' (FORMAT arrow);
+
+query I
+SELECT u::VARCHAR FROM read_arrow('{DATA_PATH}/lossless.arrow');
+----
+195090637673866227529774941829999903069
+
+statement ok
+RESET arrow_lossless_conversion;

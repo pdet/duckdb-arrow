@@ -129,12 +129,14 @@ OperatorResultType ToArrowIPCFunction::Function(ExecutionContext& context,
     output.data[1].Append(Value::BOOLEAN(true));
   } else {
     if (!local_state.appender) {
+      const auto& types = local_state.serializer->WriteTypes();
       local_state.appender = make_uniq<ArrowAppender>(
-          input.GetTypes(), data.chunk_size, data.options,
-          ArrowTypeExtensionData::GetExtensionTypes(context.client, input.GetTypes()));
+          types, data.chunk_size, data.options,
+          ArrowTypeExtensionData::GetExtensionTypes(context.client, types));
     }
 
-    local_state.appender->Append(input, 0, input.size(), input.size());
+    auto& written = local_state.serializer->Cast(input);
+    local_state.appender->Append(written, 0, written.size(), written.size());
     local_state.current_count += input.size();
 
     if (caching_disabled || local_state.current_count >= data.chunk_size) {

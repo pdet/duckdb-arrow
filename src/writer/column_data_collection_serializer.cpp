@@ -1,5 +1,9 @@
 #include "writer/column_data_collection_serializer.hpp"
 
+#include "duckdb/common/type_visitor.hpp"
+#include "duckdb/planner/expression/bound_cast_expression.hpp"
+#include "duckdb/planner/expression/bound_reference_expression.hpp"
+
 #include <cstring>
 #include <utility>
 
@@ -39,6 +43,56 @@ inline void InitArrowDuckBuffer(ArrowBuffer* buffer, Allocator& duck_allocator) 
   buffer->allocator.private_data = &duck_allocator;
 }
 
+//! Whether Arrow has no exact type for a value of this type
+static bool IsLossy(const LogicalType& type) {
+  return type.id() == LogicalTypeId::HUGEINT || type.id() == LogicalTypeId::UHUGEINT;
+}
+
+//! The type a value is written as, which rebuilds only the types that hold a lossy one
+static LogicalType WrittenType(const LogicalType& type) {
+  if (!TypeVisitor::Contains(type, IsLossy)) {
+    return type;
+  }
+  switch (type.id()) {
+    case LogicalTypeId::HUGEINT:
+    case LogicalTypeId::UHUGEINT:
+      // The decimal128 the schema declared anyway, with a cast that checks the range
+      return LogicalType::DECIMAL(38, 0);
+    case LogicalTypeId::LIST:
+      return LogicalType::LIST(WrittenType(ListType::GetChildType(type)));
+    case LogicalTypeId::ARRAY:
+      return LogicalType::ARRAY(WrittenType(ArrayType::GetChildType(type)),
+                                ArrayType::GetSize(type));
+    case LogicalTypeId::MAP:
+      return LogicalType::MAP(WrittenType(MapType::KeyType(type)),
+                              WrittenType(MapType::ValueType(type)));
+    case LogicalTypeId::STRUCT:
+    case LogicalTypeId::TUPLE: {
+      auto children = StructType::GetChildTypes(type);
+      for (auto& child : children) {
+        child.second = WrittenType(child.second);
+      }
+      return type.id() == LogicalTypeId::STRUCT ? LogicalType::STRUCT(children)
+                                                : LogicalType::TUPLE(children);
+    }
+    case LogicalTypeId::UNION: {
+      auto members = UnionType::CopyMemberTypes(type);
+      for (auto& member : members) {
+        member.second = WrittenType(member.second);
+      }
+      return LogicalType::UNION(members);
+    }
+    default:
+      return type;
+  }
+}
+
+//! The type a column is written as, since Arrow has no exact type for some of DuckDB's
+static LogicalType WriteType(const LogicalType& type, const ClientProperties& options) {
+  // The lossless conversion keeps every value in an extension type
+  return options.arrow_lossless_conversion ? type : WrittenType(type);
+}
+
 static void CheckEncodableField(const ArrowSchema& field, const char* column) {
   if (field.dictionary) {
     throw NotImplementedException(
@@ -70,7 +124,11 @@ nanoarrow::UniqueSchema CreateArrowIpcSchema(const vector<LogicalType>& types,
                                              const vector<Identifier>& names,
                                              ClientProperties& options) {
   nanoarrow::UniqueSchema schema;
-  ArrowConverter::ToArrowSchema(schema.get(), types, IdentifiersToStrings(names),
+  vector<LogicalType> write_types;
+  for (const auto& type : types) {
+    write_types.push_back(WriteType(type, options));
+  }
+  ArrowConverter::ToArrowSchema(schema.get(), write_types, IdentifiersToStrings(names),
                                 options);
   for (int64_t i = 0; i < schema->n_children; i++) {
     CheckEncodableField(*schema->children[i], schema->children[i]->name);
@@ -100,8 +158,36 @@ void ColumnDataCollectionSerializer::Init(const ArrowSchema* schema,
   THROW_NOT_OK(InternalException, &error,
                ArrowArrayViewInitFromSchema(chunk_view.get(), schema, &error));
 
+  write_types.clear();
+  cast_expressions.clear();
+  cast_executor.reset();
+  for (idx_t i = 0; i < logical_types.size(); i++) {
+    write_types.push_back(WriteType(logical_types[i], options));
+    unique_ptr<Expression> column =
+        make_uniq<BoundReferenceExpression>(logical_types[i], i);
+    if (write_types[i] != logical_types[i]) {
+      column = BoundCastExpression::AddCastToType(*options.client_context,
+                                                  std::move(column), write_types[i]);
+    }
+    cast_expressions.push_back(std::move(column));
+  }
+  if (write_types != logical_types) {
+    cast_executor =
+        make_uniq<ExpressionExecutor>(*options.client_context, cast_expressions);
+    cast_chunk.Destroy();
+    cast_chunk.Initialize(allocator, write_types);
+  }
   extension_types =
-      ArrowTypeExtensionData::GetExtensionTypes(*options.client_context, logical_types);
+      ArrowTypeExtensionData::GetExtensionTypes(*options.client_context, write_types);
+}
+
+DataChunk& ColumnDataCollectionSerializer::Cast(DataChunk& chunk) {
+  if (!cast_executor) {
+    return chunk;
+  }
+  cast_chunk.Reset();
+  cast_executor->Execute(chunk, cast_chunk);
+  return cast_chunk;
 }
 
 void ColumnDataCollectionSerializer::SerializeSchema(const ArrowSchema* schema,
@@ -196,9 +282,10 @@ idx_t ColumnDataCollectionSerializer::Serialize(const ColumnDataCollection& buff
   if (buffer.Count() == 0) {
     return 0;
   }
-  ArrowAppender appender(buffer.Types(), buffer.Count(), options, extension_types);
+  ArrowAppender appender(write_types, buffer.Count(), options, extension_types);
   for (auto& chunk : buffer.Chunks()) {
-    appender.Append(chunk, 0, chunk.size(), chunk.size());
+    auto& written = Cast(chunk);
+    appender.Append(written, 0, written.size(), written.size());
   }
   return Serialize(appender);
 }
