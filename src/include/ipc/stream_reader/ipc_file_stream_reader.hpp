@@ -105,6 +105,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
   const ArrowIpcFileBlock* end_block = nullptr;
   //! Whether the blocks being read are the dictionary blocks of the footer
   bool reading_dictionaries = false;
+  //! The dictionaries the footer defined so far, each of which it may define once
+  unordered_set<int64_t> dictionary_ids;
   //! Counting reads headers only, so regular files seek past the bodies
   bool skip_bodies = false;
   //! Stands in for bodies a count skips, whose views only need offsets inside it

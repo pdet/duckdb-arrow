@@ -36,6 +36,24 @@ SELECT k FROM read_arrow('data/corrupt/footer_dictionary_as_batch.arrow');
 ----
 names a dictionary batch as a record batch block
 
+# A footer that lists the record batch block among the dictionaries is refused as well
+statement error
+SELECT k FROM read_arrow('data/corrupt/footer_batch_as_dictionary.arrow');
+----
+names a record batch as a dictionary block
+
+# An end of stream marker among the dictionary blocks would hide the blocks after it
+statement error
+SELECT w FROM read_arrow('data/corrupt/footer_eos_as_dictionary.arrow');
+----
+names the end of stream marker as a dictionary block
+
+# A footer with two dictionary batches for one id replaces the dictionary, which a file must not
+statement error
+SELECT w FROM read_arrow('data/corrupt/dictionary_replaced.arrow');
+----
+replaces dictionary 0
+
 statement ok
 CALL truncate_duckdb_logs();
 

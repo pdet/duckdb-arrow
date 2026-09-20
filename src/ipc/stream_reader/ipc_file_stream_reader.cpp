@@ -620,11 +620,29 @@ bool IPCFileStreamReader::DecodeBlockHeader(const ArrowIpcFileBlock& block,
 ArrowIpcMessageType IPCFileStreamReader::DecodeFetchedBlock(
     const ArrowIpcFileBlock& block, const FetchedBlock& fetched) {
   if (!DecodeBlockHeader(block, fetched)) {
+    // An end of stream marker among the dictionary blocks would hide the ones after it
+    if (reading_dictionaries) {
+      throw IOException(
+          "Arrow IPC footer names the end of stream marker as a dictionary block");
+    }
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
   }
-  // A dictionary batch among the record batches would change dictionaries readers share
-  if (!reading_dictionaries &&
-      decoder->message_type == NANOARROW_IPC_MESSAGE_TYPE_DICTIONARY_BATCH) {
+  const bool dictionary =
+      decoder->message_type == NANOARROW_IPC_MESSAGE_TYPE_DICTIONARY_BATCH;
+  if (reading_dictionaries) {
+    // The dictionary blocks hold nothing else, so the check comes before any decode
+    if (!dictionary) {
+      throw IOException("Arrow IPC footer names a record batch as a dictionary block");
+    }
+    // A file may grow a dictionary with deltas but never replace it, as a stream may
+    if (!decoder->dictionary->is_delta &&
+        !dictionary_ids.insert(decoder->dictionary->id).second) {
+      throw IOException(
+          "Arrow IPC file replaces dictionary %lld, which only a stream may",
+          decoder->dictionary->id);
+    }
+  } else if (dictionary) {
+    // A dictionary batch among the record batches would change dictionaries readers share
     throw IOException(
         "Arrow IPC footer names a dictionary batch as a record batch block");
   }
@@ -661,9 +679,7 @@ void IPCFileStreamReader::LoadDictionaries(const vector<ArrowIpcFileBlock>& bloc
   // Only dictionary blocks are named, so the read decodes them all and reaches the end
   nanoarrow::UniqueArray none;
   reading_dictionaries = true;
-  if (GetNextBatch(none.get())) {
-    throw IOException("Arrow IPC footer names a record batch as a dictionary block");
-  }
+  GetNextBatch(none.get());
   reading_dictionaries = false;
 }
 
