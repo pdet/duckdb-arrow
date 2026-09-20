@@ -266,13 +266,11 @@ nanoarrow::UniqueBuffer IPCFileStreamReader::GetUniqueBuffer() {
   return out;
 }
 bool IPCFileStreamReader::DecodeHeader(const idx_t message_header_size) {
+  // The size comes from the file, so it is checked before that much is allocated
+  CheckInFile(SequentialOffset(), message_header_size - sizeof(message_prefix));
   if (message_header.GetSize() < message_header_size) {
     message_header = allocator.Allocate(message_header_size);
   }
-  // Read the message header. I believe the fact that this loops and calls
-  // the file handle's Read() method with relatively small chunks will ensure that
-  // an attempt to read a very large message_header_size can be cancelled. If this
-  // is not the case, we might want to implement our own buffering.
   std::memcpy(message_header.get(), &message_prefix, sizeof(message_prefix));
   ReadData(message_header.get() + sizeof(message_prefix),
            message_header_size - sizeof(message_prefix));
@@ -280,14 +278,15 @@ bool IPCFileStreamReader::DecodeHeader(const idx_t message_header_size) {
   return DecodeHeaderBuffer(AllocatedDataView(message_header.get(), message_header_size));
 }
 
-bool IPCFileStreamReader::CanReadBodyPositionally(idx_t body_start, idx_t body_size) {
-  // CanSeek answers for the file system, not for this handle, so it lets pipes through
+void IPCFileStreamReader::CheckInFile(idx_t start, idx_t size) {
+  // A pipe has no size, so its sequential read reports the truncation instead
   if (!positional) {
-    return false;
+    return;
   }
-  // A body running past the end keeps the sequential read, which reports truncation
   const auto file_size = file_reader.FileSize();
-  return body_start <= file_size && body_size <= file_size - body_start;
+  if (start > file_size || size > file_size - start) {
+    throw IOException("Arrow IPC stream is truncated, it ends inside a message");
+  }
 }
 
 void IPCFileStreamReader::ReadBodyPositionally(idx_t body_start, idx_t body_size) {
@@ -390,6 +389,7 @@ void IPCFileStreamReader::DecodeBody() {
   // The padding belongs to the previous message, so take the offset after it
   const auto body_start = SequentialOffset();
   const auto body_size = static_cast<idx_t>(decoder->body_size_bytes);
+  CheckInFile(body_start, body_size);
   // A swap reads the buffers it rewrites, so only an unswapped body can stay unread
   if (skip_bodies && !NeedsEndianSwap()) {
     // The read ahead fetches every byte anyway, and seeking drops a small body's buffer
@@ -398,7 +398,7 @@ void IPCFileStreamReader::DecodeBody() {
       SetUnreadBody(body_size);
       return;
     }
-    if (body_size >= FILE_BUFFER_SIZE && CanReadBodyPositionally(body_start, body_size)) {
+    if (body_size >= FILE_BUFFER_SIZE && positional) {
       file_reader.Seek(body_start + body_size);
       SetUnreadBody(body_size);
       return;
@@ -407,7 +407,7 @@ void IPCFileStreamReader::DecodeBody() {
   message_body = make_shared_ptr<AllocatedData>(allocator.Allocate(body_size));
   if (scheduler) {
     SequentialRead(message_body->get(), body_size);
-  } else if (CanReadBodyPositionally(body_start, body_size)) {
+  } else if (positional) {
     if (!TryReadProjectedBody(body_start, body_size)) {
       ReadBodyPositionally(body_start, body_size);
     }
