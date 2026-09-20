@@ -76,6 +76,28 @@ bool EndsWithMagic(const_data_ptr_t end) {
                      kArrowIPCFileMagicSize) == 0;
 }
 
+//! Whether nanoarrow can size the buffers of a view without its int64 arithmetic wrapping
+bool LengthFits(const ArrowArrayView& view) {
+  // Validation multiplies the length by each buffer width and by the fixed list size
+  constexpr auto kMax = NumericLimits<int64_t>::Maximum() - 8;
+  for (int i = 0; i < NANOARROW_MAX_FIXED_BUFFERS; i++) {
+    const auto bits = view.layout.element_size_bits[i];
+    if (bits > 0 && view.length > kMax / bits) {
+      return false;
+    }
+  }
+  const auto children = view.layout.child_size_elements;
+  if (children > 0 && view.length > kMax / children) {
+    return false;
+  }
+  for (int64_t i = 0; i < view.n_children; i++) {
+    if (!LengthFits(*view.children[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 //! Whether a field or any of its children is dictionary encoded
 bool HasDictionary(const ArrowSchema& schema) {
   if (schema.dictionary) {
@@ -400,8 +422,9 @@ void IPCFileStreamReader::DecodeBody() {
   const auto body_start = SequentialOffset();
   const auto body_size = static_cast<idx_t>(decoder->body_size_bytes);
   CheckInFile(body_start, body_size);
-  // A swap reads the buffers it rewrites, so only an unswapped body can stay unread
-  if (skip_bodies && !NeedsEndianSwap()) {
+  // A swap reads the buffers it rewrites, and a compressed body must be decoded to count
+  if (skip_bodies && !NeedsEndianSwap() &&
+      decoder->codec == NANOARROW_IPC_COMPRESSION_TYPE_NONE) {
     // The read ahead fetches every byte anyway, and seeking drops a small body's buffer
     if (scheduler) {
       SequentialSeek(body_start + body_size);
@@ -499,17 +522,19 @@ bool IPCFileStreamReader::NextBatchLength(idx_t& length) {
     }
   } while (message_type != NANOARROW_IPC_MESSAGE_TYPE_RECORD_BATCH);
 
-  // The view only takes offsets inside the body, so an unread body gives the length
+  // The view takes offsets inside an unread plain body and decodes a compressed one
   const auto body_view = AllocatedDataView(cur_ptr, cur_size);
-  CodecOverride codec_override(*decoder.get());
   ArrowArrayView* view = nullptr;
   THROW_NOT_OK(
       IOException, &error,
       ArrowIpcDecoderDecodeArrayViewWithDictionaries(
           decoder.get(), body_view, count_field, dictionaries->get(), &view, &error));
-  if (view->length < 0) {
-    throw IOException("Arrow IPC record batch has a negative length");
+  if (!LengthFits(*view)) {
+    throw IOException("Arrow IPC record batch length is too large");
   }
+  // The buffer sizes bound the rows, so a header cannot claim more than the body holds
+  THROW_NOT_OK(IOException, &error,
+               ArrowArrayViewValidate(view, NANOARROW_VALIDATION_LEVEL_MINIMAL, &error));
   length = static_cast<idx_t>(view->length);
   return true;
 }
@@ -665,8 +690,17 @@ ArrowIpcMessageType IPCFileStreamReader::DecodeFetchedBlock(
     if (body_size > static_cast<idx_t>(block.body_length)) {
       throw IOException("Arrow IPC message body is larger than its footer block");
     }
-    if (skip_bodies) {
+    if (skip_bodies && decoder->codec == NANOARROW_IPC_COMPRESSION_TYPE_NONE) {
       SetUnreadBody(body_size);
+    } else if (skip_bodies) {
+      // Only the header was fetched, and a compressed body must be decoded to count it
+      message_body = make_shared_ptr<AllocatedData>(allocator.Allocate(body_size));
+      ReadAt(*file_reader.handle,
+             FileRead{message_body->get(), body_size,
+                      static_cast<idx_t>(block.offset) +
+                          static_cast<idx_t>(block.metadata_length)});
+      cur_ptr = message_body->get();
+      cur_size = static_cast<int64_t>(body_size);
     } else {
       message_body = fetched.data;
       cur_ptr = fetched.ptr + block.metadata_length;

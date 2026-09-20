@@ -27,6 +27,20 @@ SELECT count(*) FROM (SELECT * FROM read_arrow('{DATA_PATH}/test_${compression}.
 ----
 0
 
+# Counting reads the headers of a plain body and decodes one column of a compressed one
+statement ok
+COPY test TO '{DATA_PATH}/test_${compression}.arrow' (FORMAT ARROW, COMPRESSION '${compression}');
+
+query I
+SELECT count(*) FROM read_arrow('{DATA_PATH}/test_${compression}.arrows');
+----
+1024
+
+query I
+SELECT count(*) FROM read_arrow('{DATA_PATH}/test_${compression}.arrow');
+----
+1024
+
 endloop
 
 # Compressed files are smaller than the uncompressed one

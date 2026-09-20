@@ -22,7 +22,7 @@ Arrow IPC stream is truncated
 
 endloop
 
-# A recorded uncompressed length does not match the codec output, which only a column read decompresses
+# A recorded uncompressed length does not match the codec output
 statement error
 SELECT sum(i) FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/bad_body_zstd.arrows');
 ----
@@ -32,6 +32,22 @@ statement error
 SELECT sum(i) FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/bad_body_lz4.arrows');
 ----
 LZ4 frame
+
+# A record batch header must not claim more rows than its buffers hold, compressed or not
+foreach file bad_field_length.arrows bad_field_length.arrow bad_field_length_zstd.arrows bad_field_length_zstd.arrow
+
+statement error
+SELECT count(*) FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/${file}');
+----
+to have size >=
+
+endloop
+
+# A length that would wrap nanoarrow's buffer size arithmetic is rejected before it runs
+statement error
+SELECT count(*) FROM read_arrow('__WORKING_DIRECTORY__/data/corrupt/bad_field_length_wrap.arrows');
+----
+length is too large
 
 # Validate the message length before allocating or reading metadata.
 statement ok
