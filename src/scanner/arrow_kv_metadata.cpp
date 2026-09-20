@@ -5,6 +5,7 @@
 #include "duckdb/common/vector/vector_writer.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "ipc/stream_factory.hpp"
+#include "ipc/stream_reader/ipc_file_stream_reader.hpp"
 #include "utf8proc_wrapper.hpp"
 
 namespace duckdb {
@@ -109,6 +110,8 @@ void Function(ClientContext& context, TableFunctionInput& input, DataChunk& outp
     state.next_row = 0;
     FileIPCStreamFactory factory(context, file);
     factory.InitReader();
+    // The footer is the schema of record of a file, which the scan reads first too
+    static_cast<IPCFileStreamReader&>(*factory.reader).TryReadFooter();
     vector<Value> path;
     CollectMetadata(factory.reader->GetBaseSchema(), path, state.rows);
   }

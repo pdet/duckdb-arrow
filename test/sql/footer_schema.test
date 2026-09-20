@@ -1,0 +1,73 @@
+# name: test/sql/footer_schema.test
+# description: The footer is the schema of record of an Arrow IPC file, wherever the file is read from
+# group: [sql]
+
+require nanoarrow
+
+test-env DATA_PATH {TEST_DIR}
+
+# Arrow JS writes the schema only in the footer, so the stream section starts with a batch
+query II
+SELECT * FROM read_arrow('data/arrow_js.arrow');
+----
+1	1.5
+2	2.5
+3	3.5
+
+query II
+SELECT * FROM read_arrow('data/arrow_js_dictionary.arrow');
+----
+1	a
+2	b
+3	a
+4	c
+
+query I
+SELECT count(*) FROM arrow_kv_metadata('data/arrow_js.arrow');
+----
+0
+
+# The schema message of this file names the columns the other way round
+query II
+SELECT AAAA, BBBB FROM read_arrow('data/corrupt/footer_names_swapped.arrow');
+----
+1	100
+2	200
+
+# The schema message of this file has another name and no extension type
+query II
+SELECT column_name, column_type FROM (DESCRIBE FROM read_arrow('data/corrupt/footer_type_uuid.arrow'));
+----
+QQQQQQQQ	UUID
+
+query III
+SELECT field_path, key, value FROM arrow_kv_metadata('data/corrupt/footer_type_uuid.arrow');
+----
+[QQQQQQQQ]	ARROW:extension:name	arrow.uuid
+
+# A local file is told by its magic, not by its name
+statement ok
+COPY (SELECT content FROM read_blob('{WORKING_DIRECTORY}/data/arrow_js.arrow')) TO '{TEST_DIR}/arrow_js.arrows' (FORMAT BLOB);
+
+query I
+SELECT sum(id) FROM read_arrow('{TEST_DIR}/arrow_js.arrows');
+----
+6
+
+# A remote copy binds the same schema as the local file
+statement ok
+COPY (SELECT content FROM read_blob('{WORKING_DIRECTORY}/data/arrow_js.arrow')) TO '{DATA_PATH}/arrow_js.arrow' (FORMAT BLOB);
+
+query I
+SELECT sum(id) FROM read_arrow('{DATA_PATH}/arrow_js.arrow');
+----
+6
+
+statement ok
+COPY (SELECT content FROM read_blob('{WORKING_DIRECTORY}/data/corrupt/footer_names_swapped.arrow')) TO '{DATA_PATH}/footer_names_swapped.arrow' (FORMAT BLOB);
+
+query II
+SELECT AAAA, BBBB FROM read_arrow('{DATA_PATH}/footer_names_swapped.arrow');
+----
+1	100
+2	200
