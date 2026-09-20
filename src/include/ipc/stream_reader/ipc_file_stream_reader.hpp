@@ -49,8 +49,18 @@ class IPCFileStreamReader final : public IPCStreamReader {
   }
   //! The dictionary batch blocks named by the footer
   const vector<ArrowIpcFileBlock>& DictionaryBlocks() const { return dictionary_blocks; }
+  //! Whether a field the scan reads is dictionary encoded
+  bool NeedsDictionaries();
   //! Decodes these dictionary blocks, which the record batch blocks need first
   void LoadDictionaries(const vector<ArrowIpcFileBlock>& blocks);
+  //! The decoded dictionaries, for the other claim readers of the file to take
+  const shared_ptr<nanoarrow::ipc::UniqueDictionaries>& Dictionaries() const {
+    return dictionaries;
+  }
+  //! Takes the dictionaries another claim reader decoded, which a file cannot replace
+  void ShareDictionaries(shared_ptr<nanoarrow::ipc::UniqueDictionaries> shared) {
+    dictionaries = std::move(shared);
+  }
   //! Reads only the record batches of these footer blocks, then reports the end
   void SetBlocks(const ArrowIpcFileBlock* begin, const ArrowIpcFileBlock* end);
   //! Reads the blocks left to scan into memory from any thread, whole bodies if asked
@@ -96,6 +106,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
   //! The claimed blocks still to read, both null outside a block scan
   const ArrowIpcFileBlock* next_block = nullptr;
   const ArrowIpcFileBlock* end_block = nullptr;
+  //! Whether the blocks being read are the dictionary blocks of the footer
+  bool reading_dictionaries = false;
   //! Counting reads headers only, so regular files seek past the bodies
   bool skip_bodies = false;
   //! Stands in for bodies a count skips, whose views only need offsets inside it

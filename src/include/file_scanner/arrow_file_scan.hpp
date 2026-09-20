@@ -11,6 +11,7 @@
 #include "ipc/stream_factory.hpp"
 
 #include "duckdb/common/multi_file/base_file_reader.hpp"
+#include "duckdb/common/mutex.hpp"
 #include "duckdb/parallel/async_result.hpp"
 
 namespace duckdb {
@@ -71,6 +72,9 @@ class ArrowFileScan : public BaseFileReader {
 
   vector<string> names;
   vector<LogicalType> types;
+  //! The dictionaries of the file, decoded by the first claim reader that needs them
+  shared_ptr<nanoarrow::ipc::UniqueDictionaries> dictionaries;
+  mutex dictionary_lock;
   //! Tells readers apart in reused scan states, where an address could repeat
   const idx_t scan_id;
   vector<ArrowIpcFileBlock> blocks;

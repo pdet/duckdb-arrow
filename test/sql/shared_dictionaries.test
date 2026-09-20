@@ -1,0 +1,55 @@
+# name: test/sql/shared_dictionaries.test
+# description: The dictionaries of a file are decoded once for its claim readers, and only when a read needs them
+# group: [sql]
+
+require nanoarrow
+
+require noforcestorage
+
+statement ok
+SET VARIABLE file_size = (SELECT size FROM read_blob('data/dictionary_claims.arrow'));
+
+statement ok
+SET logging_storage = 'memory';
+
+statement ok
+SET threads=4;
+
+statement ok
+CALL enable_logging('FileSystem');
+
+# A read of the boolean column alone never touches the 680 KB dictionary
+query I
+SELECT count(*) FROM read_arrow('data/dictionary_claims.arrow') WHERE b;
+----
+405000
+
+query I
+SELECT sum(bytes) < 500000 FROM duckdb_logs_parsed('FileSystem')
+WHERE op = 'READ' AND path LIKE '%dictionary_claims.arrow%';
+----
+true
+
+# A footer that lists the dictionary block among the record batches is refused
+statement error
+SELECT k FROM read_arrow('data/corrupt/footer_dictionary_as_batch.arrow');
+----
+names a dictionary batch as a record batch block
+
+statement ok
+CALL truncate_duckdb_logs();
+
+query II
+SELECT count(*), count(DISTINCT k) FROM read_arrow('data/dictionary_claims.arrow');
+----
+810000	20000
+
+# Shared buffers count their readers atomically only with C11 atomics, which MSVC lacks
+require notwindows
+
+# Three claims of keys share one dictionary, so the file is read about once
+query I
+SELECT sum(bytes) < getvariable('file_size') + 100000 FROM duckdb_logs_parsed('FileSystem')
+WHERE op = 'READ' AND path LIKE '%dictionary_claims.arrow%';
+----
+true

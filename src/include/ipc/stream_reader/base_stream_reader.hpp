@@ -93,7 +93,9 @@ class IPCStreamReader {
   AllocatedData aligned_header;
   ArrowError error{};
   nanoarrow::ipc::UniqueDecoder decoder{};
-  nanoarrow::ipc::UniqueDictionaries dictionaries{};
+  //! The dictionaries of the stream, which the claim readers of one file share
+  shared_ptr<nanoarrow::ipc::UniqueDictionaries> dictionaries =
+      make_shared_ptr<nanoarrow::ipc::UniqueDictionaries>();
   //! The schema message endianness, which the decoder wipes before every message
   ArrowIpcEndianness stream_endianness = NANOARROW_IPC_ENDIANNESS_UNINITIALIZED;
   vector<int64_t> projected_fields;
