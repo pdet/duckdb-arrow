@@ -174,10 +174,6 @@ void ArrowFileScan::PrepareScan(ClientContext& context,
     // The schema comes from the footer copy, so a claim costs no read of the file start
     lstate.block_reader->LoadFooter(ArrowBufferView{
         {footer_window.get()}, static_cast<int64_t>(footer_window.GetSize())});
-    // Each reader decodes the dictionaries once, since a file cannot replace them
-    if (!count_only) {
-      lstate.block_reader->LoadDictionaries(dictionary_blocks);
-    }
     InitializeScanData(lstate, &ArrowFileScan::ProduceBlocks,
                        reinterpret_cast<uintptr_t>(&lstate));
     // The fetch needs the projection before the scan that would push it starts
@@ -190,6 +186,19 @@ void ArrowFileScan::PrepareScan(ClientContext& context,
       }
       if (!projection.empty()) {
         lstate.block_reader->SetColumnProjection(projection);
+      }
+      // Claim readers share one set, since a file cannot replace its dictionaries
+      if (lstate.block_reader->NeedsDictionaries()) {
+        lock_guard<mutex> guard(dictionary_lock);
+        if (dictionaries) {
+          lstate.block_reader->ShareDictionaries(dictionaries);
+        } else {
+          lstate.block_reader->LoadDictionaries(dictionary_blocks);
+          // Shared buffers count their readers atomically only when nanoarrow has atomics
+          if (ArrowSharedBufferIsThreadSafe()) {
+            dictionaries = lstate.block_reader->Dictionaries();
+          }
+        }
       }
     }
     lstate.block_scan_id = scan_id;

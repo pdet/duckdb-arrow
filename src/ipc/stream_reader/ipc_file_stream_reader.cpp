@@ -312,7 +312,7 @@ bool IPCFileStreamReader::ProjectedRanges(const_data_ptr_t base, idx_t body_size
     for (const auto field_index : projected_fields) {
       ArrowArrayView* view = nullptr;
       if (ArrowIpcDecoderDecodeArrayViewWithDictionaries(decoder.get(), body_view,
-                                                         field_index, dictionaries.get(),
+                                                         field_index, dictionaries->get(),
                                                          &view, &error) != NANOARROW_OK) {
         return false;
       }
@@ -477,7 +477,7 @@ bool IPCFileStreamReader::NextBatchLength(idx_t& length) {
   THROW_NOT_OK(
       IOException, &error,
       ArrowIpcDecoderDecodeArrayViewWithDictionaries(
-          decoder.get(), body_view, count_field, dictionaries.get(), &view, &error));
+          decoder.get(), body_view, count_field, dictionaries->get(), &view, &error));
   if (view->length < 0) {
     throw IOException("Arrow IPC record batch has a negative length");
   }
@@ -622,6 +622,12 @@ ArrowIpcMessageType IPCFileStreamReader::DecodeFetchedBlock(
   if (!DecodeBlockHeader(block, fetched)) {
     return NANOARROW_IPC_MESSAGE_TYPE_UNINITIALIZED;
   }
+  // A dictionary batch among the record batches would change dictionaries readers share
+  if (!reading_dictionaries &&
+      decoder->message_type == NANOARROW_IPC_MESSAGE_TYPE_DICTIONARY_BATCH) {
+    throw IOException(
+        "Arrow IPC footer names a dictionary batch as a record batch block");
+  }
   message_body.reset();
   cur_ptr = nullptr;
   cur_size = 0;
@@ -641,6 +647,10 @@ ArrowIpcMessageType IPCFileStreamReader::DecodeFetchedBlock(
   return decoder->message_type;
 }
 
+bool IPCFileStreamReader::NeedsDictionaries() {
+  return HasDictionary(*GetOutputSchema());
+}
+
 void IPCFileStreamReader::LoadDictionaries(const vector<ArrowIpcFileBlock>& blocks) {
   if (blocks.empty()) {
     return;
@@ -650,9 +660,11 @@ void IPCFileStreamReader::LoadDictionaries(const vector<ArrowIpcFileBlock>& bloc
   FetchBlocks(true);
   // Only dictionary blocks are named, so the read decodes them all and reaches the end
   nanoarrow::UniqueArray none;
+  reading_dictionaries = true;
   if (GetNextBatch(none.get())) {
     throw IOException("Arrow IPC footer names a record batch as a dictionary block");
   }
+  reading_dictionaries = false;
 }
 
 void IPCFileStreamReader::SetBlocks(const ArrowIpcFileBlock* begin,

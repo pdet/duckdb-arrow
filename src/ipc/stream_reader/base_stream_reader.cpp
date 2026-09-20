@@ -37,7 +37,7 @@ void IPCStreamReader::SetSchema(const ArrowIpcDictionaryEncodings& dictionary_en
 
   THROW_NOT_OK(
       IOException, &error,
-      ArrowIpcDictionariesInit(dictionaries.get(), &dictionary_encodings, &error));
+      ArrowIpcDictionariesInit(dictionaries->get(), &dictionary_encodings, &error));
 
   // Only the schema message carries this, later messages read back as uninitialized
   stream_endianness = decoder->endianness;
@@ -92,12 +92,12 @@ bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
       THROW_NOT_OK(IOException, &error,
                    ArrowIpcDecoderDecodeDictionaryFromShared(
                        decoder.get(), shared.get(), NANOARROW_VALIDATION_LEVEL_FULL,
-                       dictionaries.get(), &error));
+                       dictionaries->get(), &error));
     } else {
       THROW_NOT_OK(IOException, &error,
                    ArrowIpcDecoderDecodeDictionary(decoder.get(), body_view,
                                                    NANOARROW_VALIDATION_LEVEL_FULL,
-                                                   dictionaries.get(), &error));
+                                                   dictionaries->get(), &error));
     }
   }
 
@@ -116,7 +116,7 @@ bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
         THROW_NOT_OK(
             IOException, &error,
             ArrowIpcDecoderDecodeArrayFromSharedWithDictionaries(
-                decoder.get(), shared.get(), projected_fields[i], dictionaries.get(),
+                decoder.get(), shared.get(), projected_fields[i], dictionaries->get(),
                 array->children[i], NANOARROW_VALIDATION_LEVEL_FULL, &error));
       }
     } else {
@@ -124,7 +124,7 @@ bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
         THROW_NOT_OK(
             IOException, &error,
             ArrowIpcDecoderDecodeArrayWithDictionaries(
-                decoder.get(), body_view, projected_fields[i], dictionaries.get(),
+                decoder.get(), body_view, projected_fields[i], dictionaries->get(),
                 array->children[i], NANOARROW_VALIDATION_LEVEL_FULL, &error));
       }
     }
@@ -135,12 +135,12 @@ bool IPCStreamReader::GetNextBatch(ArrowArray* out) {
   } else if (thread_safe_shared) {
     THROW_NOT_OK(IOException, &error,
                  ArrowIpcDecoderDecodeArrayFromSharedWithDictionaries(
-                     decoder.get(), shared.get(), -1, dictionaries.get(), array.get(),
+                     decoder.get(), shared.get(), -1, dictionaries->get(), array.get(),
                      NANOARROW_VALIDATION_LEVEL_FULL, &error));
   } else {
     THROW_NOT_OK(IOException, &error,
                  ArrowIpcDecoderDecodeArrayWithDictionaries(
-                     decoder.get(), body_view, -1, dictionaries.get(), array.get(),
+                     decoder.get(), body_view, -1, dictionaries->get(), array.get(),
                      NANOARROW_VALIDATION_LEVEL_FULL, &error));
   }
 
