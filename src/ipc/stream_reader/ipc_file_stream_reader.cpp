@@ -452,8 +452,9 @@ void IPCFileStreamReader::DecodeBody() {
 }
 
 void IPCFileStreamReader::SetUnreadBody(idx_t size) {
+  // The view takes offsets inside the body and reads no byte, so untouched pages back it
   if (unread_body.GetSize() < size) {
-    unread_body = allocator.Allocate(size);
+    unread_body = Allocator::DefaultAllocator().Allocate(size);
   }
   cur_ptr = unread_body.get();
   cur_size = static_cast<int64_t>(size);
@@ -690,10 +691,11 @@ ArrowIpcMessageType IPCFileStreamReader::DecodeFetchedBlock(
     if (body_size > static_cast<idx_t>(block.body_length)) {
       throw IOException("Arrow IPC message body is larger than its footer block");
     }
-    if (skip_bodies && decoder->codec == NANOARROW_IPC_COMPRESSION_TYPE_NONE) {
+    if (skip_bodies && !NeedsEndianSwap() &&
+        decoder->codec == NANOARROW_IPC_COMPRESSION_TYPE_NONE) {
       SetUnreadBody(body_size);
     } else if (skip_bodies) {
-      // Only the header was fetched, and a compressed body must be decoded to count it
+      // Only the header was fetched, and a swapped or compressed body is read to count it
       message_body = make_shared_ptr<AllocatedData>(allocator.Allocate(body_size));
       ReadAt(*file_reader.handle,
              FileRead{message_body->get(), body_size,
