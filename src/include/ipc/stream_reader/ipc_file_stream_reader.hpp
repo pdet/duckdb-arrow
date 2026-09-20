@@ -90,6 +90,9 @@ class IPCFileStreamReader final : public IPCStreamReader {
   bool footer_read = false;
   //! The footer, its size and the magic, for claim readers to take the schema from
   AllocatedData footer_window;
+  //! Whether the end of the file was looked at, and whether it lacks the closing magic
+  bool file_end_read = false;
+  bool missing_footer = false;
   //! The claimed blocks still to read, both null outside a block scan
   const ArrowIpcFileBlock* next_block = nullptr;
   const ArrowIpcFileBlock* end_block = nullptr;
@@ -101,6 +104,8 @@ class IPCFileStreamReader final : public IPCStreamReader {
   int64_t count_field = -1;
 
   void EnsureInputStreamAligned();
+  //! Reads the closing magic of a file whose end TryReadFooter skipped
+  void ReadFileEnd();
   //! Rejects a message part that runs past the end of a file whose size is known
   void CheckInFile(idx_t start, idx_t size);
   //! Reads a whole body, small ones through the buffer and large ones positionally

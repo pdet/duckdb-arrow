@@ -24,6 +24,36 @@ SELECT count(*) FROM read_arrow('{WORKING_DIRECTORY}/data/corrupt/footer_schema_
 ----
 Expected continuation token
 
+# A file without a footer is a partial copy, even when its stream section is complete
+statement ok
+COPY (SELECT i FROM range(2048) t(i)) TO '{DATA_PATH}/part.arrows' (FORMAT arrows);
+
+statement ok
+COPY (SELECT 'ARROW1\x00\x00'::BLOB || content FROM read_blob('{DATA_PATH}/part.arrows')) TO '{DATA_PATH}/cut.arrow' (FORMAT BLOB);
+
+statement error
+SELECT count(*) FROM read_arrow('{DATA_PATH}/cut.arrow');
+----
+is truncated, it has no footer
+
+# The name of a remote file skips the footer, and the magic still asks for its end
+statement ok
+COPY (SELECT content FROM read_blob('{DATA_PATH}/cut.arrow')) TO '{DATA_PATH}/cut.arrows' (FORMAT BLOB);
+
+statement error
+SELECT count(*) FROM read_arrow('{DATA_PATH}/cut.arrows');
+----
+is truncated, it has no footer
+
+# A file with no record batches has a footer without blocks, so its stream is read to its end
+statement ok
+COPY (SELECT 1 AS i WHERE false) TO '{DATA_PATH}/empty.arrow' (FORMAT arrow);
+
+query I
+SELECT count(*) FROM read_arrow('{DATA_PATH}/empty.arrow');
+----
+0
+
 # A remote file reads its footer first, so the same checks keep it on the stream
 foreach file footer_block_overflow footer_short_metadata
 
