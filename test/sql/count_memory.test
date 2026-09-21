@@ -1,0 +1,33 @@
+# name: test/sql/count_memory.test
+# description: Counting rows reads only the message headers, so it needs no memory for the bodies
+# group: [sql]
+
+require nanoarrow
+
+test-env DATA_PATH {TEST_DIR}
+
+statement ok
+CREATE TABLE t AS SELECT range AS i, repeat('a', 100) AS p FROM range(100000);
+
+# One record batch of about 10 MB in each format
+statement ok
+COPY t TO '{DATA_PATH}/one_batch.arrow' (FORMAT arrow, CHUNK_SIZE 100000);
+
+statement ok
+COPY t TO '{DATA_PATH}/one_batch.arrows' (FORMAT arrows, CHUNK_SIZE 100000);
+
+statement ok
+SET memory_limit='8MB';
+
+query I
+SELECT count(*) FROM read_arrow('{DATA_PATH}/one_batch.arrow');
+----
+100000
+
+query I
+SELECT count(*) FROM read_arrow('{DATA_PATH}/one_batch.arrows');
+----
+100000
+
+statement ok
+RESET memory_limit;

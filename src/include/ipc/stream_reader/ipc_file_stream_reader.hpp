@@ -110,7 +110,7 @@ class IPCFileStreamReader final : public IPCStreamReader {
   bool reading_dictionaries = false;
   //! Counting reads headers only, so regular files seek past the bodies
   bool skip_bodies = false;
-  //! Stands in for bodies a count skips, whose views only need offsets inside it
+  //! Stands in for skipped bodies, untouched and outside the memory limit
   AllocatedData unread_body;
   //! The flat index of the field whose view gives the batch length, negative when none
   int64_t count_field = -1;
@@ -138,7 +138,7 @@ class IPCFileStreamReader final : public IPCStreamReader {
                           vector<FileRead>& reads);
   //! Runs planned reads, at the same time when the file is remote
   void ReadAll(const vector<FileRead>& reads);
-  //! Points the current body at the scratch space a count reads no bytes into
+  //! Points the current body at the stand in a count reads no bytes of
   void SetUnreadBody(idx_t size);
   //! Decodes the header of a fetched block, false for an end of stream marker
   bool DecodeBlockHeader(const ArrowIpcFileBlock& block, const FetchedBlock& fetched);
