@@ -118,8 +118,8 @@ bool ArrowFileScan::TryInitializeScan(ClientContext& context,
   return true;
 }
 
-//! The scan factory of the blocks a local state claimed. The state owns the scan data that
-//! holds this factory, so the state outlives it
+//! The scan factory of the blocks a local state claimed. The state owns the scan data
+//! that holds this factory, so the state outlives it
 class ArrowFileScan::BlockScanFactory : public ArrowScanFactory {
  public:
   BlockScanFactory(ArrowFileScan& scan, ArrowFileLocalState& lstate)

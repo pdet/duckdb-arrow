@@ -76,8 +76,10 @@ struct ReadArrowStream : ArrowTableFunction {
 TableFunction ReadArrowStreamFunction() { return ReadArrowStream::Function(); }
 
 void RegisterReadArrowStream(ExtensionLoader& loader) {
-  // Registers the path overload and the list of paths overload, e.g. ['file_1.arrow','file_2.arrow']
-  loader.RegisterFunction(MultiFileReader::CreateFunctionSet(ReadArrowStream::Function()));
+  // Registers the path overload and the list of paths overload, e.g.
+  // ['file_1.arrow','file_2.arrow']
+  loader.RegisterFunction(
+      MultiFileReader::CreateFunctionSet(ReadArrowStream::Function()));
   auto& config = DBConfig::GetConfig(loader.GetDatabaseInstance());
   config.replacement_scans.emplace_back(ReadArrowStream::ScanReplacement);
 }
