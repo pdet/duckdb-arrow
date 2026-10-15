@@ -12,84 +12,8 @@ defaults:
     shell: bash
 
 jobs:
-  # 7593e90 and 8f9b443 differ only in writer code, and CI timed read_projection at 160 vs 200 ms
-  pair:
-    name: Flip pair ${{ matrix.name }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 150
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: none
-            flags: ""
-          - name: functions
-            flags: "-falign-functions=64"
-          - name: functions-loops
-            flags: "-falign-functions=64 -falign-loops=64"
-    env:
-      GEN: ninja
-      BUILD_BENCHMARK: 1
-      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
-      CCACHE_BASEDIR: ${{ github.workspace }}
-      CCACHE_NOHASHDIR: true
-      CFLAGS: ${{ matrix.flags }}
-      CXXFLAGS: ${{ matrix.flags }}
-    steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
-      - name: Install Ninja
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build
-          gcc --version | head -1
-          lscpu | grep -E "Model name|^CPU\(s\)"
-      - uses: actions/checkout@v4
-        with:
-          repository: duckdb/duckdb-nanoarrow
-          ref: 7593e90894bd98a9899bff1597b73d6df5b3d891
-          path: fast
-          persist-credentials: false
-      - uses: actions/checkout@v4
-        with:
-          repository: duckdb/duckdb-nanoarrow
-          ref: 8f9b4434ef037c421a95e07d1b955fa41d832daf
-          path: slow
-          persist-credentials: false
-      - name: Checkout submodules
-        run: |
-          for checkout in fast slow; do
-            git -C "$checkout" submodule update --init --depth 1 duckdb extension-ci-tools
-          done
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
-        with:
-          vcpkgGitCommitId: 84bab45d415d22042bd0b9081aea57f362da3f35
-          vcpkgDirectory: ${{ github.workspace }}/vcpkg
-      - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: align-exp-pair-${{ matrix.name }}
-          max-size: 2G
-      - name: Build fast
-        working-directory: fast
-        run: make release
-      - name: Build slow
-        working-directory: slow
-        run: make release
-      - name: Run
-        working-directory: fast
-        run: |
-          printf '%s\n' benchmark/micro/read_projection.benchmark benchmark/micro/read_tiny_batches.benchmark benchmark/micro/read_small_batches.benchmark > pair.csv
-          python3 duckdb/scripts/regression/test_runner.py \
-            --old build/release/benchmark/benchmark_runner \
-            --new ../slow/build/release/benchmark/benchmark_runner \
-            --benchmarks pair.csv --verbose --threads 2 || true
-
   suite:
-    name: Suite functions-loops
+    name: Suite functions
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
@@ -98,8 +22,8 @@ jobs:
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: true
-      CFLAGS: "-falign-functions=64 -falign-loops=64"
-      CXXFLAGS: "-falign-functions=64 -falign-loops=64"
+      CFLAGS: "-falign-functions=64"
+      CXXFLAGS: "-falign-functions=64"
     steps:
       - name: Free disk space
         run: |
@@ -132,7 +56,7 @@ jobs:
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: align-exp-suite
+          key: align-exp-suite-functions
           max-size: 2G
       - name: Build base
         working-directory: base
