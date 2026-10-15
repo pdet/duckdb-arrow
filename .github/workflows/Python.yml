@@ -5,7 +5,6 @@ defaults:
     shell: bash
 jobs:
   python:
-    if: false
     name: Python
     runs-on: macos-latest
     env:
@@ -25,7 +24,7 @@ jobs:
         with:
           repository: duckdb/duckdb-python
           # Last v2.0-cyanoptera commit that builds against the duckdb submodule, move it with the submodule
-          ref: 44592022a016804ca6b52c8412c6cb6a05ff2a02
+          ref: 37425f413440f49cff9ca533a9b22dcbf2b40940
           path: duckdb-python
           fetch-depth: 0
           submodules: true

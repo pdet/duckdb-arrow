@@ -1,5 +1,6 @@
 name: Java
-on: [push, pull_request, repository_dispatch]
+on: workflow_dispatch
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

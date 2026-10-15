@@ -1,6 +1,6 @@
 name: NodeJS
 
-on: [push, pull_request, repository_dispatch, workflow_dispatch]
+on: workflow_dispatch
 
 defaults:
   run:
