@@ -24,7 +24,7 @@ jobs:
         with:
           repository: duckdb/duckdb-python
           # Last v2.0-cyanoptera commit that builds against the duckdb submodule, move it with the submodule
-          ref: 37425f413440f49cff9ca533a9b22dcbf2b40940
+          ref: 2e9b953911e181436ebaa7b137df1c1d54f5ba12
           path: duckdb-python
           fetch-depth: 0
           submodules: true

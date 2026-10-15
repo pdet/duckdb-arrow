@@ -49,13 +49,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: duckdb/duckdb-nanoarrow
-          ref: 7593e90
+          ref: 7593e90894bd98a9899bff1597b73d6df5b3d891
           path: fast
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: duckdb/duckdb-nanoarrow
-          ref: 8f9b443
+          ref: 8f9b4434ef037c421a95e07d1b955fa41d832daf
           path: slow
           persist-credentials: false
       - name: Checkout submodules
@@ -116,7 +116,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: duckdb/duckdb-nanoarrow
-          ref: 6c0c364
+          ref: 6c0c36497e1cd01a46e2a5791cc7c3e53f43fc1c
           path: base
           persist-credentials: false
       - name: Checkout submodules
