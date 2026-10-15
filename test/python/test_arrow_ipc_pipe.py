@@ -29,9 +29,11 @@ def read_through_pipe(connection, path, data):
     writer = threading.Thread(target=feed)
     writer.start()
     try:
-        return connection.execute(f"SELECT count(*), sum(id) FROM read_arrow('{path}')").fetchone()
+        # The client binds a SELECT to describe it and again to run it, which would open the pipe twice
+        connection.execute(f"CREATE TABLE piped AS SELECT count(*) AS n, sum(id) AS s FROM read_arrow('{path}')")
     finally:
         writer.join()
+    return connection.execute("SELECT n, s FROM piped").fetchone()
 
 
 @pytest.mark.skipif(not hasattr(os, 'mkfifo'), reason='a pipe needs mkfifo')
